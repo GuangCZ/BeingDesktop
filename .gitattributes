@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.png -text
+*.ico -text
+*.ttf -text
+renderer/vendor/** -text
