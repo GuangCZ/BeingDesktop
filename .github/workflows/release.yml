@@ -1,0 +1,70 @@
+name: Windows release
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/release.yml]
+permissions:
+  contents: write
+concurrency:
+  group: windows-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install dependencies
+        run: npm ci
+      - name: Check source and documentation
+        shell: pwsh
+        run: |
+          npm run check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/build-docs.cjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check-docs.cjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build portable executable
+        run: npm run dist -- --publish never
+      - name: Verify archive
+        run: node -e "console.log(JSON.stringify(require('./test/verify-package.cjs').verifyPackage({archive:'dist/win-unpacked/resources/app.asar'})))"
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $releaseVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $releaseTag = "v$releaseVersion"
+          $releaseExe = "dist/Being-Desktop-$releaseVersion-win-x64.exe"
+          $releaseZip = "dist/Being-Desktop-$releaseVersion-win-x64.zip"
+          if (-not (Test-Path -LiteralPath $releaseExe)) { throw 'Portable executable missing.' }
+          Compress-Archive -LiteralPath dist/win-unpacked -DestinationPath $releaseZip -CompressionLevel Optimal
+          $releaseChecksums = @($releaseExe, $releaseZip) | ForEach-Object {
+            $releaseHash = (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$releaseHash  $([IO.Path]::GetFileName($_))"
+          }
+          $releaseChecksums | Set-Content dist/SHA256SUMS.txt -Encoding utf8NoBOM
+          @"
+          Being Desktop $releaseVersion for Windows x64.
+
+          Portable EXE: download and open directly. ZIP: extract the complete folder, then run Being Desktop.exe.
+
+          Includes multi-session Loom chat, image input, a local workspace, browser and PowerShell, Portal management, Grove integrations, and redesigned settings.
+
+          Requires an existing Being and Loom connection. The executable is not code-signed.
+
+          Documentation: https://GuangCZ.github.io/BeingDesktop/
+          "@ | Set-Content dist/RELEASE.md -Encoding utf8NoBOM
+          gh release view $releaseTag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) { throw "Release $releaseTag already exists; refusing to replace its assets." }
+          gh release create $releaseTag $releaseExe $releaseZip dist/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Being Desktop $releaseVersion" --notes-file dist/RELEASE.md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
