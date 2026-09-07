@@ -1,0 +1,122 @@
+/* Settings shell follows the installed Codex desktop navigation and row scale. */
+body[data-page="settings"] .desktop-layout { grid-template-columns: minmax(0, 1fr); }
+body[data-page="settings"] .sidebar,
+body[data-page="settings"] .workspace-toolbar,
+body[data-page="settings"] .statusbar,
+body[data-page="settings"] #inspector,
+body[data-page="settings"] #desktop-tools { display: none; }
+body[data-page="settings"] #content-grid { grid-template-columns: minmax(0, 1fr); }
+#page-settings { display: grid; grid-template-columns: 268px minmax(0, 1fr); width: 100%; max-width: none; padding: 0; margin: 0; overflow: hidden; }
+.settings-navigation { display: flex; flex-direction: column; gap: 16px; min-height: 0; padding: 20px 12px; background: var(--sidebar); color: var(--sidebar-text); overflow-y: auto; }
+.settings-back, .settings-nav-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; padding: 8px 12px; border-radius: 8px; background: transparent; text-align: left; font-size: 14px; line-height: 20px; font-weight: 400; }
+.settings-back { margin-bottom: 4px; }
+.settings-back .icon { transform: rotate(180deg); }
+.settings-nav-item .icon, .settings-back .icon { width: 18px; height: 18px; flex: 0 0 18px; }
+.settings-nav-item:hover, .settings-back:hover, .settings-nav-item[aria-current] { background: var(--sidebar-hover); }
+.settings-links { display: grid; gap: 2px; }
+.settings-navigation :focus-visible { outline-offset: -2px; }
+.settings-search { display: flex; align-items: center; gap: 8px; min-height: 34px; margin: 0 4px; padding: 0 8px; border: 1px solid var(--sidebar-line); border-radius: 8px; color: var(--sidebar-muted); }
+.settings-search .icon { width: 16px; height: 16px; flex-shrink: 0; }
+.settings-search input { width: 100%; min-width: 0; padding: 6px 0; border: 0; background: transparent; color: var(--sidebar-text); font-size: 13px; outline: none; }
+.settings-search:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.settings-search-empty { padding: 0 12px; color: var(--sidebar-muted); font-size: 13px; }
+.settings-content { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 44px 48px 64px; }
+.settings-content-inner { width: 100%; max-width: 768px; margin: 0 auto; }
+#page-settings .settings-intro { padding: 0; margin-bottom: 32px; }
+#page-settings #settings-heading { font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -.5px; outline: none; }
+.settings-panel { display: flex; flex-direction: column; gap: 24px; }
+#page-settings .settings-card { padding: 0; border: 0; min-width: 0; }
+#page-settings .card-heading { align-items: center; gap: 0; margin: 0 0 18px; }
+#page-settings .setting-icon { display: none; }
+#page-settings .card-heading h3, #page-settings .diagnostics-card h3 { margin-bottom: 4px; font-size: 16px; line-height: 24px; font-weight: 500; }
+#page-settings .card-heading p, #page-settings .field-help { font-size: 13px; line-height: 20px; color: var(--muted); }
+#page-settings .field-help.tone-error { color: var(--danger); }
+#page-settings .reading-option, #page-settings .switch-row, #page-settings .theme-field { min-height: 64px; margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--line-soft); }
+#page-settings .theme-field > label, #page-settings .reading-option > label { margin: 0; gap: 2px; font-size: 13px; font-weight: 500; }
+#page-settings .theme-field .field-help, #page-settings .reading-option .field-help, #page-settings .switch-row .field-help { margin: 0; font-size: 12px; line-height: 16px; font-weight: 400; }
+#page-settings .theme-fields, #page-settings .switch-row { border: 1px solid var(--line); border-radius: 16px; background: color-mix(in srgb, var(--surface) 35%, var(--background)); }
+#page-settings .theme-field { position: relative; border: 0; }
+#page-settings .theme-field:not(:last-child)::after { content: ''; position: absolute; inset: auto 16px 0; height: .5px; background: var(--line); }
+#page-settings .switch-row strong { font-weight: 400; }
+#page-settings .button { min-height: 28px; border-radius: 999px; padding: 4px 12px; font-size: 12px; line-height: 20px; white-space: nowrap; }
+#page-settings .button.secondary { background: transparent; border: 1px solid var(--line); }
+#page-settings .button.secondary:hover:not(:disabled) { background: var(--hover); border-color: var(--muted); }
+#page-settings .card-footer { margin-top: 0; padding-top: 18px; }
+#page-settings select { border-radius: 8px; min-height: 32px; font-size: 13px; }
+#page-settings .reading-option select { width: 144px; }
+#page-settings .switch-track { width: 32px; height: 20px; border: 0; }
+#page-settings .switch-track::after { width: 16px; height: 16px; top: 2px; left: 2px; }
+#page-settings .switch-row input:checked + .switch-track::after { transform: translateX(12px); }
+#page-settings .theme-presets { gap: 12px; margin-bottom: 12px; }
+#page-settings .theme-preset { flex-direction: column; align-items: stretch; gap: 10px; padding: 8px; background: transparent; border-color: transparent; border-radius: 10px; }
+#page-settings .theme-preset[aria-pressed="true"] { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+#page-settings .theme-preset > span:last-child { text-align: center; font-size: 13px; }
+#page-settings .theme-preset-swatches { flex: none; position: relative; height: 104px; border-radius: 8px; background: linear-gradient(90deg, var(--preview-sidebar) 28%, var(--preview-background) 28%); }
+#page-settings .theme-preset-swatches i { display: none; }
+#page-settings .theme-preset-swatches::before { content: ''; position: absolute; top: 16px; left: 8px; width: 17%; height: 4px; border-radius: 2px; background: var(--preview-text); opacity: .35; box-shadow: 0 12px var(--preview-text), 0 24px var(--preview-text); }
+#page-settings .theme-preset-swatches::after { content: ''; position: absolute; inset: 24px 12px 14px 36%; border-radius: 6px; border: 1px solid rgb(128 128 128 / 20%); background: repeating-linear-gradient(transparent 0 19px, rgb(128 128 128 / 20%) 19px 20px), var(--preview-surface); }
+#page-settings .theme-fields { grid-template-columns: minmax(0, 1fr); }
+#page-settings .theme-color-control .theme-hex { width: 100px; border-color: transparent; background: transparent; }
+#page-settings .theme-color-control { gap: 0; padding-left: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--input); }
+#page-settings .theme-color-control input[type="color"] { width: 24px; height: 24px; padding: 4px; border: 0; background: transparent; }
+#page-settings .theme-color-control input[type="color"]::-webkit-color-swatch { border-radius: 50%; }
+#page-settings .portal-setup-panel, #page-settings .portal-update-panel { border-radius: 12px; }
+#page-settings .settings-footnote { padding-top: 8px; font-size: 12px; }
+/* Compact disclosure groups keep controls aligned and secondary copy optional. */
+#portal-settings { display: flex; flex-direction: column; gap: 16px; }
+#portal-settings > .card-heading { margin-bottom: 0; }
+#portal-settings .settings-machine-context { margin: 0; font-size: 12px; }
+#page-settings .portal-update-panel,
+#page-settings .portal-setup-panel,
+#page-settings .portal-runtime-group,
+#page-settings .settings-disclosure { margin: 0; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: color-mix(in srgb, var(--surface) 35%, var(--background)); color: var(--text); }
+#page-settings .portal-update-heading,
+#page-settings .portal-setup-heading,
+#page-settings .portal-setup-panel .path-setting,
+#page-settings .settings-disclosure .path-setting,
+#page-settings .portal-state-info .detail-row { min-height: 56px; margin: 0; padding: 12px 16px; gap: 16px; border: 0; }
+#page-settings .portal-setup-heading h4 { margin: 0; font-size: 13px; font-weight: 500; }
+#page-settings .portal-setup-panel .path-setting { border-block: .5px solid var(--line); }
+#page-settings .portal-update-heading > div:first-child { display: flex; gap: 16px; align-items: center; }
+#page-settings .portal-update-heading .field-label { margin: 0; color: var(--text); }
+#page-settings .portal-update-heading strong { color: var(--muted); font-weight: 400; font-size: 12px; }
+#page-settings .path-setting .field-label { color: var(--text); font-size: 13px; }
+#page-settings .portal-setup-panel .field-help { margin: 0; }
+#page-settings .portal-setup-panel > .field-help,
+#page-settings .portal-state-info > .field-help { padding: 12px 16px; }
+#page-settings .portal-setup-panel progress { width: calc(100% - 32px); margin: 12px 16px; }
+#page-settings .portal-setup-help,
+#page-settings .settings-action-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin: 0; padding: 12px 16px; }
+#page-settings .settings-action-row > .inline-actions { margin-left: auto; gap: 8px; }
+#page-settings .settings-note { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); }
+#page-settings .settings-note > summary { width: fit-content; padding: 0; margin: 0; color: var(--muted); font-size: 12px; cursor: pointer; }
+#page-settings .settings-note[open] { flex-basis: 100%; }
+#page-settings .settings-note p { margin: 8px 0 0; font-size: 12px; line-height: 18px; }
+#page-settings .portal-update-panel > .settings-note { padding: 0 16px 12px; }
+#page-settings .settings-disclosure > summary { display: flex; justify-content: space-between; align-items: center; min-height: 56px; padding: 16px; margin: 0; list-style: none; color: var(--text); font-size: 13px; font-weight: 500; cursor: pointer; }
+#page-settings .settings-disclosure > summary::after { content: ''; width: 7px; height: 7px; margin-right: 4px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(-45deg); }
+#page-settings .settings-disclosure[open] > summary::after { transform: rotate(45deg); }
+#page-settings .settings-disclosure > summary:hover { background: var(--hover); }
+#page-settings .portal-permission-row { position: relative; display: flex; justify-content: space-between; align-items: center; gap: 24px; min-height: 52px; padding: 12px 16px; margin: 0; font-size: 13px; cursor: pointer; }
+#page-settings .portal-permission-row::before { content: ''; position: absolute; inset: 0 16px auto; height: .5px; background: var(--line); }
+#page-settings .portal-permission-row input { appearance: none; position: relative; flex: 0 0 32px; width: 32px; height: 20px; margin: 0; padding: 0; border: 0; border-radius: 999px; background: var(--hover); cursor: pointer; transition: background .12s; }
+#page-settings .portal-permission-row input::after { content: ''; position: absolute; width: 16px; height: 16px; top: 2px; left: 2px; border-radius: 50%; background: var(--muted); transition: transform .12s; }
+#page-settings .portal-permission-row input:checked { background: var(--accent); }
+#page-settings .portal-permission-row input:checked::after { background: var(--accent-contrast); transform: translateX(12px); }
+#page-settings .portal-permission-row input:disabled { opacity: .4; cursor: not-allowed; }
+#page-settings .portal-state-info { padding: 0; }
+#page-settings .portal-state-info .detail-row strong { font-size: 12px; font-weight: 400; }
+#page-settings .settings-feedback { padding: 0 16px 12px; font-size: 12px; }
+#page-settings .settings-feedback:empty { display: none; }
+@media (max-width: 1100px) {
+  #page-settings { grid-template-columns: 220px minmax(0, 1fr); }
+  .settings-content { padding: 32px 32px 48px; }
+}
+@media (max-width: 700px) {
+  #page-settings { grid-template-columns: 176px minmax(0, 1fr); }
+  .settings-navigation { padding: 12px 8px; }
+  .settings-content { padding: 24px 20px 40px; }
+  #page-settings .theme-presets { gap: 4px; }
+  #page-settings .theme-preset-swatches { height: 64px; }
+  #page-settings .theme-footer, #page-settings .reading-option { flex-wrap: wrap; gap: 12px; }
+}

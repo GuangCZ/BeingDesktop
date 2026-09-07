@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Being Desktop</title>
+  <link rel="icon" type="image/x-icon" href="assets/being/being-icon.ico">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="theme-settings.css">
+  <link rel="stylesheet" href="onboarding.css">
+  <link rel="stylesheet" href="town-app.css">
+  <link rel="stylesheet" href="feature-tasks.css">
+  <link rel="stylesheet" href="town-library.css">
+  <link rel="stylesheet" href="desktop-tools.css">
+  <link rel="stylesheet" href="vendor/xterm/xterm.css">
+  <link rel="stylesheet" href="terminal-panel.css">
+  <link rel="stylesheet" href="settings-layout.css">
+  <script src="vendor/xterm/xterm.js" defer></script>
+  <script src="vendor/xterm/addon-fit.js" defer></script>
+  <script src="terminal-panel.js" defer></script>
+  <script src="desktop-tools.js" defer></script>
+  <script src="kit-catalog.js" defer></script>
+  <script src="town-library.js" defer></script>
+  <script src="town-app.js" defer></script>
+  <script src="feature-tasks.js" defer></script>
+  <script src="model-settings.js" defer></script>
+  <script src="theme-colors.js" defer></script>
+  <script src="theme-settings.js" defer></script>
+  <script src="onboarding.js" defer></script>
+  <script src="portal-updates.js" defer></script>
+  <script src="portal-permissions.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <svg class="icon-library" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+    <!-- Toolbar fill icons use the original Codex 26.901 SVG geometry. -->
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20 11.5a8 8 0 0 1-8 8H5l-3 2v-10a9 9 0 0 1 18 0Z"/><path d="M7 10h8M7 14h5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M3 8h18"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 20 20" fill="currentColor" stroke="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M9.99994 6.58741C11.8866 6.58741 13.4167 8.11684 13.4169 10.0034C13.4169 11.8902 11.8867 13.4204 9.99994 13.4204C8.11346 13.4201 6.58392 11.89 6.58392 10.0034C6.58415 8.11706 8.1136 6.58776 9.99994 6.58741ZM9.99994 7.91749C8.84814 7.91784 7.91423 8.8516 7.914 10.0034C7.914 11.1554 8.84799 12.09 9.99994 12.0903C11.1522 12.0903 12.0869 11.1557 12.0869 10.0034C12.0866 8.85138 11.152 7.91749 9.99994 7.91749Z" fill="currentColor"/> <path fill-rule="evenodd" clip-rule="evenodd" d="M10.746 1.48975C11.3535 1.48978 11.9164 1.81358 12.2197 2.34132C12.487 2.80674 12.8848 3.50127 13.206 4.05909C13.2711 4.17222 13.3924 4.24261 13.5244 4.24268H15.5068C16.1135 4.24268 16.6751 4.56591 16.9785 5.09132L17.7148 6.36768C18.0159 6.88943 18.0182 7.53236 17.7206 8.05616L16.6161 10.0005L17.7206 11.9448C18.018 12.4685 18.0158 13.1107 17.7148 13.6323L16.9785 14.9087C16.6751 15.4341 16.1135 15.7583 15.5068 15.7583H13.5244C13.3924 15.7584 13.2712 15.8278 13.206 15.9409C12.8848 16.4988 12.486 17.1932 12.2187 17.6587C11.9154 18.1864 11.3534 18.5103 10.746 18.5103C10.2189 18.5103 9.79593 18.5103 9.25287 18.5103C8.64561 18.51 8.0843 18.1854 7.78119 17.6577C7.51383 17.1922 7.11402 16.4987 6.79291 15.9409C6.72766 15.828 6.60731 15.7583 6.47552 15.7583H4.4931C3.88642 15.7583 3.32478 15.4341 3.02142 14.9087L2.28509 13.6333C1.9839 13.1116 1.98183 12.4687 2.27923 11.9448L3.3847 10.0005L2.27923 8.05616C1.98165 7.53232 1.98392 6.88946 2.28509 6.36768L3.0224 5.09132C3.32583 4.5661 3.88651 4.24171 4.4931 4.24171L6.47552 4.24268C6.60747 4.24265 6.72872 4.17225 6.79388 4.05909C7.11509 3.5012 7.51385 2.80675 7.78119 2.34132C8.08449 1.81366 8.64649 1.48976 9.25384 1.48975C9.79678 1.48974 10.219 1.48974 10.746 1.48975ZM9.25384 2.81983C9.12132 2.81992 8.9989 2.89059 8.93353 3.0044C8.66615 3.46991 8.2677 4.1648 7.94623 4.72315C7.64294 5.24954 7.08168 5.57273 6.47552 5.57276H4.4931C4.3616 5.57276 4.23959 5.64253 4.17376 5.75635L3.43744 7.03272C3.3722 7.1458 3.37108 7.28539 3.43548 7.39893L4.7265 9.66944C4.76927 9.74474 4.7964 9.82825 4.80755 9.91358L4.81341 10.0005C4.81335 10.116 4.78355 10.2301 4.7265 10.3306L3.43548 12.6021C3.3712 12.7156 3.37219 12.8553 3.43744 12.9683L4.17376 14.2437C4.23959 14.3575 4.3616 14.4282 4.4931 14.4282H6.47552C7.0818 14.4283 7.643 14.7512 7.94623 15.2778C8.26778 15.8363 8.66715 16.5311 8.93451 16.9966C8.99997 17.1101 9.12148 17.1811 9.25384 17.1812C9.79674 17.1812 10.219 17.1812 10.746 17.1812C10.8785 17.1812 11.0009 17.1104 11.0663 16.9966C11.3337 16.5311 11.7321 15.8363 12.0536 15.2778C12.3569 14.7512 12.918 14.4283 13.5244 14.4282H15.5068C15.6381 14.4282 15.7603 14.3573 15.8261 14.2437L16.5624 12.9683C16.6278 12.8551 16.6289 12.7147 16.5644 12.6011L15.2734 10.3306C15.2163 10.2301 15.1865 10.116 15.1865 10.0005C15.1865 9.88497 15.2164 9.77089 15.2734 9.67042L16.5644 7.39893C16.6288 7.28546 16.6285 7.14576 16.5634 7.03272L15.8261 5.75635C15.7603 5.64258 15.6382 5.57279 15.5068 5.57276H13.5244C12.9182 5.57274 12.3569 5.2496 12.0536 4.72315C11.7322 4.16477 11.3337 3.46992 11.0663 3.0044C11.001 2.89069 10.8794 2.82006 10.747 2.81983C10.2199 2.81982 9.7968 2.81982 9.25384 2.81983Z" fill="currentColor"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 20 20" fill="currentColor" stroke="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M14.5 2.87695C16.5241 2.87695 18.165 4.51787 18.165 6.54199V13.459C18.1649 15.483 16.524 17.124 14.5 17.124H5.5C3.47598 17.124 1.83514 15.483 1.83496 13.459V6.54199C1.83496 4.51787 3.47588 2.87695 5.5 2.87695H14.5ZM8.16504 15.7939H14.5C15.7895 15.7939 16.8348 14.7484 16.835 13.459V6.54199C16.835 5.25241 15.7896 4.20703 14.5 4.20703H8.16504V15.7939ZM5.5 4.20703C4.21042 4.20703 3.16504 5.25241 3.16504 6.54199V13.459C3.16521 14.7484 4.21052 15.7939 5.5 15.7939H6.83496V4.20703H5.5Z" fill="currentColor"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 20 20" fill="currentColor" stroke="none"><path d="M3.50205 16.6664V13.3333C3.50205 12.9661 3.79982 12.6683 4.16709 12.6683H7.5001L7.63389 12.682C7.93696 12.7439 8.16514 13.0119 8.16514 13.3333C8.16514 13.6547 7.93696 13.9227 7.63389 13.9847L7.5001 13.9984H5.47471C6.58687 15.2249 8.21848 16.0013 10.0001 16.0013C13.06 16.0013 15.586 13.711 15.9552 10.7513L15.9854 10.6195C16.0846 10.3266 16.3786 10.1335 16.6974 10.1732C17.0617 10.2186 17.3198 10.551 17.2745 10.9154L17.2247 11.2523C16.6301 14.7051 13.6225 17.3313 10.0001 17.3314C8.01108 17.3314 6.17193 16.5383 4.83213 15.2474V16.6664C4.83213 17.0335 4.53416 17.3312 4.16709 17.3314C3.79982 17.3314 3.50205 17.0336 3.50205 16.6664ZM4.04502 9.24936C3.99941 9.61354 3.66706 9.87179 3.30283 9.82651C2.93839 9.78106 2.67926 9.44877 2.72471 9.08432L4.04502 9.24936ZM10.0001 2.6683C11.994 2.66834 13.8372 3.46552 15.1778 4.76205V3.33334C15.1778 2.96617 15.4757 2.66846 15.8429 2.6683C16.2101 2.6683 16.5079 2.96607 16.5079 3.33334V6.66635C16.5079 7.03362 16.2101 7.33139 15.8429 7.33139H12.5099C12.1426 7.33139 11.8448 7.03362 11.8448 6.66635C11.845 6.29923 12.1427 6.00131 12.5099 6.00131H14.5255C13.4134 4.77489 11.7816 3.99842 10.0001 3.99838C6.94004 3.99838 4.41411 6.28948 4.04502 9.24936L3.38486 9.16635L2.72471 9.08432C3.1758 5.46703 6.26081 2.6683 10.0001 2.6683Z" fill="currentColor"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-external" viewBox="0 0 16 16" fill="currentColor" stroke="none"><path d="M6.66699 2.47461C6.95676 2.47479 7.19136 2.7102 7.19141 3C7.19141 3.28984 6.95679 3.52521 6.66699 3.52539H5.33301C4.33458 3.52557 3.52562 4.33459 3.52539 5.33301V10.667C3.52557 11.6654 4.33455 12.4744 5.33301 12.4746H10.667C11.6654 12.4744 12.4744 11.6654 12.4746 10.667V9.33301C12.4748 9.04325 12.7102 8.80859 13 8.80859C13.2898 8.80859 13.5252 9.04325 13.5254 9.33301V10.667C13.5252 12.2453 12.2453 13.5252 10.667 13.5254H5.33301C3.75465 13.5252 2.47479 12.2453 2.47461 10.667V5.33301C2.47484 3.75469 3.75468 2.47479 5.33301 2.47461H6.66699Z" fill="currentColor"/> <path d="M13.4072 1.81738C13.8352 1.81738 14.1816 2.16477 14.1816 2.59277L14.1826 5.87695C14.1825 6.16664 13.9479 6.40209 13.6582 6.40234C13.3683 6.40234 13.1329 6.1668 13.1328 5.87695V3.61621L9.21387 7.53516C9.00885 7.74017 8.67573 7.74015 8.4707 7.53516C8.26568 7.33013 8.26568 6.99702 8.4707 6.79199L12.3955 2.86719H10.123C9.83327 2.86714 9.59885 2.63251 9.59863 2.34277C9.59863 2.05285 9.83313 1.81743 10.123 1.81738H13.4072Z" fill="currentColor"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="m10 13 4-4m-6 7-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 2 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 20 20" fill="currentColor" stroke="none"><path d="M6.11286 7.77888C6.37253 7.51941 6.79462 7.51937 7.05427 7.77888L8.7447 9.47028C9.03688 9.76247 9.03676 10.2366 8.7447 10.5289L7.05427 12.2203C6.79457 12.48 6.37256 12.48 6.11286 12.2203C5.8533 11.9606 5.85321 11.5385 6.11286 11.2789L7.39216 9.99958L6.11286 8.72028C5.8533 8.46057 5.85321 8.03853 6.11286 7.77888Z" fill="currentColor"/> <path d="M13.5006 11.0845C13.8674 11.0848 14.1654 11.3827 14.1656 11.7496C14.1656 12.1167 13.8676 12.4143 13.5006 12.4146H10.8336C10.4663 12.4146 10.1685 12.1168 10.1685 11.7496C10.1687 11.3825 10.4664 11.0845 10.8336 11.0845H13.5006Z" fill="currentColor"/> <path fill-rule="evenodd" clip-rule="evenodd" d="M13.3795 2.50153C14.2459 2.50153 14.8376 2.4934 15.3345 2.65485C16.2878 2.96466 17.0355 3.71231 17.3453 4.6656C17.5067 5.16249 17.4986 5.75348 17.4986 6.6197V13.3795C17.4986 14.2459 17.5067 14.8376 17.3453 15.3345C17.0355 16.2878 16.2878 17.0355 15.3345 17.3453C14.8376 17.5067 14.2459 17.4986 13.3795 17.4986H6.6197C5.75348 17.4986 5.16249 17.5067 4.6656 17.3453C3.71231 17.0355 2.96466 16.2878 2.65485 15.3345C2.4934 14.8376 2.50153 14.2459 2.50153 13.3795V6.6197C2.50153 5.75342 2.49342 5.16251 2.65485 4.6656C2.96463 3.71223 3.71223 2.96463 4.6656 2.65485C5.16251 2.49342 5.75342 2.50153 6.6197 2.50153H13.3795ZM6.6197 3.83161C5.6503 3.83161 5.32281 3.83962 5.07673 3.9195C4.52827 4.09772 4.09772 4.52827 3.9195 5.07673C3.83962 5.32281 3.83161 5.6503 3.83161 6.6197V13.3795C3.83161 14.3493 3.83955 14.6773 3.9195 14.9234C4.09771 15.4719 4.52827 15.9014 5.07673 16.0797C5.32283 16.1596 5.65005 16.1685 6.6197 16.1685H13.3795C14.3494 16.1685 14.6773 16.1596 14.9234 16.0797C15.4717 15.9014 15.9014 15.4717 16.0797 14.9234C16.1596 14.6773 16.1685 14.3494 16.1685 13.3795V6.6197C16.1685 5.65005 16.1596 5.32283 16.0797 5.07673C15.9014 4.52827 15.4719 4.09771 14.9234 3.9195C14.6773 3.83955 14.3493 3.83161 13.3795 3.83161H6.6197Z" fill="currentColor"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4"/><rect x="10" y="10" width="4" height="4" rx="1"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2 12h5l3-8 4 16 3-8h5"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H5v18h14V8l-5-5Zm0 0v5h5M8 12h8m-8 4h5"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5L20 7"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="i-minimize" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-maximize" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></symbol>
+    <symbol id="i-restore" viewBox="0 0 24 24"><path d="M9 8V5h10v10h-3"/><rect x="5" y="9" width="10" height="10" rx="1"/></symbol>
+  </defs></svg>
+  <header class="titlebar" aria-label="窗口工具栏">
+    <nav class="titlebar-navigation" aria-label="页面导航">
+      <button class="icon-button" id="toggle-sidebar" aria-label="收起侧栏" title="收起侧栏 · Ctrl+B" aria-expanded="true" aria-controls="sidebar"><svg class="icon sidebar-toggle-icon"><use href="#i-panel"/></svg></button>
+      <button class="icon-button" id="navigate-back" aria-label="后退" title="后退 · Alt+←" disabled><svg class="icon navigation-back-icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+      <button class="icon-button" id="navigate-forward" aria-label="前进" title="前进 · Alt+→" disabled><svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+    </nav>
+    <nav class="app-menubar" role="menubar" aria-label="应用菜单">
+      <button class="app-menu-button" role="menuitem" data-app-menu="file" aria-haspopup="menu" aria-expanded="false" tabindex="0">文件</button>
+      <button class="app-menu-button" role="menuitem" data-app-menu="edit" aria-haspopup="menu" aria-expanded="false" tabindex="-1">编辑</button>
+      <button class="app-menu-button" role="menuitem" data-app-menu="view" aria-haspopup="menu" aria-expanded="false" tabindex="-1">视图</button>
+      <button class="app-menu-button" role="menuitem" data-app-menu="help" aria-haspopup="menu" aria-expanded="false" tabindex="-1">帮助</button>
+    </nav>
+    <div class="titlebar-drag-space" aria-hidden="true"></div>
+    <div class="window-controls">
+      <button class="window-button" id="window-minimize" aria-label="最小化"><svg class="icon"><use href="#i-minimize"/></svg></button>
+      <button class="window-button" id="window-maximize" aria-label="最大化或还原"><svg class="icon"><use href="#i-maximize"/></svg></button>
+      <button class="window-button window-close" id="window-close" aria-label="关闭窗口"><svg class="icon"><use href="#i-close"/></svg></button>
+    </div>
+  </header>
+
+  <div class="desktop-layout">
+    <aside class="sidebar" id="sidebar" aria-label="主导航">
+      <div class="sidebar-brand"><h2 class="sidebar-brand-name">Being</h2></div>
+      <nav class="primary-nav">
+        <button class="nav-button active" data-page="chat" aria-current="page" title="对话 · Ctrl+1"><svg class="icon"><use href="#i-chat"/></svg><span>对话</span></button>
+        <button class="nav-button" data-page="workspace" title="本机工作区 · Ctrl+2"><svg class="icon"><use href="#i-folder"/></svg><span>本机工作区</span></button>
+        <button class="nav-button" id="nav-browser"><svg class="icon"><use href="#i-external"/></svg><span>浏览器</span></button>
+        <button class="nav-button" id="nav-console"><svg class="icon"><use href="#i-terminal"/></svg><span>控制台</span><span id="tools-pending-count" hidden></span></button>
+        <button class="nav-button" id="nav-town" data-page="town"><svg class="icon"><use href="#i-panel"/></svg><span>Town 功能</span></button>
+        <button class="nav-button" id="nav-tasks" data-page="tasks"><svg class="icon"><use href="#i-check"/></svg><span>功能任务</span><span id="feature-task-count" hidden></span></button>
+      </nav>
+      <div class="sidebar-scroll" id="sidebar-scroll">
+        <section class="sidebar-project" aria-labelledby="sidebar-project-title">
+          <div class="sidebar-section-heading project-section-heading"><h2 id="sidebar-project-title"><button type="button" class="sidebar-section-toggle" id="sidebar-project-toggle" aria-expanded="true" aria-controls="sidebar-project-content"><span>项目</span><svg class="icon small" aria-hidden="true"><use href="#i-chevron"/></svg></button></h2><button type="button" class="icon-button compact" id="sidebar-select-workspace" aria-label="选择本机项目文件夹" title="选择本机文件夹"><svg class="icon"><use href="#i-plus"/></svg></button></div>
+          <div id="sidebar-project-content">
+            <button class="workspace-shortcut" id="workspace-shortcut"><svg class="icon"><use href="#i-folder"/></svg><span id="sidebar-workspace-name">选择文件夹</span><svg class="icon small"><use href="#i-chevron"/></svg></button>
+            <p class="sidebar-hint" id="sidebar-workspace-hint">尚未选择本机工作区</p>
+          </div>
+        </section>
+        <section class="sidebar-session" aria-labelledby="sidebar-session-toggle">
+          <h2 class="sidebar-section-heading session-section-heading"><button type="button" class="sidebar-section-toggle" id="sidebar-session-toggle" aria-expanded="true" aria-controls="sidebar-session-content"><span>会话</span><svg class="icon small"><use href="#i-chevron"/></svg></button><button type="button" class="icon-button compact" id="new-chat-session" title="沿用当前语境新建会话" aria-label="新增会话" disabled><svg class="icon"><use href="#i-plus"/></svg></button></h2>
+          <div id="sidebar-session-content">
+            <button class="session-shortcut" id="active-session" hidden aria-label="返回当前 Being 会话">
+              <svg class="icon"><use href="#i-chat"/></svg>
+              <span class="session-copy"><strong id="sidebar-being-name">Being</strong><span class="session-state"><i class="status-dot" id="sidebar-status-dot"></i><span id="sidebar-status">尚未连接</span></span></span>
+            </button>
+            <div id="chat-session-list"></div>
+            <p class="sidebar-hint" id="session-empty">连接 Loom 后显示会话</p>
+          </div>
+        </section>
+        <section class="sidebar-town" aria-labelledby="sidebar-town-toggle">
+          <h2 class="sidebar-section-heading town-section-heading"><button type="button" class="sidebar-section-toggle sidebar-town-toggle" id="sidebar-town-toggle" aria-expanded="true" aria-controls="sidebar-town-content"><span>Town</span><svg class="icon small"><use href="#i-chevron"/></svg></button></h2>
+          <div id="sidebar-town-content" role="region" aria-labelledby="sidebar-town-toggle" tabindex="0">
+            <p class="sidebar-hint" id="sidebar-town-status" role="status">正在读取功能目录…</p>
+            <button class="button quiet small-button sidebar-town-retry" id="sidebar-town-retry" hidden>重新读取目录</button>
+            <div id="sidebar-town-features"></div>
+          </div>
+        </section>
+      </div>
+      <div class="sidebar-bottom">
+        <button class="nav-button" data-page="settings" title="连接与设置 · Ctrl+,"><svg class="icon"><use href="#i-settings"/></svg><span>设置</span></button>
+        <div class="version-row"><span>Being Desktop</span><span id="app-version">0.1.0</span></div>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="workspace-toolbar" aria-label="当前页面工具栏">
+        <div class="top-page-context">
+          <svg class="icon page-context-icon" aria-hidden="true"><use id="page-context-icon" href="#i-chat"/></svg>
+          <span class="visually-hidden" id="page-eyebrow"></span>
+          <h1 id="page-title">对话</h1>
+          <span class="titlebar-caption" id="titlebar-caption"></span>
+        </div>
+        <div class="header-actions">
+          <span class="connection-chip" id="header-connection" role="status"><i class="status-dot" id="header-status-dot" aria-hidden="true"></i><span id="header-status-label">尚未连接</span></span>
+          <span class="header-divider" aria-hidden="true"></span>
+          <button class="icon-button" id="open-browser" aria-label="打开内置浏览器" title="内置浏览器"><svg class="icon"><use href="#i-external"/></svg></button>
+          <button class="icon-button" id="open-console" aria-label="打开命令控制台" title="命令控制台"><svg class="icon"><use href="#i-terminal"/></svg></button>
+          <button class="icon-button" id="refresh-state" aria-label="刷新连接状态" title="刷新连接状态"><svg class="icon"><use href="#i-refresh"/></svg></button>
+          <button class="icon-button" id="toggle-inspector" aria-label="展开状态面板" title="展开状态面板" aria-expanded="false" aria-controls="inspector"><svg class="icon inspector-toggle-icon"><use href="#i-panel"/></svg></button>
+        </div>
+      </header>
+      <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+      <div class="content-grid inspector-hidden" id="content-grid">
+        <div class="page-column">
+          <div class="page chat-page" id="page-chat">
+            <section class="onboarding" id="onboarding" aria-labelledby="welcome-title">
+              <img class="being-brand-icon welcome-brand-icon" src="assets/being/being-icon-64.png" srcset="assets/being/being-icon-64.png 1x, assets/being/being-icon-80.png 1.25x, assets/being/being-icon-96.png 1.5x, assets/being/being-icon-112.png 1.75x, assets/being/being-icon-128.png 2x, assets/being/being-icon-160.png 2.5x, assets/being/being-icon-192.png 3x, assets/being/being-icon-256.png 4x" width="64" height="64" alt="" draggable="false">
+              <h2 id="welcome-title">连接 Being</h2>
+              <p class="welcome-copy">使用已有 Loom 地址，继续原来的会话。</p>
+              <form class="connect-form" id="onboarding-connect-form">
+                <label for="onboarding-url">Loom 地址</label>
+                <div class="secret-input">
+                  <svg class="icon"><use href="#i-link"/></svg>
+                  <input id="onboarding-url" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴完整的 Loom 连接地址" required aria-describedby="onboarding-url-help">
+                  <button class="icon-button" type="button" data-reveal="onboarding-url" aria-label="显示 Loom 地址"><svg class="icon"><use href="#i-eye"/></svg></button>
+                </div>
+                <p class="field-help" id="onboarding-url-help">包含连接令牌的原始地址，凭据在本机加密保存。</p>
+                <button class="button primary connect-button" type="submit" id="onboarding-connect"><span>连接 Being</span><svg class="icon"><use href="#i-arrow"/></svg></button>
+              </form>
+              <div class="welcome-footnote"><svg class="icon"><use href="#i-shield"/></svg><span>使用既有身份、会话与授权</span></div>
+            </section>
+            <div class="loom-panel" id="loom-panel" hidden>
+              <div class="loom-toolbar" hidden><strong id="loom-being-name">Being</strong><button id="reconnect-inline">重新连接</button></div>
+              <div id="loom-host" aria-label="Loom 对话区域">
+                <div class="loom-placeholder" id="loom-placeholder">
+                  <span class="loading-orbit" aria-hidden="true"></span>
+                  <h2 id="loom-placeholder-title">正在连接 Being</h2>
+                  <p id="loom-placeholder-detail">正在打开现有 Loom 会话…</p>
+                  <button class="button secondary" id="reconnect-placeholder">重新连接</button>
+                </div>
+              </div>
+              <div class="loom-caption" hidden><i class="status-dot" id="loom-status-dot"></i><span id="loom-status-label">等待连接</span></div>
+            </div>
+          </div>
+
+          <section class="page" id="page-tasks" hidden aria-label="功能任务"></section>
+          <section class="page town-app-page" id="page-town-app" hidden aria-label="Town 管理"></section>
+          <section class="page town-page" id="page-town" hidden aria-labelledby="town-heading">
+            <div class="section-topline town-topline">
+              <div><h2 id="town-heading">Town 功能</h2><p class="muted">知识、交流与工具，从这里找到入口。</p></div>
+              <button class="button secondary small-button" id="town-open-home">打开 Town<svg class="icon small"><use href="#i-external"/></svg><span class="visually-hidden">（内置浏览器）</span></button>
+            </div>
+            <p class="town-intro">工具、渠道、设备和围炉在桌面管理；其余能力可通过 Being 继续。</p>
+            <div class="town-search-row">
+              <label class="visually-hidden" for="town-search">搜索 Town 功能名称或用途</label>
+              <input type="search" id="town-search" placeholder="搜索名称或用途…" autocomplete="off" spellcheck="false">
+              <button class="button quiet small-button" id="town-search-clear" hidden>清除</button>
+              <span class="town-count" id="town-count" aria-live="polite">读取中</span>
+            </div>
+            <div class="town-connection-note" id="town-connection-note" hidden><span>连接 Being 后，可为 Being 能力准备对话草稿。</span><button class="button quiet small-button" id="town-connect">连接 Being<svg class="icon small"><use href="#i-arrow"/></svg></button></div>
+            <div class="town-catalog-status" id="town-catalog-status" role="status"><p id="town-status-message">正在读取 Town 功能目录…</p><button class="button secondary small-button" id="town-retry" hidden>重新读取目录</button></div>
+            <div id="town-feature-list" class="town-feature-list"></div>
+            <div class="town-empty" id="town-empty" hidden><h3>没有匹配的功能</h3><p>试试中文、英文名称或用途，也可以清除搜索查看全部功能。</p></div>
+            <p class="town-catalog-source" id="town-catalog-source"></p>
+          </section>
+
+          <section class="page workspace-page" id="page-workspace" hidden aria-labelledby="workspace-heading">
+            <div class="section-topline">
+              <div><h2 id="workspace-heading">文件</h2><p class="muted">浏览当前电脑上的项目目录。</p></div>
+              <button class="button secondary" id="workspace-select"><svg class="icon"><use href="#i-plus"/></svg>选择文件夹</button>
+            </div>
+            <div class="permission-note"><svg class="icon"><use href="#i-shield"/></svg><p>此电脑上的文件夹；选择不会自动上传到 Town，也不代表 Portal 已获访问授权。</p></div>
+            <div class="workspace-selected" id="workspace-selected" hidden>
+              <div class="workspace-path-card">
+                <div class="folder-tile"><svg class="icon"><use href="#i-folder"/></svg></div>
+                <div><strong id="workspace-name"></strong><p class="monospace" id="workspace-path"></p></div>
+                <button class="icon-button" id="workspace-open" aria-label="在文件资源管理器中打开工作区" title="在文件资源管理器中打开"><svg class="icon"><use href="#i-external"/></svg></button>
+              </div>
+              <div class="file-browser">
+                <div class="file-browser-toolbar"><nav class="breadcrumbs" id="file-breadcrumbs" aria-label="文件夹路径"></nav><button class="icon-button compact" id="workspace-refresh" aria-label="刷新文件列表"><svg class="icon"><use href="#i-refresh"/></svg></button></div>
+                <div class="file-list-heading"><span>名称</span><span>大小</span></div>
+                <div id="file-list" class="file-list" aria-live="polite"></div>
+                <div class="file-browser-footer"><span id="file-count">0 个项目</span><span>本机目录</span></div>
+              </div>
+            </div>
+            <div class="empty-workspace" id="workspace-empty">
+              <svg class="icon"><use href="#i-folder"/></svg><h3>尚未选择工作区</h3><p>选择要在桌面中浏览的文件夹。</p>
+              <button class="button secondary" id="workspace-empty-select">选择文件夹</button>
+            </div>
+          </section>
+
+          <section class="page settings-page" id="page-settings" hidden aria-labelledby="settings-heading">
+            <div class="settings-intro"><h2 id="settings-heading">连接与设置</h2><p class="muted">Being 连接、本机工具与桌面偏好。</p></div>
+            <section class="settings-card appearance-settings" id="appearance-settings" aria-labelledby="appearance-heading">
+              <div class="card-heading"><div class="setting-icon"><svg class="icon"><use href="#i-eye"/></svg></div><div><h3 id="appearance-heading">外观与颜色</h3><p>从预设开始，或调出自己的界面配色。</p></div><span class="badge" id="theme-current-name">默认深色</span></div>
+              <div class="theme-presets" id="theme-presets" role="group" aria-label="配色预设"></div>
+              <form id="theme-form" novalidate>
+                <fieldset class="theme-fields" id="theme-fields"><legend class="visually-hidden">自定义界面颜色</legend></fieldset>
+                <div class="card-footer theme-footer"><p class="field-help" id="theme-status" role="status" aria-live="polite">更改会即时预览，保存后下次打开仍会使用。</p><div class="inline-actions"><button class="button quiet small-button" id="theme-reset" type="button">恢复默认</button><button class="button secondary small-button" id="theme-cancel" type="button" hidden>撤销更改</button><button class="button primary small-button" id="theme-save" type="submit" disabled>保存配色</button></div></div>
+              </form>
+            </section>
+            <section class="settings-card">
+              <div class="card-heading"><div class="setting-icon"><svg class="icon"><use href="#i-link"/></svg></div><div><h3>Being 连接</h3><p>使用已有的 Loom 会话。</p></div><span class="badge" id="settings-connection-status">尚未连接</span></div>
+              <div class="current-connection" id="settings-current-connection" hidden><span class="field-label">当前地址</span><code id="settings-connection-url"></code><div class="inline-actions"><button class="button secondary small-button" id="settings-reconnect">重新连接</button><button class="button quiet small-button" id="settings-disconnect">断开连接</button></div></div>
+              <form id="settings-connect-form">
+                <label for="settings-url">连接地址</label>
+                <div class="secret-input"><svg class="icon"><use href="#i-link"/></svg><input id="settings-url" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴完整的 Loom 连接地址" required><button class="icon-button" type="button" data-reveal="settings-url" aria-label="显示 Loom 地址"><svg class="icon"><use href="#i-eye"/></svg></button></div>
+                <div class="form-footer"><details class="settings-note"><summary>连接说明</summary><p class="field-help">凭据在本机加密保存。切换身份或主动断开会清除未转交的围炉草稿；同身份重连会保留。</p></details><button class="button primary small-button" type="submit" id="settings-connect">保存并连接</button></div>
+              </form>
+            </section>
+            <section class="settings-card" id="model-settings" aria-labelledby="model-settings-heading">
+              <div class="card-heading"><div class="setting-icon"><svg class="icon"><use href="#i-cpu"/></svg></div><div><h3 id="model-settings-heading">模型配置</h3><p>选择支持的模型，或使用自定义模型。</p></div></div>
+              <div class="model-settings-grid"><div><span class="field-label">当前模型</span><strong id="settings-model">当前配置未知</strong></div><div><span class="field-label">提供方</span><strong id="settings-provider">未知</strong></div></div>
+              <div class="endpoint-detail"><span class="field-label">服务地址</span><code id="settings-model-url">未知</code></div>
+              <form id="model-config-form" class="model-config-form">
+                <div class="model-choice-heading"><label for="model-select">模型</label><button class="text-button" id="model-config-refresh" type="button" disabled><svg class="icon small"><use href="#i-refresh"/></svg>刷新列表</button></div>
+                <select id="model-select" aria-describedby="model-list-status" disabled><option value="">连接 Being 后读取模型</option></select>
+                <p class="field-help" id="model-list-status" role="status" aria-live="polite">模型列表由当前 Being 提供。</p>
+                <div class="model-config-field" id="model-custom-field" hidden><label for="model-custom-name">自定义模型 ID</label><input id="model-custom-name" type="text" autocomplete="off" spellcheck="false" maxlength="512" placeholder="输入服务端支持的完整模型 ID" disabled></div>
+                <details class="model-service-settings" id="model-service-settings"><summary>服务与凭据</summary>
+                  <div class="model-config-field"><label for="model-provider">提供方 / API 协议</label><select id="model-provider" disabled></select></div>
+                  <div class="model-config-field"><label for="model-base-url">服务地址</label><input id="model-base-url" type="url" autocomplete="off" spellcheck="false" placeholder="https://api.example.com/v1" aria-describedby="model-service-note" disabled><p class="field-help" id="model-service-note">使用 Being 服务端可访问的地址。</p></div>
+                  <div class="model-config-field"><label for="model-api-key">API Key</label><input id="model-api-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="留空保留已有密钥" aria-describedby="model-key-note" disabled><p class="field-help" id="model-key-note">留空保留已有密钥；填写后随模型配置保存。</p></div>
+                </details>
+                <div class="form-footer model-config-footer"><p class="field-help" id="model-config-status" role="status" aria-live="polite">连接 Being 后即可配置模型。</p><button class="button primary small-button" id="model-config-save" type="submit" disabled>保存模型配置</button></div>
+              </form>
+              <details class="model-sbs-details"><summary>Side by Side</summary><div class="side-by-side-settings"><div class="detail-row"><span>已保存</span><strong id="settings-sbs-configured">未知</strong></div><div class="detail-row"><span>运行中</span><strong id="settings-sbs-active">未知</strong></div><p class="field-help" id="settings-sbs-note">等待运行时确认。</p></div><div class="card-footer model-settings-footer"><span class="muted small-text">在 Loom 中调整 Side by Side。</span><button class="button secondary small-button" id="back-to-loom" type="button">打开 Loom<svg class="icon small"><use href="#i-arrow"/></svg></button></div></details>
+            </section>
+            <section class="settings-card" id="portal-settings" tabindex="-1">
+              <div class="card-heading"><div class="setting-icon"><svg class="icon"><use href="#i-terminal"/></svg></div><div><h3>设备</h3></div><span class="badge" id="settings-portal-status">未配置</span></div>
+              <div class="portal-update-panel" id="portal-update-panel">
+                <div class="portal-update-heading"><div><span class="field-label">版本</span><strong id="portal-update-version">未识别</strong></div><div class="inline-actions"><button class="button secondary small-button" id="portal-update-check" type="button">检查更新</button><button class="button primary small-button" id="portal-update-open" type="button" hidden>查看更新</button></div></div>
+                <details class="settings-note"><summary>更新详情</summary>
+                <p class="field-help" id="portal-update-status" role="status" aria-live="polite">自动检查 Portal 新版本，也可手动检查。</p>
+                <p class="field-help muted" id="portal-update-detail" hidden></p>
+                <p class="small-text muted" id="portal-update-checked" hidden></p>
+                </details>
+              </div>
+              <div class="portal-setup-panel">
+                <div class="portal-setup-heading"><div><h4>连接这台电脑</h4></div><button class="button primary small-button" id="portal-setup" disabled>连接</button></div>
+                <div class="path-setting"><div><span class="field-label">工作区</span><code id="portal-setup-workspace">正在读取默认文件夹…</code></div><button class="button quiet small-button" id="portal-setup-choose-workspace">更换文件夹</button></div>
+                <progress id="portal-setup-progress" aria-label="Portal 配置进度" hidden></progress>
+                <p class="field-help" id="portal-setup-status" role="status" aria-live="polite">连接 Being 后，即可一键配置。</p>
+                <div class="portal-setup-help"><details class="settings-note"><summary>配置说明</summary><p class="field-help" id="portal-setup-workspace-note">未选择时自动创建工作区。</p><p class="field-help">自动下载并配置 Portal，默认开启文件读写与搜索。其他能力在权限中设置。</p></details><button class="button secondary small-button" id="portal-setup-assist" disabled>请求协助</button></div>
+              </div>
+              <details class="portal-manual-settings settings-disclosure" id="portal-permissions"><summary>工具权限</summary>
+                <div id="portal-permission-fields"></div>
+                <div class="settings-action-row"><details class="settings-note"><summary>权限说明</summary><p class="field-help">运行中保存会重启 Portal。命令可访问工作区外的文件和程序。搜索开关仅控制工具列表，Portal 0.8.0 仍允许直接调用。OAuth 无独立开关；Grove 工具在工具市场管理。</p></details><div class="inline-actions"><button class="button secondary small-button" id="portal-permission-refresh" type="button" title="重新读取已保存的权限">刷新</button><button class="button primary small-button" id="portal-permission-save" type="button" disabled>保存</button></div></div>
+                <p class="field-help settings-feedback" id="portal-permission-status" role="status" aria-live="polite"></p>
+              </details>
+              <details class="portal-manual-settings settings-disclosure" id="portal-manual-settings"><summary>手动配置</summary>
+                <div class="path-setting"><div><span class="field-label">Portal 程序</span><code id="portal-executable">尚未选择</code></div><button class="button secondary small-button" id="select-portal-executable">选择程序</button></div>
+                <div class="path-setting"><div><span class="field-label">Portal 配置</span><code id="portal-config">尚未选择</code></div><button class="button secondary small-button" id="select-portal-config">选择配置</button></div>
+              </details>
+              <div class="portal-runtime-group"><div class="portal-state-info"><div class="detail-row"><span>运行状态</span><strong id="portal-process-detail">尚未配置</strong></div><div class="detail-row"><span>连接</span><strong id="portal-health-detail">待确认</strong></div><p class="field-help" id="portal-detail" hidden></p></div>
+              <div class="settings-action-row"><details class="settings-note"><summary>运行详情</summary><p class="field-help" id="portal-owner-detail">仅管理由桌面启动的进程。</p></details><div class="inline-actions"><button class="button secondary small-button" id="stop-portal" disabled>停止</button><button class="button primary small-button" id="start-portal" disabled>启动</button></div></div></div>
+            </section>
+            <section class="settings-card reading-settings" id="reading-settings" aria-labelledby="reading-heading">
+              <div class="card-heading"><div class="setting-icon"><svg class="icon"><use href="#i-eye"/></svg></div><div><h3 id="reading-heading">阅读</h3><p>调整桌面显示，保留统一的系统字体。</p></div></div>
+              <div class="reading-option">
+                <label for="reading-chat-size"><span>对话字号</span><span class="field-help">用于对话正文和消息输入框。</span></label>
+                <select id="reading-chat-size"><option value="14">14 px（默认）</option><option value="15">15 px</option><option value="16">16 px</option></select>
+              </div>
+              <div class="reading-option">
+                <label for="reading-code-size"><span>代码字号</span><span class="field-help">用于桌面和对话中的代码、路径。</span></label>
+                <select id="reading-code-size"><option value="12">12 px（默认）</option><option value="13">13 px</option><option value="14">14 px</option></select>
+              </div>
+              <div class="card-footer reading-footer"><p class="field-help" id="reading-status" role="status" aria-live="polite">选择后立即保存，仅影响桌面显示。</p><button class="button secondary small-button" id="reading-reset" type="button">恢复默认阅读设置</button></div>
+            </section>
+            <section class="settings-card">
+              <div class="card-heading"><div class="setting-icon"><svg class="icon"><use href="#i-settings"/></svg></div><div><h3>桌面偏好</h3></div></div>
+              <label class="switch-row" for="close-to-tray"><span><strong>关闭窗口后保留在托盘</strong><span class="field-help">退出应用可在托盘菜单中操作。</span></span><input type="checkbox" id="close-to-tray" role="switch"><span class="switch-track" aria-hidden="true"></span></label>
+            </section>
+            <section class="settings-card diagnostics-card"><div><h3>诊断</h3><p class="field-help">导出连接状态与近期桌面活动。</p></div><button class="button secondary small-button" id="export-diagnostics"><svg class="icon"><use href="#i-download"/></svg>导出诊断</button></section>
+            <section class="settings-card diagnostics-card"><div><h3>新手引导</h3><p class="field-help">依次连接 Loom、部署 Portal 和配置 Channel。</p></div><button class="button secondary small-button" id="setup-restart">继续新手引导</button></section>
+            <p class="settings-footnote">Being Desktop <span id="settings-version">0.1.0</span> · Windows</p>
+          </section>
+        </div>
+
+        <aside class="desktop-tools" id="desktop-tools" hidden aria-label="浏览器和控制台">
+          <div class="tools-resizer" id="tools-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="调整工具面板宽度"></div>
+          <header class="tools-heading">
+            <div class="tools-modes" role="tablist" aria-label="桌面工具">
+              <button id="tools-browser-mode" role="tab" aria-selected="true" aria-controls="tools-browser-pane">浏览器</button>
+              <button id="tools-console-mode" role="tab" aria-selected="false" aria-controls="tools-console-pane">控制台</button>
+            </div>
+            <button class="icon-button compact" id="tools-connection" aria-label="Being 工具连接" title="Being 工具连接" aria-expanded="false"><svg class="icon"><use href="#i-link"/></svg></button>
+            <button class="icon-button compact" id="tools-expand" aria-label="展开工具面板" title="展开工具面板"><svg class="icon"><use href="#i-maximize"/></svg></button>
+            <button class="icon-button compact" id="tools-close" aria-label="收起工具面板"><svg class="icon"><use href="#i-close"/></svg></button>
+          </header>
+          <div id="tools-link-details" hidden>
+          <div class="tools-link-row"><span><i class="status-dot" id="tools-link-dot"></i><span id="tools-link-status">Being 工具未连接</span></span><button class="text-button" id="tools-link-toggle">连接 Being 工具</button></div>
+          <p class="tools-link-hint" id="tools-link-hint">连接后，Being 的页面和命令调用会在这里等待你确认。</p>
+          </div>
+          <div class="tools-requests" id="tools-requests" aria-label="Being 待确认调用"></div>
+          <p class="tools-error" id="tools-error" role="alert" hidden></p>
+          <section class="tools-pane" id="tools-browser-pane" role="tabpanel" aria-labelledby="tools-browser-mode">
+            <div class="browser-tab-strip"><div class="browser-tabs" id="browser-tabs" role="tablist" aria-label="网页标签"></div><button class="icon-button compact" id="browser-new" aria-label="新建标签页"><svg class="icon"><use href="#i-plus"/></svg></button></div>
+            <form class="browser-address-row" id="browser-address-form">
+              <button class="icon-button compact" type="button" id="browser-back" aria-label="后退"><svg class="icon tool-back"><use href="#i-arrow"/></svg></button>
+              <button class="icon-button compact" type="button" id="browser-forward" aria-label="前进"><svg class="icon"><use href="#i-arrow"/></svg></button>
+              <button class="icon-button compact" type="button" id="browser-reload" aria-label="刷新网页"><svg class="icon"><use href="#i-refresh"/></svg></button>
+              <label class="visually-hidden" for="browser-address">网页地址</label><input id="browser-address" autocomplete="off" spellcheck="false" placeholder="输入网址或 localhost:3000">
+              <button class="icon-button compact" aria-label="打开网页"><svg class="icon"><use href="#i-arrow"/></svg></button>
+            </form>
+            <div class="browser-surface" id="browser-host"><div class="browser-empty" id="browser-empty"><svg class="icon"><use href="#i-external"/></svg><h3 id="browser-empty-title">从一个网址开始</h3><p id="browser-empty-detail">在这里浏览资料、打开项目预览，与 Being 并排工作。</p></div></div>
+            <div class="browser-bottom"><span id="browser-load-status">新标签页</span><span>独立浏览器会话</span></div>
+          </section>
+          <section class="tools-pane console-pane" id="tools-console-pane" hidden role="tabpanel" aria-labelledby="tools-console-mode">
+            <div id="terminal-host"></div>
+          </section>
+        </aside>
+        <aside class="inspector" id="inspector" hidden aria-label="运行状态面板">
+          <div class="inspector-title"><span>状态</span><button class="icon-button compact" id="close-inspector" aria-label="收起状态面板"><svg class="icon"><use href="#i-close"/></svg></button></div>
+          <div class="inspector-scroll">
+            <section class="presence-card"><h2 id="presence-title">尚未连接</h2><p id="presence-detail">连接 Loom 后查看运行状态。</p><div class="presence-footer"><i class="status-dot" id="presence-dot"></i><span id="presence-runtime">运行时未知</span></div></section>
+            <section class="inspector-section"><h3><svg class="icon"><use href="#i-link"/></svg>连接</h3><div class="detail-row"><span>Loom</span><strong id="inspector-loom">未连接</strong></div><div class="detail-row"><span>Being 运行时</span><strong id="inspector-runtime">未知</strong></div><div class="detail-row"><span>消息处理</span><strong id="inspector-stream">未知</strong></div><p class="section-note" id="inspector-connection-error" hidden></p></section>
+            <section class="inspector-section"><h3>消息任务队列</h3><div id="message-task-queue"></div><p class="section-note">当前会话按发送顺序展示。已发送不代表已开始执行；其他会话和渠道的运行时队列尚未提供。</p></section>
+            <section class="inspector-section"><h3><svg class="icon"><use href="#i-terminal"/></svg>本机 Portal</h3><div class="detail-row"><span>Portal 进程</span><strong id="inspector-portal">未配置</strong></div><div class="detail-row"><span>连接健康</span><strong id="inspector-health">待确认</strong></div><p class="section-note" id="inspector-portal-note">选择程序与配置后管理本机 Portal。</p><button class="text-button" id="configure-portal">管理 Portal<svg class="icon small"><use href="#i-arrow"/></svg></button></section>
+            <section class="inspector-section"><h3><svg class="icon"><use href="#i-cpu"/></svg>模型</h3><div class="model-name" id="inspector-model">当前配置未知</div><div class="detail-row"><span>提供方</span><strong id="inspector-provider">未知</strong></div><div class="detail-row"><span>CLIProxy</span><strong id="inspector-proxy">未知</strong></div></section>
+            <section class="inspector-section"><h3><svg class="icon"><use href="#i-pulse"/></svg>Side by Side</h3><div class="detail-row"><span>已保存</span><strong id="inspector-sbs-saved">未知</strong></div><div class="detail-row"><span>运行中</span><strong id="inspector-sbs-active">未知</strong></div><p class="section-note" id="inspector-sbs-note">等待运行时确认。</p></section>
+            <section class="inspector-section activity-section"><div class="activity-heading"><h3>近期活动</h3><span id="activity-count">0</span></div><div id="activity-list" class="activity-list"><p class="section-note">尚无桌面活动。</p></div></section>
+          </div>
+          <div class="inspector-footer"><span id="last-updated">等待首次更新</span><button class="icon-button compact" id="inspector-refresh" aria-label="刷新运行状态"><svg class="icon"><use href="#i-refresh"/></svg></button></div>
+        </aside>
+      </div>
+      <footer class="statusbar"><span class="statusbar-connection"><i class="status-dot" id="footer-status-dot"></i><span id="footer-status">尚未连接</span></span><span class="statusbar-workspace" id="footer-workspace">尚未选择工作区</span><span class="statusbar-right" id="footer-model">模型配置未知</span><button class="portal-update-entry" id="portal-update-entry" type="button" hidden><svg class="icon small" aria-hidden="true"><use href="#i-refresh"/></svg>Portal 有更新</button></footer>
+    </main>
+  </div>
+</body>
+</html>

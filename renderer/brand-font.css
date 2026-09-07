@@ -1,0 +1,8 @@
+/* Exact Silkscreen font subset used by the selected pixel wordmark preview. */
+@font-face {
+  font-family: "Silkscreen";
+  src: url("./assets/fonts/Silkscreen-Bold-Being.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}

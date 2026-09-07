@@ -1,0 +1,78 @@
+#messages[data-desktop-message-navigation] {
+  padding-left: max(48px, calc((100% - 780px) / 2)) !important;
+}
+#desktop-message-navigator {
+  position: fixed !important;
+  z-index: 40 !important;
+  width: 32px !important;
+  padding: 0 !important;
+  font-family: var(--font-sans), sans-serif !important;
+  pointer-events: none !important;
+}
+#desktop-message-navigator[hidden], #desktop-message-preview[hidden], #desktop-message-preview-body[hidden] { display: none !important; }
+#desktop-message-rail {
+  position: relative !important;
+  display: block !important;
+  width: 32px !important;
+  box-sizing: border-box !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  touch-action: none !important;
+  user-select: none !important;
+  outline: none !important;
+}
+#desktop-message-rail:focus-visible { outline: 1px solid var(--muted, #999) !important; outline-offset: 2px !important; }
+#desktop-message-ticks > span {
+  position: absolute !important;
+  left: 8px !important;
+  display: block !important;
+  height: 2px !important;
+  border-radius: 1px !important;
+  background: var(--surface-line, #4b4b4b) !important;
+  pointer-events: none !important;
+  transition: width 100ms ease, background-color 100ms ease !important;
+}
+#desktop-message-ticks > span[data-current="true"] { background: var(--muted, #a0a0a0) !important; }
+#desktop-message-ticks > span[data-selected="true"] { background: var(--accent, #eee) !important; }
+#desktop-message-preview {
+  position: absolute !important;
+  left: 44px !important;
+  box-sizing: border-box !important;
+  padding: 9px 10px !important;
+  border: 0 !important;
+  border-radius: 12px !important;
+  background: var(--input, #2c2c2c) !important;
+  box-shadow: 0 6px 22px #0002 !important;
+  color: var(--input-text, #eee) !important;
+  pointer-events: none !important;
+  text-align: left !important;
+  user-select: none !important;
+}
+#desktop-message-preview-title {
+  display: block !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 20px !important;
+}
+#desktop-message-preview-body {
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 3 !important;
+  overflow: hidden !important;
+  overflow-wrap: anywhere !important;
+  margin-top: 3px !important;
+  color: var(--input-muted, #999) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  line-height: 21px !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  #desktop-message-ticks > span { transition: none !important; }
+}

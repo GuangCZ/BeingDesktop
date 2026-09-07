@@ -1,0 +1,28 @@
+.appearance-settings .card-heading { align-items: center; }
+.appearance-settings .card-heading h3 { margin-bottom: 4px; }
+.theme-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 22px; }
+.theme-preset { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--surface-text, var(--text)); text-align: left; }
+.theme-preset:hover { border-color: var(--muted); }
+.theme-preset[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.theme-preset-swatches { display: flex; flex: 0 0 48px; height: 26px; overflow: hidden; border: 1px solid rgb(128 128 128 / 25%); border-radius: 5px; }
+.theme-preset-swatches i { flex: 1; }
+.theme-preset > span:last-child { min-width: 0; font-size: 13px; }
+.theme-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; margin: 0; padding: 0; border: 0; }
+.theme-field { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 14px 0; border-bottom: 1px solid var(--line-soft); }
+.theme-field > label { display: grid; gap: 3px; min-width: 0; }
+.theme-field .field-help { font-size: 12px; }
+.theme-color-control { display: flex; align-items: center; flex: 0 0 auto; gap: 8px; }
+.theme-color-control input[type="color"] { display: block; width: 32px; height: 32px; padding: 3px; border: 1px solid var(--line); border-radius: 7px; background: var(--input); cursor: pointer; }
+.theme-color-control input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.theme-color-control input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 3px; }
+.theme-color-control .theme-hex { width: 88px; min-width: 0; height: 32px; padding: 6px 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--input); color: var(--input-text, var(--text)); font-family: var(--font-mono); font-size: 12px; line-height: 18px; }
+.theme-color-control .theme-hex[aria-invalid="true"] { border-color: var(--danger); }
+.theme-footer { align-items: flex-start; gap: 12px; padding-top: 18px; }
+.theme-footer .field-help { flex: 1 1 180px; max-width: 340px; }
+.theme-footer .inline-actions { justify-content: flex-end; }
+@container (max-width: 600px) {
+  .theme-fields { grid-template-columns: minmax(0, 1fr); }
+  .theme-presets { gap: 8px; }
+  .theme-preset { flex-wrap: wrap; gap: 8px; padding: 10px; }
+}
+.appearance-settings { container-type: inline-size; }

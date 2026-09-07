@@ -1,0 +1,59 @@
+{
+  "name": "being-desktop",
+  "version": "0.8.19",
+  "description": "A desktop home for your existing Being, Loom and local Portal.",
+  "author": {
+    "name": "Being Desktop contributors"
+  },
+  "main": "src/main.cjs",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "postinstall": "node node_modules/electron/install.js",
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "check": "node --check src/main.cjs && node --check src/preload.cjs && node --check src/portal-updates.cjs && node --check src/model-config.cjs && node --check src/onboarding.cjs && node --check src/ui-theme.cjs && node --check renderer/portal-updates.js && node --check renderer/model-settings.js && node --check renderer/onboarding.js && node --check renderer/theme-colors.js && node --check renderer/theme-settings.js && node --check renderer/app.js && node --check src/portal-config.cjs && node --check src/portal-permissions.cjs && node --check renderer/portal-permissions.js",
+    "test:portal-updates": "node --test test/portal-updates.test.cjs && node test/portal-updates-ui.cjs",
+    "test:onboarding": "node test/onboarding-ui.cjs",
+    "test:theme": "node scripts/verify-theme-settings.cjs",
+    "pack": "electron-builder --win dir",
+    "dist": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "town.beings.desktop",
+    "productName": "Being Desktop",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/node-pty/**/*"
+    ],
+    "npmRebuild": false,
+    "files": [
+      "src/**/*",
+      "extensions/being-anywhere/being-client.mjs",
+      "renderer/**/*",
+      "!renderer/assets/kits/**/*",
+      "package.json",
+      "LICENSE"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "portable",
+      "icon": "renderer/assets/being/being-icon.ico",
+      "signExecutable": false
+    },
+    "portable": {
+      "artifactName": "Being-Desktop-${version}-win-x64.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "44.2.0",
+    "electron-builder": "26.15.3"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "node-pty": "1.1.0"
+  }
+}

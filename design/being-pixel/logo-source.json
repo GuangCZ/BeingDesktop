@@ -1,0 +1,49 @@
+{
+  "method": "Original user artwork; uniform raster resampling with mild antialias prefilter",
+  "source": "design/being-pixel/being-source.png",
+  "sourceSize": {
+    "width": 1712,
+    "height": 1152
+  },
+  "sourceSha256": "85135a9532f2d77fcebcab9861ddd3fe3a0f64c9d0a76db90c7ba876a2e8cd79",
+  "crop": {
+    "x": 280,
+    "y": 0,
+    "width": 1152,
+    "height": 1152
+  },
+  "formatNotes": "All small rasters use the unchanged 1152 px square source crop with identical horizontal and vertical scaling and a Gaussian-prefiltered area sampler (sigma 0.3 output pixels). No glyph reconstruction, grid merging, letter-spacing changes, or optical enlargement. Desktop UI uses PNG srcset for display density. SVG is a CSS-width raster fallback. Fine gaps naturally fade below pixel resolution.",
+  "export": "scripts/export-being-icon.cjs",
+  "png": "renderer/assets/being/being-icon.png",
+  "pngSize": 1024,
+  "pngSha256": "2b0397c5fc790184d5a0d941c804f0b98b804091701fb107a558182648cb00cd",
+  "ico": "renderer/assets/being/being-icon.ico",
+  "icoSha256": "f2eb7ce0ccda13bbd3c83927a14358d7322477edcb3db3ab8084ccf320a798d5",
+  "icoSizes": [
+    16,
+    20,
+    24,
+    32,
+    40,
+    48,
+    64,
+    128,
+    256
+  ],
+  "uiReport": "design/being-pixel/source-faithful-ui/brand-ui-report.json",
+  "smallSvg": "renderer/assets/being/being-icon-small.svg",
+  "comparison": "design/being-pixel/source-faithful/comparison.png",
+  "exportReport": "design/being-pixel/icon-export-report.json",
+  "historicalGrid": "design/being-pixel/logo-grid.json",
+  "samplingReport": "design/being-pixel/source-faithful-ui/sampling-properties.json",
+  "extensionScope": "Desktop export remains separate. The approved artwork is copied byte-for-byte to BeingAnywhere through its explicit logo sync script.",
+  "srcsetReport": "design/being-pixel/source-faithful-ui/srcset-report.json",
+  "productRelease": "dist-0.8.7",
+  "productLauncher": "Open-Being.cmd",
+  "productVerification": "dist-0.8.7/product-verification.json",
+  "productPublication": "dist-0.8.7/logo-publication.json",
+  "extensionLogoSync": "scripts/sync-being-anywhere-logo.cjs",
+  "extensionVersion": "0.2.6",
+  "extensionRelease": ".local/being-anywhere-release/BeingAnywhere-0.2.6.zip",
+  "extensionValidation": ".local/being-anywhere-release/VALIDATION_0.2.6_CN.md"
+}

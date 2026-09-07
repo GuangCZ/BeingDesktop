@@ -1,0 +1,16 @@
+node_modules/
+dist*/
+.local/
+*.log
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.zip
+*.exe
+*.asar
+coverage/
+showcase/
+design/

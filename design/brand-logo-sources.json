@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "retrievedAt": "2026-09-06T16:39:01.2243081Z",
+  "purpose": "Original vendor artwork for Grove product integration identification",
+  "naming": "Theme suffixes identify the intended UI surface, not the artwork color.",
+  "assets": [
+    {
+      "brand": "jira",
+      "kitIds": [
+        "zdVdrI5rNEkaENW9nv5aH"
+      ],
+      "file": "jira.svg",
+      "theme": "any",
+      "sourcePage": "https://atlassian.design/foundations/logos",
+      "sourceUrl": "https://atlassian.design/assets/c846903555df/logos/jira_app.zip",
+      "archiveEntry": "jira/SVG/Jira_icon.svg",
+      "recommendedBackground": "transparent",
+      "presentation": "Original 48 x 48 app tile with built-in blue background and radius. Do not nest inside another tile.",
+      "path": "renderer/assets/brands/jira.svg",
+      "format": "svg",
+      "sha256": "ad20a13973de9ff9b4ad7354881c84ba2207b9117b6aad9bfce68b611c6fb9a8",
+      "bytes": 1045,
+      "modifications": "none; original file bytes copied unchanged"
+    },
+    {
+      "brand": "claude",
+      "kitIds": [
+        "jM-oec68MUWwUdF8yLjO8"
+      ],
+      "file": "claude.svg",
+      "theme": "any",
+      "sourcePage": "https://www.anthropic.com/news",
+      "sourceUrl": "https://www.anthropic.com/press-kit",
+      "archiveEntry": "Anthropic media resources/Anthropic logos/Claude logos/3 Claude Spark/SVG/Claude Spark - Clay.svg",
+      "recommendedBackground": "transparent",
+      "presentation": "Official Claude Spark in Clay. Preserve original color and aspect ratio; no generated replacement.",
+      "path": "renderer/assets/brands/claude.svg",
+      "format": "svg",
+      "sha256": "6d53db4be375e899c937c26cf16684a80d6e869b1928d72b37748bef2560e219",
+      "bytes": 2580,
+      "modifications": "none; original file bytes copied unchanged"
+    },
+    {
+      "brand": "cursor",
+      "kitIds": [
+        "op993xqkvii9fyg1V2AQX"
+      ],
+      "file": "cursor-light.svg",
+      "theme": "light",
+      "sourcePage": "https://cursor.com/en-US/brand",
+      "sourceUrl": "https://ptht05hbb1ssoooe.public.blob.vercel-storage.com/assets/brand/cursor-brand-assets.zip",
+      "archiveEntry": "General Logos/Cube/SVG/CUBE_2D_LIGHT.svg",
+      "recommendedBackground": "transparent on light theme",
+      "presentation": "Official 2D cube, dark artwork for light surfaces. Preserve non-square aspect ratio.",
+      "path": "renderer/assets/brands/cursor-light.svg",
+      "format": "svg",
+      "sha256": "c483c02f78eb2619778fdd959e72a9adfac4844854472cd2653d4cbfd60e4d71",
+      "bytes": 793,
+      "modifications": "none; original file bytes copied unchanged"
+    },
+    {
+      "brand": "cursor",
+      "kitIds": [
+        "op993xqkvii9fyg1V2AQX"
+      ],
+      "file": "cursor-dark.svg",
+      "theme": "dark",
+      "sourcePage": "https://cursor.com/en-US/brand",
+      "sourceUrl": "https://ptht05hbb1ssoooe.public.blob.vercel-storage.com/assets/brand/cursor-brand-assets.zip",
+      "archiveEntry": "General Logos/Cube/SVG/CUBE_2D_DARK.svg",
+      "recommendedBackground": "transparent on dark theme",
+      "presentation": "Official 2D cube, light artwork for dark surfaces. Preserve non-square aspect ratio.",
+      "path": "renderer/assets/brands/cursor-dark.svg",
+      "format": "svg",
+      "sha256": "cd0e3e5d8991a4cdd4577f8896cd063105207665165c73e25a1ff918dd367eb7",
+      "bytes": 793,
+      "modifications": "none; original file bytes copied unchanged"
+    },
+    {
+      "brand": "linear",
+      "kitIds": [
+        "rOl4C7kM8Le_mTLhpFuj4"
+      ],
+      "file": "linear-light.svg",
+      "theme": "light",
+      "sourcePage": "https://linear.app/brand",
+      "sourceUrl": "https://static.linear.app/design-assets/Linear-Brand-Assets.zip?v=3",
+      "archiveEntry": "logo-dark.svg",
+      "recommendedBackground": "transparent on light theme",
+      "presentation": "Official monochrome logomark. Filename suffix denotes target theme; original archive suffix denotes artwork color.",
+      "path": "renderer/assets/brands/linear-light.svg",
+      "format": "svg",
+      "sha256": "e683e95a5eb9b360ae06360c0350fd1b5fcf3d2222ef9de8e71fa0bc413dccc3",
+      "bytes": 1060,
+      "modifications": "none; original file bytes copied unchanged"
+    },
+    {
+      "brand": "linear",
+      "kitIds": [
+        "rOl4C7kM8Le_mTLhpFuj4"
+      ],
+      "file": "linear-dark.svg",
+      "theme": "dark",
+      "sourcePage": "https://linear.app/brand",
+      "sourceUrl": "https://static.linear.app/design-assets/Linear-Brand-Assets.zip?v=3",
+      "archiveEntry": "logo-light.svg",
+      "recommendedBackground": "transparent on dark theme",
+      "presentation": "Official monochrome logomark. Filename suffix denotes target theme; original archive suffix denotes artwork color.",
+      "path": "renderer/assets/brands/linear-dark.svg",
+      "format": "svg",
+      "sha256": "32f9883452188b39787f8242c7bfce723ded255f35f13254e727871d3dae2fd1",
+      "bytes": 1057,
+      "modifications": "none; original file bytes copied unchanged"
+    },
+    {
+      "brand": "opencode",
+      "kitIds": [
+        "W1nK_PzrkDTLj7UGvd741"
+      ],
+      "file": "opencode-light.svg",
+      "theme": "light",
+      "sourcePage": "https://opencode.ai/brand",
+      "sourceUrl": "https://opencode.ai/opencode-brand-assets.zip",
+      "archiveEntry": "OpenCode Brand Assets/Logo/opencode-logo-light.svg",
+      "recommendedBackground": "transparent on light theme",
+      "presentation": "Official standalone OpenCode mark, dark artwork for light surfaces. Preserve 240:300 aspect ratio.",
+      "path": "renderer/assets/brands/opencode-light.svg",
+      "format": "svg",
+      "sha256": "5eeb3a5f14dbbccc03111296ecfd3cd05cc98844150d4f9d77ba921847953380",
+      "bytes": 577,
+      "modifications": "none; original file bytes copied unchanged"
+    },
+    {
+      "brand": "opencode",
+      "kitIds": [
+        "W1nK_PzrkDTLj7UGvd741"
+      ],
+      "file": "opencode-dark.svg",
+      "theme": "dark",
+      "sourcePage": "https://opencode.ai/brand",
+      "sourceUrl": "https://opencode.ai/opencode-brand-assets.zip",
+      "archiveEntry": "OpenCode Brand Assets/Logo/opencode-logo-dark.svg",
+      "recommendedBackground": "transparent on dark theme",
+      "presentation": "Official standalone OpenCode mark, light artwork for dark surfaces. Preserve 240:300 aspect ratio.",
+      "path": "renderer/assets/brands/opencode-dark.svg",
+      "format": "svg",
+      "sha256": "4e84f87aa7bc2a5f8a72eeb08d3d4f1836b422189256d0bd5e7bfabc830d7ed0",
+      "bytes": 577,
+      "modifications": "none; original file bytes copied unchanged"
+    },
+    {
+      "brand": "feishu",
+      "kitIds": [
+        "7vWqrnJgSP9gx--45zV2b"
+      ],
+      "file": "feishu.svg",
+      "theme": "any",
+      "sourcePage": "https://open.feishu.cn/",
+      "sourceUrl": "https://lf-package-cn.feishucdn.com/obj/feishu-static/lark/open/website/favicon-logo.svg",
+      "archiveEntry": null,
+      "recommendedBackground": "transparent",
+      "presentation": "Official Feishu Developer site SVG favicon. Contains original white tile and brand colors; do not add a second container.",
+      "path": "renderer/assets/brands/feishu.svg",
+      "format": "svg",
+      "sha256": "247c4e35716c3263d04b697ad19ff1868cb8ed321a12454e27224d34ee11f1eb",
+      "bytes": 5511,
+      "modifications": "none; original file bytes copied unchanged"
+    }
+  ]
+}
