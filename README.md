@@ -43,7 +43,7 @@ node scripts/build-docs.cjs
 node scripts/check-docs.cjs
 ```
 
-GitHub Pages serves `main:/docs`. The site has static pages, local search, responsive navigation, and light/dark themes with no external runtime dependencies.
+GitHub Pages serves the root of `gh-pages`; documentation sources and generated pages are maintained in `main:/docs`. After committing changes, run `node scripts/publish-docs.cjs` from the independent repository to publish them. The site has static pages, local search, responsive navigation, and light/dark themes with no external runtime dependencies.
 
 ## License
 
