@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="Being">
-  <title>Being</title>
-  <rect x="8" y="8" width="240" height="240" rx="54" fill="#181818" stroke="#474747" stroke-width="2"/>
-  <path fill="#f4f4f4" fill-rule="evenodd" transform="translate(-3 -1)" d="M78 58h59c30 0 47 15 47 37 0 15-8 26-21 32 18 6 29 18 29 35 0 24-19 39-51 39H78V58Zm24 22v38h31c17 0 26-7 26-19s-9-19-26-19h-31Zm0 58v41h35c19 0 29-7 29-20s-10-21-29-21h-35Z"/>
-</svg>
