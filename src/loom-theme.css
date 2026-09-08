@@ -423,6 +423,8 @@ code, pre, kbd, samp, .code-lang, .readonly-value, .tui-cmd, .tui-arg, .tui-key-
 }
 #tui-wrapper[data-desktop-inline-activity] .desktop-activity-empty { color: var(--surface-muted); }
 .side-panel { background: var(--surface) !important; color: var(--surface-text) !important; border-color: var(--surface-line) !important; }
+/* Offscreen Loom panels must not cast their left shadow into the conversation. */
+.side-panel:not(.active) { box-shadow: none !important; }
 .settings-header, .privacy-header, .panel-header { background: var(--surface) !important; border-color: var(--surface-line) !important; }
 .settings-section { border-color: var(--surface-line) !important; }
 .field-input { background: var(--input) !important; color: var(--input-text) !important; border-color: var(--surface-line) !important; border-radius: 7px !important; }

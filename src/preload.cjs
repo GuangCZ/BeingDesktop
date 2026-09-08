@@ -10,6 +10,7 @@ for(const name of ['installGroveKit','installEligibleGroveKits','prepareGroveAss
 for(const name of ['getFeatureTasks','getFeatureTask','discussFeatureTask','endFeatureTaskTracking'])api[name]=(...args)=>ipcRenderer.invoke(`being:${name}`,...args);
 for (const name of ['checkPortalUpdates','openPortalUpdate']) api[name]=()=>ipcRenderer.invoke(`being:${name}`);
 api.setColors=colors=>ipcRenderer.invoke('being:setColors',colors);
+api.previewColors=colors=>ipcRenderer.invoke('being:previewColors',colors);
 api.setOnboardingStep=step=>ipcRenderer.invoke('being:setOnboardingStep',step);
 for(const name of ['getModelConfig','saveModelConfig'])api[name]=(...args)=>ipcRenderer.invoke(`being:${name}`,...args);
 for (const name of ['getDesktopTools','desktopAction','setBrowserView','copyDesktopText','getTerminalState','readTerminal','terminalAction','readNativeText']) api[name]=(...args)=>ipcRenderer.invoke(`being:${name}`,...args);

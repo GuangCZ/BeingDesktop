@@ -32,6 +32,13 @@ window.beingThemeSettings = (() => {
     document.documentElement.style.colorScheme = variables['--color-scheme'] || 'dark';
     applied = identity;
     window.dispatchEvent(new CustomEvent('being-theme-change', {detail: {...draft}}));
+    // Loom is a separate renderer; CSS variables on the shell cannot reach it.
+    if (bridge?.previewColors) void bridge.previewColors({...draft}).catch(() => {
+      if (applied !== identity) return;
+      feedback = '对话配色预览暂未应用，请重试或保存配色。';
+      failed = true;
+      render();
+    });
   }
 
   function render() {
