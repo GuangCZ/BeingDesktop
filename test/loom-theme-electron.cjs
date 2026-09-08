@@ -48,5 +48,16 @@ app.whenReady().then(async()=>{
   await win.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(html));
   await applyLoomTheme(win.webContents,PRESETS[1].colors);
   await check(PRESETS[1]);
+  // Loom hides panels by translating them offscreen, but their left shadow still bleeds into chat.
+  await win.webContents.executeJavaScript(`(() => {
+    const style=document.createElement('style');
+    style.textContent='.side-panel{position:fixed;right:0;top:0;bottom:0;width:380px;transform:translateX(100%);box-shadow:-24px 0 60px rgba(0,0,0,.25)}.side-panel.active{transform:translateX(0)}';
+    document.head.append(style);
+    const panel=document.createElement('div');panel.className='side-panel';document.body.append(panel);
+  })()`);
+  assert.equal(await win.webContents.executeJavaScript("getComputedStyle(document.querySelector('.side-panel')).boxShadow"),'none','closed panel must not cast a shadow into chat');
+  await win.webContents.executeJavaScript("document.querySelector('.side-panel').classList.add('active')");
+  assert.notEqual(await win.webContents.executeJavaScript("getComputedStyle(document.querySelector('.side-panel')).boxShadow"),'none','open panel retains its shadow');
+  console.log('PASS closed/open panel shadows');
   app.exit(0);
 }).catch(error=>{console.error(error);app.exit(1);});
