@@ -12,6 +12,7 @@ const {applyLoomTheme,applyContentTypography,applyContentColors} = require('./lo
 const {prepareLoomSessions,changeLoomSession} = require('./loom-sessions.cjs');
 const {normalizeTypography,validateTypography} = require('./typography.cjs');
 const {normalizeColors,saveColors} = require('./ui-theme.cjs');
+const {validateColors} = require('../renderer/theme-colors.js');
 const {restoreOnboarding,saveOnboardingStep,completeOnboardingAfterBonfire} = require('./onboarding.cjs');
 const {normalizeAppMenuRequest,commandForInput,captureMenuEditingTarget,getDesktopWindowState,createDesktopMenuTemplate} = require('./desktop-menu.cjs');
 const {getTownCatalog,townPageUrl,prepareTownFeature,prepareTownAssistance,prepareFiresideDraft,prepareLoomDraft} = require('./town.cjs');
@@ -52,6 +53,8 @@ if (!lock) { app.quit(); } else { boot(); }
 
 function boot() {
   let win, view, tray, desktopTools, desktopTerminal, refreshTimer, refreshPromise, exitStarted = false, quitCommitted = false;
+  // Unsaved appearance previews also apply to newly loaded/cached Loom views.
+  let previewColors = null;
   const chatViews = new Map(), liveChatViews = new Set(), chatViewStatus = new WeakMap();
   let connection = null, generation = 0, identityRevision = 0, portalIdentityRevision = null, viewRevision = 0, viewWanted = false, viewport = {x:224,y:88,width:800,height:600};
   let portalBeingName = '';
@@ -549,9 +552,9 @@ function boot() {
       if(epoch!==generation)return;
       const finishedRevision = loadRevision;
       try {
-        await applyLoomTheme(contents,state.settings.colors);
+        await applyLoomTheme(contents,previewColors || state.settings.colors);
         if(epoch===generation && finishedRevision===loadRevision && !contents.isDestroyed()) {
-          await Promise.all([applyContentTypography(contents,state.settings.typography),applyContentColors(contents,state.settings.colors)]);
+          await Promise.all([applyContentTypography(contents,state.settings.typography),applyContentColors(contents,previewColors || state.settings.colors)]);
         }
       }
       catch { if(epoch===generation && finishedRevision===loadRevision)activity('warning','对话外观未应用','Loom 保持原有界面，可以继续使用或重新连接。'); }
@@ -727,7 +730,7 @@ function boot() {
         clearInterval(composerTimer);composerTimer=null;composerRevision++;
         Object.assign(state.connection,chatViewStatus.get(next));
         state.chatSessions=await next.webContents.executeJavaScript('globalThis.__beingDesktopSessions.list()');
-        await Promise.all([applyContentTypography(next.webContents,state.settings.typography),applyContentColors(next.webContents,state.settings.colors)]);
+        await Promise.all([applyContentTypography(next.webContents,state.settings.typography),applyContentColors(next.webContents,previewColors || state.settings.colors)]);
         mountView();
         if(state.connection.status==='connected')void mountComposer(next.webContents,generation).catch(()=>{});
       } else {
@@ -915,8 +918,18 @@ function boot() {
       if(applied.some(result=>result.status==='rejected')) activity('warning','字号已保存','部分页面暂未应用字号，重新连接或打开桌面端后会恢复。');
       broadcast();return publicState();
     });
+    handle('previewColors',async(value)=>{
+      const colors=validateColors(value);
+      previewColors=colors;
+      if(win && !win.isDestroyed()) win.setBackgroundColor(colors.background);
+      if(view && !view.webContents.isDestroyed() && !view.webContents.isLoadingMainFrame()) {
+        await applyContentColors(view.webContents,colors);
+      }
+      return true;
+    });
     handle('setColors',async(value)=>{
       const colors=await saveColors(value,{settings:disk,persist});
+      previewColors=null;
       state.settings.colors=colors;
       if(win && !win.isDestroyed()) win.setBackgroundColor(colors.background);
       if(view && !view.webContents.isDestroyed() && !view.webContents.isLoadingMainFrame()) {
