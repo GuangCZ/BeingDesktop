@@ -33,10 +33,10 @@ test('probe failure keeps verified process state and never returns raw errors',a
  const {portal}=fixture();portal.readExternalVersion=async()=>{throw new Error('secret-sentinel');};
  const result=await portal.inspect();assert.equal(result.status,'external');assert.equal(result.observedVersion,'');assert.ok(!JSON.stringify(result).includes('secret-sentinel'));
 });
-test('configuration change while a version read is pending discards the result',async()=>{
+test('observed external ownership blocks configuration changes during a pending version read',async()=>{
  const {portal}=fixture();let finish;
  portal.readExternalVersion=()=>new Promise(resolve=>{finish=resolve;});
  const pending=portal.inspect();await new Promise(resolve=>setImmediate(resolve));
- portal.configure({executable:__filename});finish('0.8.0');
- const result=await pending;assert.equal(result.status,'not_configured');assert.equal(result.pid,null);
+ assert.throws(()=>portal.configure({executable:__filename}),/已有 Portal/);finish('0.8.0');
+ const result=await pending;assert.equal(result.status,'external');assert.equal(result.pid,42);assert.equal(result.executable,'');
 });

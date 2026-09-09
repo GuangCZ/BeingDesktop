@@ -14,6 +14,7 @@ class PortalWatchdog {
     this.nextHealthAt = 0;
     this.nextAttemptAt = 0;
     this.attempts = 0;
+    this.externalObserved = false;
     this.observedPid = null;
     this.runningSince = null;
     this.contextKey = '';
@@ -93,6 +94,7 @@ class PortalWatchdog {
     await this.portal.inspect();
     if (!this._allowed() || context.identity !== this.getContext().identity) return;
     const current = this.portal.state;
+    if (current.status === 'external' || current.management === 'external') this.externalObserved = true;
     this._update({checkedAt:new Date(this.now()).toISOString()});
     if (current.pid && ['running','external'].includes(current.status)) {
       if (this.observedPid !== current.pid) {
@@ -100,7 +102,7 @@ class PortalWatchdog {
         this.runningSince = this.now();
       }
       if (this.now() - this.runningSince >= 60000) { this.attempts = 0; this.nextAttemptAt = 0; }
-      this._update({status:'monitoring', detail:current.owned ? '自动守护中：每 5 秒检查进程，退出后自动拉起；每 30 秒检查连接健康。' : '正在监控已有 Portal；不会重复启动。进程退出后将按桌面保存的配置自动拉起。', retryAt:null, attempts:this.attempts});
+      this._update({status:'monitoring', detail:current.owned ? '自动守护中：每 5 秒检查进程，退出后自动拉起；每 30 秒检查连接健康。' : '正在检查已有 Portal；配置和重启由原部署方式管理。', retryAt:null, attempts:this.attempts});
       this._health(context, current);
       return;
     }
@@ -110,6 +112,10 @@ class PortalWatchdog {
     this._update({health:null});
     if (current.status === 'error') {
       this._update({status:'error', detail:'无法确认已有进程，暂缓自动启动；5 秒后重新检查。', retryAt:null});
+      return;
+    }
+    if (this.externalObserved || context.allowAutomaticStart === false) {
+      this._update({status:'waiting', detail:'已有 Portal 优先；等待原管理方式恢复，Desktop 不会接管或启动另一实例。', retryAt:null});
       return;
     }
     if (!context.ready || !current.executable || !current.configPath) {

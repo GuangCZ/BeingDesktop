@@ -78,7 +78,7 @@ function parseString(value) {
   return { value: decoded, length: match[1].length + 2 };
 }
 
-function configFields(text) {
+function configFields(text, keys = ['kits_enabled', 'kits_dir']) {
   const fields = {};
   let offset = 0, rootEnd = text.length, quote = '', triple = false, depth = 0;
   for (const line of text.match(/[^\r\n]*(?:\r\n|\n|\r|$)/g) || []) {
@@ -92,7 +92,7 @@ function configFields(text) {
       const assignment = /^[ \t]*(?:([A-Za-z0-9_-]+)|"([^"\\]*)"|'([^']*)')[ \t]*=[ \t]*/.exec(content);
       if (assignment) {
         const key = assignment[1] || assignment[2] || assignment[3];
-        if (key === 'kits_enabled' || key === 'kits_dir') {
+        if (keys.includes(key)) {
           if (Object.hasOwn(fields, key)) throw new Error('Portal 工具包配置包含重复字段，请先核对配置。');
           const value = content.slice(assignment[0].length);
           let parsed;
@@ -355,4 +355,4 @@ function verifyGrovePortalLogs(logs, kitNames) {
     started: names.filter(name => started.has(name)), failed: names.filter(name => failed.has(name)), tools };
 }
 
-module.exports = { inspectGrovePortal, enableGrovePortal, verifyGrovePortalLogs, grovePortalConfigText, recoverGrovePortalMetadata, readConfig };
+module.exports = { inspectGrovePortal, enableGrovePortal, verifyGrovePortalLogs, grovePortalConfigText, recoverGrovePortalMetadata, readConfig, configFields };

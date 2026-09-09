@@ -61,6 +61,16 @@ test('enabling requires an executable default agent and persistence succeeds bef
   await assert.rejects(manager.configure({enabled:false},async()=>{throw new Error('disk failed');}),/disk failed/);
   assert.equal(manager.mode.enabled,false);
 });
+test('an unavailable bridge still prevents worker launch after chat readiness is inspected',async t=>{
+  const {OrchestrationPolicy}=require('../src/orchestration-policy.cjs');
+  const {manager,args,children}=await fixture(t),desktopId=randomUUID();
+  const gate=new OrchestrationPolicy({getIdentity:()=>manager.owner,getDesktopId:()=>desktopId,getMode:()=>manager.mode,
+    getBridge:()=>({status:'disconnected',place:'being-desktop-tools-'+desktopId,tools:[]})});
+  manager.assertEnforced=()=>gate.assertEnforced();
+  assert.equal((await gate.inspectForMessage()).status,'blocked');
+  await assert.rejects(manager.run(args),{code:'ORCHESTRATION_NOT_ENFORCED'});
+  assert.equal(children.length,0);assert.equal(manager.workers.length,0);
+});
 test('worker dispatch is session bound, deduplicated, and serializes the shared checkout',async t=>{
   const {manager,args,otherId,children}=await fixture(t);
   await assert.rejects(manager.run({...args,sessionToken:randomUUID()}),/有效会话/);

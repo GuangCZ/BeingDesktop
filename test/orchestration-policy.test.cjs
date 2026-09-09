@@ -36,6 +36,17 @@ test('missing dispatch and direct tools in an orchestrator bridge fail closed',a
   f.bridge.tools=['desktop_worker_start','desktop_console_run'];await assert.rejects(f.gate.assertEnforced(),/范围未生效/);
   f.bridge.tools=['desktop_worker_start'];f.bridge.status='disconnected';await assert.rejects(f.gate.assertEnforced(),/未连接/);
 });
+test('chat readiness reports an unavailable or invalid bridge without authorizing local execution',async()=>{
+  for(const change of [f=>{f.bridge.status='disconnected';},f=>{f.bridge.tools=[];},f=>{f.bridge.tools.push('desktop_console_run');},f=>{f.bridge.place='other-desktop';}]){
+    const f=fixture();f.mode.enabled=true;change(f);
+    const state=await f.gate.inspectForMessage();
+    assert.equal(state.status,'blocked');assert.equal(state.scope,'desktop');
+    await assert.rejects(f.gate.assertEnforced(),{code:'ORCHESTRATION_NOT_ENFORCED'});
+    assert.equal(f.mode.enabled,true);
+  }
+  const f=fixture();assert.equal((await f.gate.inspectForMessage()).status,'disabled');
+  f.mode.enabled=true;assert.equal((await f.gate.inspectForMessage()).status,'enforced');
+});
 test('invalid identity cannot configure mode; a disconnected Being cannot dispatch',async()=>{
   const f=fixture();f.setId('malformed');await assert.rejects(f.gate.configure(true),/身份/);
   const g=fixture();g.setIdentity('');await assert.rejects(g.gate.configure(true),/连接 Being/);

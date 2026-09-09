@@ -94,6 +94,7 @@
     return status === 'access_required' ? 'auth_required' : status;
   };
   const can = (id) => access(id) === 'ready';
+  const canSendFireside = () => can('firesideSend') || can('fireside');
   const beingName = () => string(town.identity?.displayName, string(publicState.connection?.beingName, '当前 Being'));
   const beingId = () => string(town.identity?.beingId);
   const sameEpoch = (value) => value === epoch;
@@ -804,20 +805,29 @@
     const page = ui.portalPage;
     page.replaceChildren();
     const machine = string(publicState.machine?.hostname, '当前电脑');
-    const workspace = string(publicState.workspace?.path, string(town.portalWorkspace?.path));
+    const workspace = string(town.portalWorkspace?.path);
+    const readOnly = town.portalWorkspace?.readOnly || portal.status === 'external';
     const state = busy.has('deploy') ? string(installation.status, local.status) : ['running', 'external', 'error'].includes(portal.status) ? portal.status : local.status || string(portal.status, 'not_configured');
     append(page, append(node('div', 'ta-computer-card'), append(node('span', 'ta-computer-icon'), icon('terminal')), append(node('div', 'ta-computer-copy'), node('h3', '', machine), node('p', 'ta-muted', `${beingName()} 的本机工作区`)), badge(state)));
-    const workspaceCard = append(node('section', 'ta-panel'), node('h4', '', '工作区'), node('p', 'ta-mono ta-workspace-path', workspace || '尚未选择文件夹'));
+    const workspaceCard = append(node('section', 'ta-panel'), node('h4', '', '工作区'), node('p', 'ta-mono ta-workspace-path', workspace || (readOnly ? '尚未确认，请核对原配置' : '尚未选择文件夹')));
     const choose = button(workspace ? '更换文件夹' : '选择文件夹', async () => {
       if (busy.has('workspace')) return;
       busy.add('workspace'); choose.disabled = true;
-      try { const result = await options.onSelectWorkspace?.(); if (result?.workspace) setState(result); }
+      try { const result = await options.onSelectPortalWorkspace?.(); if (result?.workspace) setState(result); }
       catch (error) { local.detail = errorText(error); }
       finally { busy.delete('workspace'); renderPortal(); }
     }, 'ta-secondary', 'portal-app-workspace');
-    choose.disabled = busy.has('deploy') || busy.has('workspace');
-    append(workspaceCard, node('p', 'ta-muted', publicState.workspace?.path ? '工作区是默认操作目录，不代表 Portal 的全部访问范围仅限于此目录。' : '一键配置时自动创建专用工作区，也可选择已有文件夹。'), choose);
+    choose.disabled = readOnly || busy.has('deploy') || busy.has('workspace');
+    append(workspaceCard, node('p', 'ta-muted', readOnly ? '沿用已部署 Portal 的配置工作区；Desktop 项目目录独立保存。' : '一键配置时创建 Portal 专用工作区；与 Desktop 项目目录分别保存。'), choose);
     page.append(workspaceCard);
+    if (portal.status === 'external' || portal.management === 'external') {
+      page.append(append(node('section', 'ta-panel'), node('h4', '', '优先使用已有 Portal'),
+        node('p', '', portal.pid ? '已有进程正在运行，沿用原部署配置和管理方式。' : '已有部署当前未运行，请由原启动方式恢复。'),
+        node('p', 'ta-mono', string(portal.deployment?.configPath, '配置位置尚未确认')),
+        node('p', 'ta-muted', '工作区与名称来自配置文件；在线连接和实际工具目标需另行确认。'),
+        button('打开连接设置', () => options.onNavigateSettings?.(), 'ta-quiet', 'portal-app-settings')));
+      return;
+    }
     const permissions = append(node('section', 'ta-panel'), node('h4', '', '工具权限'),
       node('p', 'ta-muted', '在设置 → 本机 Portal 中查看和修改文件、命令、截图及自定义工具权限。'),
       button('打开权限设置', () => options.onNavigateSettings?.(), 'ta-quiet', 'portal-app-permissions'),
@@ -861,7 +871,7 @@
   }
 
   async function deployPortal() {
-    if (busy.has('deploy') || !(publicState.workspace?.path || town.portalWorkspace?.path) || publicState.connection?.status !== 'connected' || town.platformSupported === false) return;
+    if (busy.has('deploy') || !town.portalWorkspace?.path || publicState.connection?.status !== 'connected' || town.platformSupported === false) return;
     const requestEpoch = epoch;
     busy.add('deploy'); model.portal.confirm = false; model.portal.detail = ''; model.portal.status = 'deploying'; renderPortal();
     try {
@@ -896,15 +906,15 @@
     ui.roomComposer = node('div', 'ta-composer ta-fireside-composer ta-capsule-composer');
     ui.roomDraft = node('textarea', 'ta-input ta-capsule-input');
     ui.roomDraft.id = 'fireside-draft'; ui.roomDraft.rows = 1; ui.roomDraft.maxLength = 32000;
-    ui.roomDraft.placeholder = '写下希望 Being 协助的内容…'; ui.roomDraft.setAttribute('aria-label', '围炉协助草稿');
+    ui.roomDraft.placeholder = '写下围炉消息…'; ui.roomDraft.setAttribute('aria-label', '围炉消息草稿');
     ui.roomDraft.addEventListener('input', () => { model.fireside.drafts.set(model.fireside.selected || 'local', ui.roomDraft.value); renderComposer(); });
     ui.roomDraft.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
-      if (!can('fireside')) return;
+      if (!canSendFireside()) return;
       event.preventDefault();
       if (!ui.roomSend.disabled) void sendMessage();
     });
-    ui.roomSend = button('', () => { if (can('fireside')) void sendMessage(); else void carryFiresideDraft(); }, 'ta-capsule-submit', 'fireside-send');
+    ui.roomSend = button('', () => { if (canSendFireside()) void sendMessage(); else void carryFiresideDraft(); }, 'ta-capsule-submit', 'fireside-send');
     ui.roomSendLabel = node('span', 'visually-hidden');
     ui.roomSendIcon = icon('external');
     append(ui.roomSend, ui.roomSendLabel, ui.roomSendIcon);
@@ -949,14 +959,15 @@
 
   function renderComposer() {
     const fireside = model.fireside;
-    const enabled = can('fireside') && Boolean(fireside.selected);
+    const enabled = canSendFireside() && Boolean(fireside.selected) && connected();
     const pending = busy.has(`send:${fireside.selected}`);
     const canCarry = publicState.connection?.status === 'connected' && Number.isSafeInteger(town.identity?.connectionRevision);
     const carryPending = busy.has('draft-handoff');
-    ui.roomSend.disabled = !ui.roomDraft.value.trim() || (can('fireside') ? !enabled || pending : !canCarry || carryPending);
-    text(ui.roomSendLabel, can('fireside') ? pending ? '发送中…' : '发送' : carryPending ? '正在准备草稿…' : '带草稿到 Loom');
-    ui.roomSendIcon.querySelector('use').setAttribute('href', can('fireside') ? '#i-arrow' : '#i-external');
-    ui.roomSend.classList.toggle('is-send', can('fireside'));
+    const uncertain = fireside.deliveries.some(entry => entry.room === fireside.selected && entry.message === ui.roomDraft.value && entry.status === 'uncertain');
+    ui.roomSend.disabled = !ui.roomDraft.value.trim() || (canSendFireside() ? !enabled || pending : !canCarry || carryPending);
+    text(ui.roomSendLabel, canSendFireside() ? pending ? '处理中…' : uncertain ? '核对发送结果' : '发送' : carryPending ? '正在准备草稿…' : '带草稿到 Loom');
+    ui.roomSendIcon.querySelector('use').setAttribute('href', canSendFireside() ? '#i-arrow' : '#i-external');
+    ui.roomSend.classList.toggle('is-send', canSendFireside());
     ui.roomSend.setAttribute('aria-busy', String(pending || carryPending));
   }
 
@@ -1007,10 +1018,10 @@
       append(messageNode, append(node('div', 'ta-message-meta'), node('strong', '', string(entry.beingName, string(entry.speaker_name, bonfireSender(entry) || 'Being'))), node('span', '', `${timestamp}${entry.revisedAt || entry.revised_at ? ' · 已编辑' : ''}`)), node('p', 'ta-message-body', string(entry.content, string(entry.message))));
       ui.roomMessages.append(messageNode);
     }
-    for (const delivery of can('fireside') ? fireside.deliveries.filter((entry) => entry.room === fireside.selected) : []) {
+    for (const delivery of canSendFireside() ? fireside.deliveries.filter((entry) => entry.room === fireside.selected) : []) {
       const label = { pending: '发送中…', failed: '发送未完成', uncertain: '发送结果待确认' }[delivery.status] || '待确认';
       const item = append(node('article', `ta-message is-mine ta-delivery ta-${delivery.status}`), node('div', 'ta-message-meta', `${beingName()} · ${label}`), node('p', 'ta-message-body', delivery.message));
-      if (delivery.status === 'uncertain') item.append(node('p', 'ta-warning', '上游可能已经收到。先刷新消息确认，避免重复发送。'));
+      if (delivery.status === 'uncertain') item.append(node('p', 'ta-warning', '上游可能已经收到。再次提交此草稿只核对原请求，不会重发。'));
       if (delivery.status === 'failed') item.append(button('放回草稿', () => {
         if (ui.roomDraft.value) { setNotice(ui.roomNotice, '已有草稿，请先处理当前草稿。', true); return; }
         model.fireside.drafts.set(fireside.selected, delivery.message); ui.roomDraft.value = delivery.message;
@@ -1073,21 +1084,31 @@
     const fireside = model.fireside;
     const room = fireside.selected;
     const messageText = ui.roomDraft.value;
-    if (!can('fireside') || !room || !messageText.trim() || busy.has(`send:${room}`)) return;
+    if (!canSendFireside() || !connected() || !room || !messageText.trim() || busy.has(`send:${room}`)) return;
     const requestEpoch = epoch;
-    const delivery = { room, message: messageText, status: 'pending' };
-    fireside.deliveries.push(delivery); fireside.drafts.set(room, ''); ui.roomDraft.value = '';
+    const delivery = fireside.deliveries.find(entry => entry.room === room && entry.message === messageText) || {room, message: messageText, requestId: crypto.randomUUID()};
+    delivery.status = 'pending';
+    if (!fireside.deliveries.includes(delivery)) fireside.deliveries.push(delivery);
+    fireside.drafts.set(room, messageText); fireside.roomError = '';
     busy.add(`send:${room}`); renderMessages();
     try {
-      const result = record(await call('sendFiresideMessage', { firesideId: room, message: messageText }));
+      const result = record(await call('sendFiresideMessage', { firesideId: room, message: messageText, connectionRevision: town.identity?.connectionRevision, requestId: delivery.requestId }));
       if (!sameEpoch(requestEpoch)) return;
       if (result.status === 'uncertain' || result.ok !== true) delivery.status = 'uncertain';
-      else { fireside.deliveries = fireside.deliveries.filter((entry) => entry !== delivery); if (fireside.selected === room) await readTownMessages('fireside', room, true); }
+      else {
+        fireside.deliveries = fireside.deliveries.filter((entry) => entry !== delivery);
+        if (fireside.drafts.get(room) === messageText) fireside.drafts.set(room, '');
+        if (fireside.selected === room) {
+          if (ui.roomDraft.value === messageText) ui.roomDraft.value = '';
+          if (visibleModule('fireside')) await requestReadOnce();
+        }
+      }
     } catch (error) {
       if (!sameEpoch(requestEpoch)) return;
       // Only an explicit pre-send rejection is safe to label as failed.
-      delivery.status = ['VALIDATION', 'AUTH_REQUIRED', 'NOT_SENT'].includes(error?.code) ? 'failed' : 'uncertain';
-    } finally { busy.delete(`send:${room}`); renderMessages(); }
+      delivery.status = ['VALIDATION', 'INVALID_REQUEST', 'AUTH_REQUIRED', 'NOT_SENT'].includes(error?.code) ? 'failed' : 'uncertain';
+      if (fireside.selected === room) fireside.roomError = errorText(error);
+    } finally { if (sameEpoch(requestEpoch)) { busy.delete(`send:${room}`); renderMessages(); } }
   }
 
   function showRoomDialog(kind) {
@@ -1195,7 +1216,7 @@
     const state = model.bonfire;
     const connected = publicState.connection?.status === 'connected';
     ui.bonfireSend.disabled = !connected || !state.draft.trim() || busy.has('bonfire-send');
-    text(ui.bonfireSendLabel, busy.has('bonfire-send') ? '发送中…' : '发送到篝火');
+    text(ui.bonfireSendLabel, busy.has('bonfire-send') ? '处理中…' : state.sendRequest?.content === state.draft && state.sendRequest.uncertain ? '核对发送结果' : '发送到篝火');
     ui.bonfireSend.setAttribute('aria-busy', String(busy.has('bonfire-send')));
     const suggestions = connected ? bonfireSuggestions() : [];
     if (state.mentionIndex >= suggestions.length) state.mentionIndex = 0;
@@ -1292,18 +1313,24 @@
     if (!content.trim() || publicState.connection?.status !== 'connected' || busy.has('bonfire-send')) return;
     const requestEpoch = epoch;
     const handles = new Set(Array.from(content.matchAll(/(?:^|\s)@([A-Za-z0-9][A-Za-z0-9_-]{0,99})(?=$|[^A-Za-z0-9_-])/g), (match) => match[1]));
+    if (state.sendRequest?.content !== content) state.sendRequest = {content, requestId: crypto.randomUUID(), uncertain: false};
+    const sendRequest = state.sendRequest;
     const mentions = state.members.map(memberId).filter((id) => handles.has(id));
     busy.add('bonfire-send'); state.sendError = ''; renderBonfire();
     try {
       let result;
       try {
-        result = record(await call('sendBonfireMessage', { content, mentions: [...new Set(mentions)], connectionRevision: town.identity?.connectionRevision }));
+        result = record(await call('sendBonfireMessage', { content, mentions: [...new Set(mentions)], connectionRevision: town.identity?.connectionRevision, requestId: sendRequest.requestId }));
       } catch (error) {
-        if (sameEpoch(requestEpoch)) state.sendError = ['VALIDATION', 'INVALID_REQUEST', 'AUTH_REQUIRED', 'NOT_SENT'].includes(error?.code) ? `${errorText(error)} 草稿已保留。` : '发送结果待确认，草稿已保留。请先刷新消息再决定是否重试。';
+        if (sameEpoch(requestEpoch)) {
+          sendRequest.uncertain = !['VALIDATION', 'INVALID_REQUEST', 'AUTH_REQUIRED', 'NOT_SENT'].includes(error?.code);
+          state.sendError = sendRequest.uncertain ? '发送结果待确认，草稿已保留。再次提交此草稿只核对原请求，不会重发。' : `${errorText(error)} 草稿已保留。`;
+        }
         return;
       }
       if (!sameEpoch(requestEpoch)) return;
-      if (result.ok !== true || result.status === 'uncertain') { state.sendError = '发送结果待确认，草稿已保留。请先检查篝火消息，避免重复发送。'; return; }
+      if (result.ok !== true || result.status === 'uncertain') { sendRequest.uncertain = true; state.sendError = '发送结果待确认，草稿已保留。再次提交此草稿只核对原请求，不会重发。'; return; }
+      if (state.sendRequest === sendRequest) state.sendRequest = null;
       if (state.draft === content) { state.draft = ''; ui.bonfireDraft.value = ''; }
       state.sender = ''; state.mentionClosed = true;
       try { await options.onBonfireSent?.(result); }
@@ -1312,11 +1339,11 @@
         if (sameEpoch(requestEpoch)) setNotice(ui.notice, '消息已发送，新手引导进度暂未更新。可以在设置中继续引导。', true);
       }
       if (!sameEpoch(requestEpoch)) return;
-      try { await readTownMessages('bonfire', '', true); }
+      try { if (visibleModule('bonfire')) await requestReadOnce(); }
       catch {
         if (sameEpoch(requestEpoch)) state.error = '消息已发送，暂时无法刷新篝火。可以稍后刷新显示。';
       }
-    } finally { busy.delete('bonfire-send'); if (sameEpoch(requestEpoch)) renderBonfire(); }
+    } finally { if (sameEpoch(requestEpoch)) { busy.delete('bonfire-send'); renderBonfire(); } }
   }
 
   function clearPrivate({ preserveDraft = false } = {}) {
@@ -1325,6 +1352,7 @@
     channelRequest += 1; busy.delete('channel-status'); busy.delete('channel-connect');
     model.fireside.rooms = []; model.fireside.selected = ''; model.fireside.messages = []; model.fireside.members = [];
     if (!preserveDraft) model.fireside.drafts.clear();
+    if (!preserveDraft) model.bonfire.sendRequest = null;
     model.fireside.deliveries = []; model.fireside.error = ''; model.fireside.messageError = ''; model.fireside.roomError = ''; model.fireside.status = 'idle'; model.fireside.refresh = {}; model.fireside.latestSeq = null;
     model.channel.status = 'unknown'; model.channel.detail = ''; model.channel.qr = ''; model.channel.wizard = false;
     Object.assign(model.bonfire, { messages: [], members: [], status: 'idle', error: '', memberError: '', sendError: '', sender: '', latestSeq: null, refresh: {}, mentionClosed: true });

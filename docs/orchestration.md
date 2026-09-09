@@ -4,6 +4,8 @@ Final results appear in their original conversation as Being's summary with coll
 
 Enable **Settings → 编排模式** after choosing a local workspace. Being refines requirements, delegates bounded tasks, waits for workers, and evaluates their results. The mode defaults to off and applies to every conversation on this Desktop. Toggling the switch detects available agents, saves the mode and configures enforcement immediately. A failed check restores the switch to its saved state. The switch cannot change while a local worker is executing; other Desktops keep their own modes. Dependent settings are disabled and greyed out when the mode is off.
 
+Delegation applies to local code, workspace investigation, files, commands, tests and browser operations. Being retains its native communication (including bonfire notices), memory, identity and self-management tools, including the native reads and HTTP calls needed for those capabilities, within the user's authorization and available tool schemas. Native HTTP cannot bypass local execution restrictions, and Being credentials must not be handed to a Worker. Mixed tasks delegate local steps and directly perform independent native steps. An unavailable Worker bridge blocks local execution only; chat and native capabilities remain available. Each message reports bridge readiness, while Worker dispatch and presentation still enforce the local bridge policy.
+
 ## Agent adapters
 
 - Codex CLI: `codex exec --json --sandbox workspace-write --skip-git-repo-check --color never -`. Detection checks the execution interface and `codex login status`. The selected workspace may be an ordinary directory rather than a Git repository; the workspace sandbox still applies. Prompts travel through stdin.

@@ -138,7 +138,7 @@ test('every text and multimodal request carries the desktop origin without chang
     const sent = JSON.parse(f.calls.at(-1).options.body);
     const text = sent.message || sent.content[0].text;
     assert.match(text, /消息来源：Being Desktop/);
-    assert.match(text, /当前 Portal：being-desktop/);
+    assert.match(text, /当前 Portal：未确认/);
     assert.match(text, /操作系统："Windows"/);
     assert.match(text, /主机名："CZ"/);
     assert.match(text, /place/);
@@ -164,12 +164,28 @@ test('orchestrator requests carry only their own delegation scope and block inco
   await f.context.fetch('/api/chat/stream',{method:'POST',body:JSON.stringify({message:'normal'})});
   assert.ok(!JSON.parse(f.calls.at(-1).options.body).message.includes(scope.sessionToken));
 });
+test('native tasks carry their authorization through orchestration even when the local bridge is unavailable',async()=>{
+  for(const body of [{message:'去篝火通知大家版本已发布'}, {content:[{type:'text',text:'读取自身状态与记忆'}]}]){
+    const f=fixture();
+    f.context.__beingDesktopOrchestration={enabled:true,sessionId:f.api.list().activeId,sessionToken:webcrypto.randomUUID(),agents:[]};
+    f.context.__beingDesktopEnvironment=async()=>desktopMessageContext({runtime:{mode:'orchestrator',bridge:{status:'disconnected',tools:[]},executionPolicy:{status:'blocked',scope:'desktop'}}});
+    await f.context.fetch('/api/chat/stream',{method:'POST',body:JSON.stringify(body)});
+    assert.equal(f.calls.length,1);
+    const sent=JSON.parse(f.calls[0].options.body),prompt=sent.message||sent.content[0].text;
+    assert.match(prompt,/原生通信（如篝火通知）/);assert.match(prompt,/不阻塞对话和原生能力/);
+    assert.match(prompt,/不得直接执行这些本机操作/);assert.match(prompt,/不得把 Being 凭据交给 Worker/);
+    assert.match(prompt,/disconnected/);assert.match(prompt,/"status":"blocked"/);
+    assert.doesNotMatch(prompt,/只负责澄清|Being 只澄清/);
+    if(body.content)assert.deepEqual(sent.content.slice(1),body.content);
+    else assert.ok(sent.message.endsWith(body.message));
+  }
+});
 
 test('Request inputs carry origin, while unrelated origins and Town sync remain untouched', async () => {
   const f = fixture();
   const url = 'https://fixture.invalid/api/chat/stream';
   await f.context.fetch(new Request(url, {method:'POST',body:JSON.stringify({message:'hello'})}));
-  assert.match(JSON.parse(f.calls.at(-1).options.body).message, /当前 Portal：being-desktop/);
+  assert.match(JSON.parse(f.calls.at(-1).options.body).message, /当前 Portal：未确认/);
   for (const [target, message] of [['https://other.invalid/api/chat/stream', 'hello'], [url, '[Being Desktop Town sync: fixture]']]) {
     const body = JSON.stringify({message});
     await f.context.fetch(target, {method:'POST',body});

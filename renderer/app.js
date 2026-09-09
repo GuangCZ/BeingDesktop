@@ -51,6 +51,7 @@ function portalSetupIdentity(value = state) {
 
 const connectionNames = { disconnected: '已断开', connecting: '连接中', connected: '已连接', error: '连接失败' };
 const portalNames = { not_configured: '未配置', stopped: '已停止', running: '运行中', external: '运行中（外部）', error: '状态异常' };
+const portalStatusLabel = portal => portal.status === 'external' && !portal.pid ? '已有部署（未运行）' : portalNames[portal.status] || '状态未知';
 const statusTone = (value) => ({ connected: 'good', healthy: 'good', ok: 'good', available: 'good', reachable: 'good', running: 'good', connecting: 'warning', external: 'warning', error: 'error', unhealthy: 'error', unavailable: 'error', unreachable: 'error' }[value] || 'unknown');
 const text = (id, value) => {
   const target = $(id);
@@ -259,12 +260,12 @@ function render() {
   setValue('settings-connection-status', label, statusTone(connection.status));
   $('settings-current-connection').hidden = !connection.configured;
   text('settings-connection-url', connection.displayUrl);
-  setValue('settings-portal-status', portalNames[portal.status] || '状态未知', statusTone(portal.status));
-  text('portal-executable', str(portal.executable, '尚未选择'));
-  text('portal-config', str(portal.configPath, '尚未选择'));
-  setValue('portal-process-detail', `${portalNames[portal.status] || '状态未知'}${portal.pid ? ` · PID ${portal.pid}` : ''}`, statusTone(portal.status));
+  setValue('settings-portal-status', portalStatusLabel(portal), statusTone(portal.status));
+  text('portal-executable', str(portal.management === 'external' ? portal.observedExecutable || portal.deployment?.executable : portal.executable, '尚未确认'));
+  text('portal-config', str(portal.management === 'external' ? portal.deployment?.configPath : portal.configPath, '尚未确认'));
+  setValue('portal-process-detail', `${portalStatusLabel(portal)}${portal.pid ? ` · PID ${portal.pid}` : ''}`, statusTone(portal.status));
   setValue('portal-health-detail', portal.connectionCurrent === false ? '仍连接之前的 Being' : healthLabel(portal.health), portal.connectionCurrent === false ? 'warning' : statusTone(portal.health));
-  text('portal-owner-detail', portal.owned ? '此 Portal 由桌面应用启动，可以在这里停止。' : portal.status === 'external' ? '检测到其他方式启动的 Portal。请在原启动位置管理该进程。' : '应用只管理自己启动的 Portal 进程。');
+  text('portal-owner-detail', portal.owned ? '此 Portal 由桌面应用启动，可以在这里停止。' : portal.status === 'external' ? '沿用已有 Portal 部署，请在原启动位置管理。' : '应用只管理自己启动的 Portal 进程。');
   text('portal-detail', str(portal.detail));
   $('portal-detail').hidden = !portal.detail;
   text('portal-observed-path', portal.status === 'external' && portal.observedExecutable ? `程序位置：${portal.observedExecutable}` : '');
@@ -394,9 +395,9 @@ function renderInspector() {
   const connectionError = str(connection.error) || str(runtime.error);
   text('inspector-connection-error', connectionError);
   $('inspector-connection-error').hidden = !connectionError;
-  setValue('inspector-portal', portalNames[portal.status] || '状态未知', portal.status === 'running' ? 'good' : statusTone(portal.status));
+  setValue('inspector-portal', portalStatusLabel(portal), portal.status === 'running' ? 'good' : statusTone(portal.status));
   setValue('inspector-health', healthLabel(portal.health), statusTone(portal.health));
-  text('inspector-portal-note', portal.status === 'running' ? `进程${portal.pid ? ` ${portal.pid}` : ''}由桌面管理。工具连接以健康状态为准。` : portal.status === 'external' ? '已有外部进程，桌面应用不会接管其启停。' : portal.detail || '选择 Portal 程序与配置后，可以在此管理。');
+  text('inspector-portal-note', portal.status === 'running' ? `进程${portal.pid ? ` ${portal.pid}` : ''}由桌面管理。工具连接以健康状态为准。` : portal.status === 'external' ? '已有外部部署，桌面应用不会接管其启停。' : portal.detail || '选择 Portal 程序与配置后，可以在此管理。');
   text('inspector-model', runtime.configStatus === 'connected' ? str(runtime.model, '未提供模型名称') : runtime.configStatus === 'error' ? '配置读取失败' : '当前配置未知');
   text('inspector-provider', runtime.configStatus === 'connected' ? str(runtime.provider, '未提供') : '未知');
   setValue('inspector-proxy', proxyLabel(state.localProxy.status), statusTone(state.localProxy.status));
@@ -496,12 +497,12 @@ function renderButtons() {
   const portalBusy = pending.has('startPortal') || pending.has('stopPortal') || pending.has('deployPortal') || state.townApp?.portalInstall?.status === 'installing';
   $('test-portal-connection').disabled = portalBusy || pending.has('testPortalConnection');
   text('test-portal-connection', pending.has('testPortalConnection') ? '自测中…' : '连接自测');
-  $('start-portal').disabled = portalBusy || state.portal.owned || !state.portal.executable || !state.portal.configPath || ['running', 'external'].includes(state.portal.status);
+  $('start-portal').disabled = portalBusy || state.portal.management === 'external' || state.portal.owned || !state.portal.executable || !state.portal.configPath || ['running', 'external'].includes(state.portal.status);
   $('stop-portal').disabled = portalBusy || !state.portal.owned || !state.portal.pid;
   text('start-portal', pending.has('startPortal') ? '启动中…' : '启动');
   text('stop-portal', pending.has('stopPortal') ? '停止中…' : '停止');
-  $('select-portal-executable').disabled = portalBusy || state.portal.owned;
-  $('select-portal-config').disabled = portalBusy || state.portal.owned;
+  $('select-portal-executable').disabled = portalBusy || state.portal.owned || (state.portal.management === 'external' || state.portal.status === 'external');
+  $('select-portal-config').disabled = portalBusy || state.portal.owned || (state.portal.management === 'external' || state.portal.status === 'external');
   renderPortalSetup();
   $('close-to-tray').disabled = pending.has('setCloseToTray');
   $('export-diagnostics').disabled = pending.has('exportDiagnostics');
@@ -521,18 +522,19 @@ function renderPortalSetup() {
   const existing = Boolean(portal.executable || portal.configPath);
   const running = portal.owned || portal.status === 'running';
   const failed = portalSetup.status === 'error' || installation.status === 'error';
-  const workspace = state.workspace.path || state.townApp?.portalWorkspace?.path || '';
+  const workspace = state.townApp?.portalWorkspace?.path || '';
+  const readOnly = state.townApp?.portalWorkspace?.readOnly || portal.status === 'external';
   const phases = { checking: '正在检查安装包…', download: '正在下载官方程序…', hash: '正在校验文件…', install: '正在安装程序…', starting: '正在连接 Being…' };
   button.hidden = (existing || portal.status === 'external') && !busy && !failed;
   button.disabled = busy || !connected || running || portal.status === 'external' || state.townApp?.platformSupported === false || !workspace || pending.has('startPortal') || pending.has('stopPortal');
   button.textContent = busy ? '连接中…' : failed ? '重试' : '连接';
   $('portal-settings').setAttribute('aria-busy', String(busy));
-  $('portal-setup-workspace').closest('.path-setting').hidden = portal.status === 'external';
+  $('portal-setup-workspace').closest('.path-setting').hidden = false;
   $('portal-setup-workspace-note').closest('details').hidden = portal.status === 'external';
   document.querySelector('.portal-setup-heading h4').textContent = portal.status === 'external' ? '已有 Portal' : '连接这台电脑';
-  text('portal-setup-workspace', workspace || '正在读取默认文件夹…');
-  text('portal-setup-workspace-note', state.workspace.path ? '使用当前工作区；已有 Portal 的实际目录以其配置为准。' : '点击一键配置时自动创建此文件夹，也可选择已有工作区。');
-  $('portal-setup-choose-workspace').disabled = busy || running || pending.has('selectWorkspace');
+  text('portal-setup-workspace', workspace || (readOnly ? '尚未确认，请核对原配置' : '正在读取默认文件夹…'));
+  text('portal-setup-workspace-note', readOnly ? '沿用已部署 Portal 的工作区，Desktop 项目选择独立保存。' : '部署时创建专用工作区；与 Desktop 项目目录分别保存。');
+  $('portal-setup-choose-workspace').disabled = busy || running || readOnly || pending.has('selectPortalWorkspace');
   const progress = $('portal-setup-progress');
   progress.hidden = !busy;
   if (busy && installation.phase === 'download' && Number.isFinite(installation.totalBytes) && installation.totalBytes > 0) {
@@ -541,7 +543,7 @@ function renderPortalSetup() {
   } else progress.removeAttribute('value');
   let detail;
   if (busy) detail = phases[installation.phase] || '正在准备工作区和 Portal 配置…';
-  else if (portal.status === 'external') detail = '已检测到外部 Portal，工作区与权限沿用其原有配置，请在原启动位置管理。';
+  else if (portal.status === 'external') detail = portal.pid ? '已检测到外部 Portal，工作区与权限沿用其原有配置，请在原启动位置管理。' : '已有 Portal 部署当前未运行；沿用原配置，请由原启动方式恢复。';
   else if (!connected) detail = '先连接 Being，等待会话加载完成。';
   else if (state.townApp?.platformSupported === false) detail = '当前平台暂无已校验的 Portal 安装包。';
   else if (running && portal.connectionCurrent === false) detail = `Portal 仍连接 ${portal.connectionBeingName || '之前的 Being'}。先停止 Portal，再启动以连接当前 Being。`;
@@ -1269,7 +1271,7 @@ $('select-portal-executable').addEventListener('click', () => { void perform('se
 $('select-portal-config').addEventListener('click', () => { void perform('selectPortalConfig'); });
 $('portal-setup').addEventListener('click', () => { void setupPortal(); });
 $('portal-setup-assist').addEventListener('click', () => { void askBeingAboutPortal(); });
-$('portal-setup-choose-workspace').addEventListener('click', () => { void perform('selectWorkspace'); });
+$('portal-setup-choose-workspace').addEventListener('click', () => { void perform('selectPortalWorkspace'); });
 $('start-portal').addEventListener('click', () => { void perform('startPortal'); });
 $('test-portal-connection').addEventListener('click', async () => {
   if (pending.has('testPortalConnection')) return;
@@ -1497,7 +1499,7 @@ function updateTaskBadge(value) {
 }
 if(bridge?.onFeatureTasks)bridge.onFeatureTasks(updateTaskBadge);
 if(bridge?.getFeatureTasks)void bridge.getFeatureTasks().then(updateTaskBadge).catch(()=>{});
-window.beingTownApp?.init({bridge,onNavigateChat:()=>changePage('chat'),onSelectWorkspace:()=>selectWorkspace(),onNavigateSettings:()=>changePage('settings'),onBack:()=>changePage('town'),onTasks:openFeatureTasks,onBonfireSent:result=>window.beingOnboarding?.onBonfireSent(result)});
+window.beingTownApp?.init({bridge,onNavigateChat:()=>changePage('chat'),onSelectPortalWorkspace:()=>perform('selectPortalWorkspace'),onNavigateSettings:()=>changePage('settings'),onBack:()=>changePage('town'),onTasks:openFeatureTasks,onBonfireSent:result=>window.beingOnboarding?.onBonfireSent(result)});
 window.beingTools?.init({bridge,onOpen:()=>toggleInspector(false),onLayout:scheduleView,onSelectWorkspace:()=>selectWorkspace()});
 window.beingOnboarding?.init({bridge,onState:acceptState,onLayout:scheduleView,onOpen:()=>window.beingTools?.hide(),onChat:()=>changePage('chat'),onChannel:()=>openTownModule('channel'),onGrove:()=>openTownModule('grove'),onBonfire:()=>{selectedTownFeature='bonfire';changePage('town-app');void window.beingTownApp?.startOnboardingGreeting();},onComplete:()=>showToast('问候已送达篝火，新手引导完成。欢迎来到 Town！'),onPortalSettings:()=>{changePage('settings');scrollWithinPage($('page-settings'),$('portal-settings'));},onError:message=>showToast(message,true)});
 render();

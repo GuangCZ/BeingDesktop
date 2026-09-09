@@ -35,7 +35,7 @@ api.onToolsState=callback=>{
   ipcRenderer.on('being:tools-state',listener);
   return ()=>ipcRenderer.removeListener('being:tools-state',listener);
 };
-for (const name of ['getPortalPermissions','savePortalPermissions','getState','refresh','getTownCatalog','openTownPage','prepareTownFeature','prepareTownAssistance','prepareFiresideDraft','getTownAppState','refreshTownApp','getGroveCatalog','getGroveDetail','prepareGroveInstallation','beginChannelConnection','updateFeishuCredentials','checkChannelStatus','getFiresides','getFiresideMessages','getFiresideMembers','sendFiresideMessage','createFireside','joinFireside','deployPortal','connect','disconnect','reconnect','selectWorkspace','openWorkspace','listWorkspace','selectPortalExecutable','selectPortalConfig','startPortal','stopPortal','testPortalConnection','setView','minimize','maximize','close','setCloseToTray','setTypography','exportDiagnostics']) {
+for (const name of ['getPortalPermissions','savePortalPermissions','getState','refresh','getTownCatalog','openTownPage','prepareTownFeature','prepareTownAssistance','prepareFiresideDraft','getTownAppState','refreshTownApp','getGroveCatalog','getGroveDetail','prepareGroveInstallation','beginChannelConnection','updateFeishuCredentials','checkChannelStatus','getFiresides','getFiresideMessages','getFiresideMembers','sendFiresideMessage','createFireside','joinFireside','deployPortal','connect','disconnect','reconnect','selectWorkspace','selectPortalWorkspace','openWorkspace','listWorkspace','selectPortalExecutable','selectPortalConfig','startPortal','stopPortal','testPortalConnection','setView','minimize','maximize','close','setCloseToTray','setTypography','exportDiagnostics']) {
   api[name] = (...args) => ipcRenderer.invoke(`being:${name}`, ...args);
 }
 // Electron strips custom Error fields. Preserve only known Town error categories.
@@ -43,7 +43,8 @@ const townErrorCodes=new Set(['AUTH_REQUIRED','INVALID_REQUEST','IDENTITY_MISMAT
 townErrorCodes.add('TOWN_TOOL_NOT_CALLED');
 townErrorCodes.add('RESULT_SOURCE_NOT_CONFIGURED');
 townErrorCodes.add('READINESS_UNKNOWN');townErrorCodes.add('RESULT_UNCONFIRMED');
-for(const name of ['getTownCachedData','listScrolls','getScroll','listBeings','getBeingMembers','getBonfireMessages','getFiresides','getFiresideMessages','getFiresideMembers','getTownMessageSnapshot','refreshTownMessages','requestTownRead','sendBonfireMessage','beginChannelConnection','updateFeishuCredentials','checkChannelStatus']) {
+townErrorCodes.add('NOT_SENT');
+for(const name of ['getTownCachedData','listScrolls','getScroll','listBeings','getBeingMembers','getBonfireMessages','getFiresides','getFiresideMessages','getFiresideMembers','getTownMessageSnapshot','refreshTownMessages','requestTownRead','sendBonfireMessage','sendFiresideMessage','beginChannelConnection','updateFeishuCredentials','checkChannelStatus']) {
   api[name]=async(...args)=>{
     const result=await ipcRenderer.invoke(`being:${name}`,...args);
     if(result?.__townError===true) {

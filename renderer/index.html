@@ -327,8 +327,8 @@
               <label class="switch-row" for="close-to-tray"><span><strong>关闭窗口后保留在托盘</strong><span class="field-help">退出应用可在托盘菜单中操作。</span></span><input type="checkbox" id="close-to-tray" role="switch"><span class="switch-track" aria-hidden="true"></span></label>
             </section>
             <section class="settings-card" id="orchestration-settings" data-mode-disabled="true">
-              <div class="card-heading"><div><h3>Orchestrator 模式</h3><p class="field-help">Being 细化需求、拆分任务和验收结果，由外部 Agent 执行。</p></div></div>
-              <label class="switch-row" for="orchestration-enabled"><span><strong>让 Being 专职编排</strong><span class="field-help">自动检测并保存。本机工具桥仅允许 Worker 调度；没有可用 CLI 时不执行本机任务。</span></span><input type="checkbox" id="orchestration-enabled" role="switch" aria-describedby="orchestration-status"><span class="switch-track" aria-hidden="true"></span></label>
+              <div class="card-heading"><div><h3>Orchestrator 模式</h3><p class="field-help">本机任务由外部 Agent 执行，Being 负责协调和验收；原生通信、记忆等能力仍可直接使用。</p></div></div>
+              <label class="switch-row" for="orchestration-enabled"><span><strong>编排本机执行任务</strong><span class="field-help">自动检测并保存。没有可用 Worker 时暂停本机执行，对话与原生能力可继续。</span></span><input type="checkbox" id="orchestration-enabled" role="switch" aria-describedby="orchestration-status"><span class="switch-track" aria-hidden="true"></span></label>
               <p id="orchestration-status" class="field-help orchestration-feedback" role="status" aria-live="polite">开启时会检测本机 Agent 与 Desktop 工具绑定。</p>
               <label class="worker-default-label" for="orchestration-default">默认 Worker</label>
               <select id="orchestration-default"><option value="codex">Codex CLI</option><option value="cursor">Cursor CLI</option><option value="grok">Grok Build CLI</option></select>

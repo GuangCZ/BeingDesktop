@@ -441,4 +441,4 @@ class BeingTownReader {
   }
 }
 
-module.exports = {BeingTownReader, validateTownToolResult: validTown};
+module.exports = {BeingTownReader, validateTownToolResult: validTown, consumeTownEvents: consume, parseTownJson: jsonText, sameTownUrl: sameUrl};

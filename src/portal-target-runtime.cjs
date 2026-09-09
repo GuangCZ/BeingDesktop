@@ -5,7 +5,7 @@ const {createHash}=require('node:crypto');
 
 // Install the bundled target-aware runtime without replacing a running executable.
 async function prepareTargetRuntime({resourcesPath,userData,settings}) {
-  if (!settings.portalExecutable || !settings.portalConfig) return false;
+  if (!settings.portalExecutable || !settings.portalConfig || settings.managedPortal?.executable !== settings.portalExecutable || settings.managedPortal?.configPath !== settings.portalConfig) return false;
   const directory=path.join(resourcesPath,'portal-target-binding');
   let manifest;
   try { manifest=JSON.parse(await fs.readFile(path.join(directory,'manifest.json'),'utf8')); }

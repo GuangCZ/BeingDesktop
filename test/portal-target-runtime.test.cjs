@@ -15,7 +15,7 @@ test('bundled runtime is verified and staged without replacing the previous exec
   await fs.writeFile(path.join(directory,'heart-portal.exe'),bytes);
   await fs.writeFile(path.join(directory,'manifest.json'),JSON.stringify({sha256:createHash('sha256').update(bytes).digest('hex')}));
   const original=path.join(root,'old.exe');await fs.writeFile(original,'original');
-  const settings={portalExecutable:original,portalConfig:'existing.toml',credential:'unchanged',managedPortal:{executable:original,permissions:{file:true}}};
+  const settings={portalExecutable:original,portalConfig:'existing.toml',credential:'unchanged',managedPortal:{executable:original,configPath:'existing.toml',permissions:{file:true}}};
   assert.equal(await prepareTargetRuntime({resourcesPath,userData,settings}),true);
   assert.equal(await fs.readFile(original,'utf8'),'original');
   assert.equal(settings.portalConfig,'existing.toml');assert.equal(settings.credential,'unchanged');
@@ -24,4 +24,11 @@ test('bundled runtime is verified and staged without replacing the previous exec
   assert.equal(await prepareTargetRuntime({resourcesPath,userData,settings}),false);
   await fs.writeFile(path.join(directory,'heart-portal.exe'),'tampered');
   await assert.rejects(prepareTargetRuntime({resourcesPath,userData,settings}),/integrity/);
+});
+
+test('external configuration never triggers bundled runtime migration',async()=>{
+  const settings={portalExecutable:'/existing/heart-portal',portalConfig:'/existing/portal.toml'};
+  const before=structuredClone(settings);
+  assert.equal(await prepareTargetRuntime({resourcesPath:'/not-read',userData:'/not-written',settings}),false);
+  assert.deepEqual(settings,before);
 });

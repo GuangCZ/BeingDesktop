@@ -101,12 +101,14 @@ async function inspectMacProcesses(execImpl = execFileAsync) {
 }
 
 class PortalService {
-  constructor({ onEvent = () => {}, workspace = '', spawnImpl = spawn, inspectProcesses, platform = process.platform, readExternalVersion = async () => '', now = Date.now } = {}) {
+  constructor({ onEvent = () => {}, workspace = '', spawnImpl = spawn, inspectProcesses, platform = process.platform, readExternalVersion = async () => '', discoverDeployment = async () => null, now = Date.now } = {}) {
     this.onEvent = onEvent;
     this.workspace = workspace;
     this.spawnImpl = spawnImpl;
     this.platform = platform;
     this.readExternalVersion = readExternalVersion;
+    this.discoverDeployment = discoverDeployment;
+    this._externalSeen = false;
     this.now = now;
     this._externalVersionCache = null;
     this.inspectProcesses = inspectProcesses || (platform === 'win32' ? inspectWindowsProcesses : platform === 'darwin' ? inspectMacProcesses : async () => { throw new Error('当前平台不支持 Portal 进程识别。'); });
@@ -121,10 +123,11 @@ class PortalService {
     this._lifecycleVersion = 0;
   }
 
-  get state() { return { ...this._state }; }
+  get state() { return { ...this._state, ...(this._state.deployment ? {deployment:{...this._state.deployment}} : {}) }; }
   get logs() { return this._logs.map((item) => ({ ...item })); }
 
   configure({ executable, configPath } = {}) {
+    if (this._externalSeen) throw new Error('已有 Portal 优先，请在原部署位置管理其配置。');
     if (this._child || this._startPromise) throw new Error('请先停止由桌面端启动的 Portal，再修改配置路径。');
     for (const [key, value] of Object.entries({ executable, configPath })) {
       if (value === undefined) continue;
@@ -153,6 +156,10 @@ class PortalService {
       if (this._child || lifecycleVersion !== this._lifecycleVersion) return this.state;
       const configured = this._state.executable.toLowerCase();
       const existing = processes.find((item) => Number.isInteger(item.pid) && item.pid > 0 && (PORTAL_NAME.test(item.name || '') || (configured && String(item.executable || '').toLowerCase() === configured)));
+      const deployment = await this.discoverDeployment({observedExecutable:existing?.executable || ''});
+      if (this._child || lifecycleVersion !== this._lifecycleVersion) return this.state;
+      if (existing || deployment) this._externalSeen = true;
+      this._state = {...this._state, management:this._externalSeen ? 'external' : 'desktop', deployment:deployment || null};
       if (existing) {
         const observedExecutable = typeof existing.executable === 'string' && path.isAbsolute(existing.executable) && !/[\x00-\x1f\x7f]/.test(existing.executable) ? existing.executable : '';
         const key = `${existing.pid}:${observedExecutable}`;
@@ -174,7 +181,7 @@ class PortalService {
         this._state = { ...this._state, status: 'external', health: 'unknown', pid: existing.pid, owned: false, observedExecutable, observedVersion:observation.version, observedAt:new Date(this.now()).toISOString(), detail: '检测到已有 Portal。桌面端不会重复启动或停止它；中继连接尚未验证。' };
       } else {
         this._externalVersionCache = null;
-        this._state = { ...this._state, observedExecutable:'',observedVersion:'',observedAt:null, status: this._configured ? 'stopped' : 'not_configured', health: 'unknown', pid: null, owned: false, detail: '' };
+        this._state = { ...this._state, observedExecutable:'',observedVersion:'',observedAt:null, status: this._externalSeen ? 'external' : this._configured ? 'stopped' : 'not_configured', health: 'unknown', pid: null, owned: false, detail: this._externalSeen ? '已有 Portal 部署当前未运行；沿用原配置，由原启动方式恢复。Desktop 不会另起实例。' : '' };
       }
     } catch {
       if (this._child || lifecycleVersion !== this._lifecycleVersion) return this.state;
@@ -213,6 +220,9 @@ class PortalService {
     if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) || url.username || url.password) throw new Error('Portal 需要 HTTPS Loom 地址或本机 HTTP 地址。');
     if (typeof portalName !== 'string' || !/^[a-zA-Z0-9._-]{1,64}$/.test(portalName)) throw new Error('Portal 名称无效。');
     if (coworkToken !== undefined && (typeof coworkToken !== 'string' || !/^[a-f0-9]{64}$/.test(coworkToken))) throw new Error('Portal 本机接口凭据无效。');
+    await this.inspect();
+    if (this._state.status === 'external') return this.state;
+    if (this._state.status === 'error') throw new Error(this._state.detail);
     await this._validatePaths();
     this._secrets.push(String(connectUrl));
     if (coworkToken) this._secrets.push(coworkToken);

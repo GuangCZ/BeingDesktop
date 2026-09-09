@@ -116,9 +116,9 @@ function channelDto(value, channel) {
 }
 
 class TownSession {
-  constructor({getContext, fetchImpl = globalThis.fetch, readImpl = null, onChange = () => {}} = {}) {
+  constructor({getContext, fetchImpl = globalThis.fetch, readImpl = null, writeImpl = null, onChange = () => {}} = {}) {
     if (typeof getContext !== 'function' || typeof fetchImpl !== 'function' || readImpl !== null && typeof readImpl !== 'function') throw new Error('Town 会话配置无效。');
-    Object.assign(this, {getContext, fetchImpl, readImpl, onChange});
+    Object.assign(this, {getContext, fetchImpl, readImpl, writeImpl, onChange});
     this._epoch = 0;
     this._requests = new Set();
     this._mutations = new Set();
@@ -361,9 +361,21 @@ class TownSession {
   }
 
   async sendBonfireMessage(value) {
-    plainRequest(value, ['content', 'mentions', 'connectionRevision']);
+    plainRequest(value, ['content', 'mentions', 'connectionRevision', 'requestId'], ['content', 'mentions', 'connectionRevision']);
     if (typeof value.content !== 'string' || !value.content.trim() || value.content.length > 4000 || /[\x00]/.test(value.content) || !Array.isArray(value.mentions) || value.mentions.length > 20 || value.mentions.some(id => typeof id !== 'string' || !ID.test(id)) || !sequence(value.connectionRevision)) throw failure('INVALID_REQUEST', '请输入 1–4000 字的篝火消息，并选择有效成员。');
     const expected = this._context(undefined, value.connectionRevision);
+    if (this.writeImpl) {
+      // Preserve the selected @mentions while routing writes through Being.
+      const mentions = [...new Set(value.mentions)];
+      const {members} = mentions.length ? await this.getMembers() : {members: []};
+      this._context(expected);
+      if (mentions.some(id => !members.some(member => member.id === id))) throw failure('INVALID_REQUEST', '所选 Being 已不在成员目录，请重新选择。');
+      const missing = mentions.filter(id => !new RegExp(`(^|\\s)@${id}(?=$|[^A-Za-z0-9_-])`).test(value.content));
+      const content = (missing.length ? missing.map(id => `@${id}`).join(' ') + '\n' : '') + value.content;
+      const result = await this.writeImpl({kind: 'bonfire', content, connectionRevision: value.connectionRevision, ...(value.requestId ? {requestId: value.requestId} : {})});
+      this._context(expected);
+      return result;
+    }
     return this._mutate('bonfire', expected, async () => {
       const mentions = [...new Set(value.mentions)];
       const {members} = mentions.length ? await this.getMembers() : {members: []};

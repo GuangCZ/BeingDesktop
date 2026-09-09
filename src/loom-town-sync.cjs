@@ -9,7 +9,7 @@ const MAX_RECORDS = 256;
 function normalizeTownSyncRecords(value) {
   if (!Array.isArray(value)) return [];
   const result = new Map(), conflicts = new Set();
-  const routes = new Set(['/api/bonfire/hear', '/api/bonfire/mentions', '/api/fireside/list', '/api/fireside/members', '/api/fireside/hear']);
+  const routes = new Set(['/api/bonfire/hear', '/api/bonfire/mentions', '/api/bonfire/speak', '/api/fireside/speak', '/api/fireside/list', '/api/fireside/members', '/api/fireside/hear']);
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   for (let index = Math.max(0, value.length - MAX_RECORDS); index < value.length; index++) {
     const item = Object.getOwnPropertyDescriptor(value, index)?.value;

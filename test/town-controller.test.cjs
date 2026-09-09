@@ -31,7 +31,7 @@ async function harness(t, overrides = {}) {
   const calls = [];
   const context = {
     configured: true, connected: true, exiting: false,
-    workspace, portalExecutable: '', portalConfig: '', beingName: 'fixture-being',
+    workspace, portalWorkspace: workspace, portalExecutable: '', portalConfig: '', beingName: 'fixture-being',
     connectionId: 'private-identity-fixture', credential: 'private-credential-fixture',
     ...overrides.context,
   };
@@ -65,7 +65,7 @@ async function harness(t, overrides = {}) {
       calls.push('save');
       h.saved = { ...value };
       assert.equal((await fs.stat(value.configPath)).isFile(), true);
-      Object.assign(context, { workspace: value.workspace, portalExecutable: value.executable, portalConfig: value.configPath, managedPortal: { ...value } });
+      Object.assign(context, { portalWorkspace: value.workspace, portalExecutable: value.executable, portalConfig: value.configPath, managedPortal: { ...value } });
       if (overrides.save) await overrides.save(h, value);
     },
     async startPortal() {
@@ -149,23 +149,24 @@ test('unconfigured, disconnected, and exiting contexts cannot begin deployment',
 
 test('missing real workspace fails before any download or persistence', async t => {
   const h = await harness(t);
-  h.context.workspace = path.join(h.root, 'does-not-exist');
+  h.context.portalWorkspace = path.join(h.root, 'does-not-exist');
   await assert.rejects(h.controller.deploy(confirmation()), /工作区/);
   assert.deepEqual(h.calls, ['portal.inspect']);
-  assert.equal(await fs.stat(h.context.workspace).then(() => true, () => false), false);
+  assert.equal(await fs.stat(h.context.portalWorkspace).then(() => true, () => false), false);
 });
 
 test('one-click configuration previews and creates a dedicated default workspace, then reuses it', async t => {
-  const h = await harness(t, { context: { workspace: '' } });
-  assert.deepEqual(h.controller.state().portalWorkspace, { path: h.defaultWorkspace, automatic: true });
+  const h = await harness(t, { context: { portalWorkspace: '' } });
+  assert.deepEqual(h.controller.state().portalWorkspace, { path: h.defaultWorkspace, automatic: true, readOnly: false, source: 'new_portal' });
   await assert.rejects(fs.stat(h.defaultWorkspace), { code: 'ENOENT' });
   await assert.rejects(h.controller.deploy({ confirmed: false }), /确认/);
   await assert.rejects(fs.stat(h.defaultWorkspace), { code: 'ENOENT' });
   assert.equal((await h.controller.deploy(confirmation())).status, 'running');
   const realWorkspace = await fs.realpath(h.defaultWorkspace);
-  assert.equal(h.context.workspace, realWorkspace);
+  assert.equal(h.context.portalWorkspace, realWorkspace);
+  assert.equal(h.context.workspace, h.workspace);
   assert.equal(h.saved.workspace, realWorkspace);
-  assert.deepEqual(h.controller.state().portalWorkspace, { path: realWorkspace, automatic: false });
+  assert.deepEqual(h.controller.state().portalWorkspace, { path: realWorkspace, automatic: false, readOnly: true, source: 'managed_portal' });
   assert.equal(JSON.parse(/^workspace = (.+)$/m.exec(await fs.readFile(h.saved.configPath, 'utf8'))[1]), realWorkspace);
   assert.deepEqual(await fs.readdir(realWorkspace), []);
   const saved = { ...h.saved };
@@ -185,7 +186,7 @@ test('an owned Portal for a previous identity is preserved without reporting it 
 });
 
 test('identity changes while inspecting processes prevent workspace creation and installation', async t => {
-  const h = await harness(t, { context: { workspace: '', identityRevision: 1 }, inspectPortal(h) { h.context.identityRevision++; } });
+  const h = await harness(t, { context: { portalWorkspace: '', identityRevision: 1 }, inspectPortal(h) { h.context.identityRevision++; } });
   await assert.rejects(h.controller.deploy(confirmation()), /变化/);
   assert.deepEqual(h.calls, ['portal.inspect']);
   await assert.rejects(fs.stat(h.defaultWorkspace), { code: 'ENOENT' });
@@ -319,7 +320,7 @@ test('identity, workspace, or selected paths changing during download leave the 
   for (const change of [h => { h.context.connectionId = 'new-identity'; },
     h => { h.context.identityRevision = 2; }, h => { h.context.beingName = 'different-being'; },
     h => { h.context.portalExecutable = 'different-program'; }, h => { h.context.portalConfig = 'different-config'; },
-    h => { h.context.workspace = path.join(h.root, 'other-workspace'); }, h => { h.context.exiting = true; }]) {
+    h => { h.context.portalWorkspace = path.join(h.root, 'other-workspace'); }, h => { h.context.exiting = true; }]) {
     const h = await harness(t, { install(h) { change(h); return { ...h.installation }; } });
     await assert.rejects(h.controller.deploy(confirmation()), /变化/);
     assert.equal(h.calls.includes('save'), false);
@@ -338,7 +339,7 @@ test('loss of connected or configured state during download prevents saving and 
 });
 
 test('identity and workspace are checked again after asynchronous persistence before start', async t => {
-  for (const field of ['connectionId', 'identityRevision', 'beingName', 'workspace', 'portalExecutable', 'portalConfig']) {
+  for (const field of ['connectionId', 'identityRevision', 'beingName', 'portalWorkspace', 'portalExecutable', 'portalConfig']) {
     const h = await harness(t, { save(h) { h.context[field] = 'changed-during-save'; } });
     await assert.rejects(h.controller.deploy(confirmation()));
     assert.equal(h.calls.includes('start'), false);
@@ -430,4 +431,26 @@ test('a refresh started before deployment cannot overwrite its completed state w
 
 test('Town identity-gated actions remain unavailable without a confirmed desktop authorization flow', () => {
   assert.throws(requireTownIdentity, /尚未提供已确认的桌面身份授权入口/);
+});
+
+test('Desktop project changes never replace a deployed Portal workspace or config', async t => {
+  const h = await harness(t);
+  await h.controller.deploy(confirmation());
+  const before = await fs.readFile(h.saved.configPath, 'utf8');
+  h.context.workspace = '/another-desktop-project';
+  h.calls.length = 0;
+  assert.equal(h.controller.state().portalWorkspace.path, h.saved.workspace);
+  assert.equal((await h.controller.deploy(confirmation())).status, 'running');
+  assert.equal(await fs.readFile(h.saved.configPath, 'utf8'), before);
+  assert.deepEqual(h.calls, ['portal.inspect', 'installer.inspect', 'start']);
+});
+
+test('external configuration is authoritative even while the process is stopped', async t => {
+  const h = await harness(t, {portalState:{status:'external',pid:null,management:'external',deployment:{workspace:'/'}}});
+  assert.equal(h.controller.state().portalWorkspace.path, '/');
+  assert.equal(h.controller.state().portalWorkspace.readOnly, true);
+  await h.controller.deploy(confirmation());
+  assert.deepEqual(h.calls, ['portal.inspect']);
+  h.portalState.deployment.workspace = '';
+  assert.equal(h.controller.state().portalWorkspace.path, '');
 });

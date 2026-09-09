@@ -156,8 +156,8 @@ if (!process.versions.electron) {
     handle('listWorkspace', () => ({files: []}));
     handle('setView', () => ({}));
     handle('setBrowserView', () => ({}));
-    handle('selectWorkspace', () => {
-      fixtureState.workspace.path = selectedWorkspace;
+    handle('selectPortalWorkspace', () => {
+      fixtureState.townApp.portalWorkspace.path = selectedWorkspace;
       return fixtureState;
     });
     handle('deployPortal', value => {
@@ -211,7 +211,7 @@ if (!process.versions.electron) {
     await capture('01-default-workspace-1440');
     await click('#portal-setup-choose-workspace');
     await domWait(`document.getElementById('portal-setup-workspace').textContent===${JSON.stringify(selectedWorkspace)}`);
-    check('workspace-picker-uses-real-preload-ipc', calls('selectWorkspace').length === 1);
+    check('workspace-picker-uses-real-preload-ipc', calls('selectPortalWorkspace').length === 1 && fixtureState.workspace.path === '');
     check('choosing-workspace-keeps-portal-settings-open', await execute("document.body.dataset.page==='settings'"));
 
     await click('#portal-setup');
@@ -282,6 +282,15 @@ if (!process.versions.electron) {
     fixtureState.portal={...ownedPortal,status:'external',owned:false,health:'unknown',pid:37109};
     await publish();
     check('external-portal-explains-log-source-and-disables-start',await execute("document.getElementById('portal-log-output').textContent.includes('原启动位置')&&!document.getElementById('portal-log-output').textContent.includes('line 0')&&document.getElementById('start-portal').disabled&&document.getElementById('stop-portal').disabled"));
+    const previousPortalWorkspace = structuredClone(fixtureState.townApp.portalWorkspace);
+    fixtureState.portal.management='external';
+    fixtureState.portal.pid=null;
+    fixtureState.townApp.portalWorkspace={path:'/',readOnly:true,source:'existing_portal'};
+    fixtureState.workspace.path='/Desktop/projects';
+    await publish();
+    check('existing-portal-workspace-remains-visible-and-readonly-when-stopped',await execute("document.getElementById('settings-portal-status').textContent.includes('未运行')&&document.getElementById('portal-setup-workspace').textContent==='/'&&!document.getElementById('portal-setup-workspace').closest('.path-setting').hidden&&document.getElementById('portal-setup-choose-workspace').disabled&&document.getElementById('select-portal-config').disabled&&document.getElementById('start-portal').disabled"));
+    await capture('existing-portal-priority');
+    fixtureState.townApp.portalWorkspace=previousPortalWorkspace;
     fixtureState.portal=ownedPortal;
     await publish();
     fixtureState.portal.connectionBeingName = 'previous_being';

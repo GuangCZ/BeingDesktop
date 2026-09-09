@@ -40,12 +40,14 @@ class TownController {
 
   state() {
     const context = this.getContext();
+    const external = this.portal.state.status === 'external' || this.portal.state.management === 'external';
+    const managed = context.managedPortal?.executable === context.portalExecutable && context.managedPortal?.configPath === context.portalConfig ? context.managedPortal : null;
     return {
       identity:{beingId:context.beingName || '',displayName:context.beingName || 'Being',sendAs:'being',connectionRevision:Number.isSafeInteger(context.connectionId) && context.connectionId>=0?context.connectionId:null,identityRevision:Number.isSafeInteger(context.identityRevision) && context.identityRevision>=0?context.identityRevision:null},
       access:{grove:'ready',channel:context.connected?'ready':'disconnected',bonfire:context.connected?'ready':'disconnected',fireside:'auth_required',groveRegistration:'auth_required'},
       accessDetail:AUTH_MESSAGE,
       portalInstall:{...this.installation},
-      portalWorkspace:{path:context.workspace || this.defaultWorkspace,automatic:!context.workspace},
+      portalWorkspace:{path:external ? this.portal.state.deployment?.workspace || '' : managed?.workspace || context.portalWorkspace || this.defaultWorkspace,automatic:!external && !managed && !context.portalWorkspace,readOnly:external || Boolean(managed),source:external ? 'existing_portal' : managed ? 'managed_portal' : 'new_portal'},
       platformSupported:Boolean(portalRelease(this.platform,this.arch)),
       automaticKitInstallation:false,
     };
@@ -79,7 +81,7 @@ class TownController {
   _requireCurrent(context) {
     const current=this.getContext();
     if (!current.configured || !current.connected || current.exiting
-      || ['connectionId','identityRevision','beingName','workspace','portalExecutable','portalConfig'].some(key=>current[key]!==context[key])) {
+      || ['connectionId','identityRevision','beingName','portalWorkspace','portalExecutable','portalConfig'].some(key=>current[key]!==context[key])) {
       throw new Error('连接或工作区已变化，Portal 已安装但未启动。');
     }
   }
@@ -91,7 +93,7 @@ class TownController {
     await this.portal.inspect();
     this._requireCurrent(context);
     if (this.portal.state.status==='external') {
-      this._update({status:'external',phase:'existing',detail:'已有外部管理的 Portal，已保留该进程。'});
+      this._update({status:'external',phase:'existing',detail:'已有 Portal 优先，沿用原工作区与配置，由原启动方式管理。'});
       return {status:'external',detail:this.installation.detail};
     }
     if (this.portal.state.status==='error') throw new Error(this.portal.state.detail || 'Portal 进程状态尚未确认。');
@@ -104,7 +106,7 @@ class TownController {
     }
     const managed=context.managedPortal;
     if (managed && managed.executable===context.portalExecutable && managed.configPath===context.portalConfig) {
-      const configuration=await this.configFactory({workspace:context.workspace,name:'being-desktop',permissions:managed.permissions});
+      const configuration=await this.configFactory({workspace:managed.workspace,name:'being-desktop',permissions:managed.permissions});
       if(managed.groveKitsDir)configuration.toml=grovePortalConfigText(configuration.toml,managed.groveKitsDir);
       if (managed.workspace!==configuration.capabilities.workspace) throw new Error('托管 Portal 的工作区已变化，请先在连接设置核对配置。');
       this._update({status:'installing',phase:'checking',detail:'正在核对已部署的 Portal。',recovery:null});
@@ -128,7 +130,7 @@ class TownController {
       this._update({status:'existing_configuration',phase:'existing',detail:'已保留现有程序与配置，请在原有连接设置中启动。'});
       return {status:'existing_configuration',detail:this.installation.detail};
     }
-    const workspace=await preparePortalWorkspace({workspace:context.workspace,defaultWorkspace:this.defaultWorkspace});
+    const workspace=await preparePortalWorkspace({workspace:context.portalWorkspace,defaultWorkspace:this.defaultWorkspace});
     const configuration=await this.configFactory({workspace,name:'being-desktop'});
     this._requireCurrent(context);
     let configPath, configOwned=false, installed;
@@ -147,7 +149,7 @@ class TownController {
       const deployment={executable:installed.executable,configPath,version:this.release.version,workspace:configuration.capabilities.workspace};
       await this.saveDeployment(deployment);
       saved=true;
-      this._requireCurrent({...context,workspace:deployment.workspace,portalExecutable:deployment.executable,portalConfig:deployment.configPath});
+      this._requireCurrent({...context,portalWorkspace:deployment.workspace,portalExecutable:deployment.executable,portalConfig:deployment.configPath});
       this._update({status:'installed',version:this.release.version,verified:installed.verified===true,executable:installed.executable,phase:'starting',capabilities:configuration.capabilities,detail:'程序与配置已保存，正在启动 Portal。'});
       const started=await this.startPortal();
       this._update({status:'installed',phase:started.status==='running'?'running':'not_started',started:started.status==='running',detail:started.status==='running'?'Portal 已运行，等待中继确认。':started.detail || 'Portal 已安装，尚未启动。'});

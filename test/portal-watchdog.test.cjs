@@ -40,7 +40,9 @@ test('existing external Portal is checked without taking ownership or duplicatin
   assert.equal(f.starts(), 0); assert.equal(f.probes(), 1);
   assert.equal(f.state.owned, false);
   f.crash(); await f.watchdog.tick();
-  assert.equal(f.starts(), 1);
+  f.context.identity++; f.watchdog.resume(); await f.watchdog.tick();
+  assert.equal(f.starts(), 0);
+  assert.equal(f.watchdog.state().status, 'waiting');
 });
 
 test('rapid exits use exponential backoff capped at sixty seconds', async () => {

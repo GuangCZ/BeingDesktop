@@ -289,11 +289,18 @@ if (!process.versions.electron) {
     });
     handle('sendBonfireMessage', value => {
       assert.notEqual(expectedGreeting, null, 'A greeting requires an explicit fixture Send click');
-      assert.deepEqual(value, {content: expectedGreeting, mentions: expectedGreeting.includes('@neighbor') ? ['neighbor'] : [], connectionRevision: 1});
+      const {requestId, ...payload} = value;
+      assert.match(requestId, /^[0-9a-f-]{36}$/);
+      assert.deepEqual(payload, {content: expectedGreeting, mentions: expectedGreeting.includes('@neighbor') ? ['neighbor'] : [], connectionRevision: 1});
       assert.equal(greetingDelivery, undefined, 'Only one greeting may be pending');
       return new Promise(resolve => {greetingDelivery = {resolve};});
     });
-    for (const method of ['sendFiresideMessage', 'beginChannelConnection', 'prepareTownAssistance', 'prepareTownFeature', 'checkChannelStatus', 'prepareGroveInstallation', 'requestTownRead']) {
+    handle('requestTownRead', value => {
+      assert.deepEqual(value, {kind: 'bonfire'});
+      assert(bonfireMessages.length > 0, 'Only a confirmed explicit greeting may refresh messages');
+      return {kind: 'bonfire', snapshot: {identity: structuredClone(fixtureState.townApp.identity), messages: structuredClone(bonfireMessages), latestSeq: bonfireMessages.length}, status: {status: 'ready', lastSuccessAt: '2026-09-07T04:00:00Z'}};
+    });
+    for (const method of ['sendFiresideMessage', 'beginChannelConnection', 'prepareTownAssistance', 'prepareTownFeature', 'checkChannelStatus', 'prepareGroveInstallation']) {
       handle(method, () => {throw new Error('The onboarding fixture must never initiate Being messages.');});
     }
 
@@ -759,7 +766,7 @@ if (!process.versions.electron) {
     await load();
     check('review-direct-completion-persists-after-reload', !await execute("document.getElementById('setup-wizard').open") && latestView()?.visible === true);
 
-    const forbidden = ['sendFiresideMessage', 'beginChannelConnection', 'prepareTownAssistance', 'prepareTownFeature', 'checkChannelStatus', 'prepareGroveInstallation', 'requestTownRead'];
+    const forbidden = ['sendFiresideMessage', 'beginChannelConnection', 'prepareTownAssistance', 'prepareTownFeature', 'checkChannelStatus', 'prepareGroveInstallation'];
     check('wizard-never-installs-or-prepares-being-messages-automatically', forbidden.every(method => calls(method).length === 0));
     check('only-explicit-greeting-clicks-invoke-simulated-send', calls('sendBonfireMessage').length === 4);
     check('fixture-window-never-shown', BrowserWindow.getAllWindows().every(item => !item.isVisible()));

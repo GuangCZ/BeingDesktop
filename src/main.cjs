@@ -7,6 +7,7 @@ const {pathToFileURL} = require('node:url');
 const {PortalService, safeListWorkspace, sanitizeText} = require('./services.cjs');
 const {runPortalSelfTest} = require('./portal-self-test.cjs');
 const {PortalWatchdog} = require('./portal-watchdog.cjs');
+const {discoverPortalDeployment} = require('./portal-discovery.cjs');
 const {parseConnection, endpoint, protocolFile, sessionPartition, allowedNavigation} = require('./security.cjs');
 const {emptyRuntime, readRuntime, updateRuntimeConfig} = require('./runtime.cjs');
 const {ModelConfig} = require('./model-config.cjs');
@@ -43,6 +44,7 @@ const {createBrowserLinks} = require('./browser-links.cjs');
 const {DesktopTerminal} = require('./desktop-terminal.cjs');
 const {TownSession} = require('./town-session.cjs');
 const {BeingTownReader} = require('./being-town-reader.cjs');
+const {BeingTownWriter} = require('./being-town-writer.cjs');
 const {LocalTownResults} = require('./local-town-results.cjs');
 const {SbsTownResults} = require('./sbs-town-results.cjs');
 const {applyLoomTownSync,detachLoomTownSync} = require('./loom-town-sync.cjs');
@@ -102,10 +104,11 @@ function boot() {
   const townMethods=new Set(['getBeingMembers','listScrolls','getScroll','listBeings','getBonfireMessages','getFiresides','getFiresideMessages','getFiresideMembers','getTownMessageSnapshot','refreshTownMessages','requestTownRead','sendBonfireMessage','beginChannelConnection','updateFeishuCredentials','checkChannelStatus']);
   const townErrorCodes=new Set(['AUTH_REQUIRED','INVALID_REQUEST','IDENTITY_MISMATCH','NOT_CONNECTED','SESSION_CHANGED','BUSY','REQUEST_ACCEPTED','RATE_LIMITED','RESULT_UNKNOWN','NETWORK_ERROR','SERVICE_ERROR','INVALID_RESPONSE','BACKGROUND_UNAVAILABLE','NOT_RUNNING','PAUSED','INCOMPLETE_RESULT','RESULT_SOURCE_UNAVAILABLE','WAITING_SBS','SBS_NOT_CONFIGURED','TASK_LIMIT_REACHED']);
   townErrorCodes.add('READINESS_UNKNOWN');townErrorCodes.add('RESULT_UNCONFIRMED');
+  townErrorCodes.add('NOT_SENT');townMethods.add('sendFiresideMessage');
   townErrorCodes.add('TOWN_TOOL_NOT_CALLED');
   townErrorCodes.add('RESULT_SOURCE_NOT_CONFIGURED');
   townMethods.add('getTownCachedData');
-  const serialized = new Set(['connect','disconnect','reconnect','selectWorkspace','selectPortalExecutable','selectPortalConfig','startPortal','stopPortal','setCloseToTray','setTypography','setColors','saveModelConfig','setOnboardingStep','prepareTownFeature','prepareTownAssistance','prepareFiresideDraft','discussFeatureTask','deployPortal']);
+  const serialized = new Set(['connect','disconnect','reconnect','selectWorkspace','selectPortalWorkspace','selectPortalExecutable','selectPortalConfig','startPortal','stopPortal','setCloseToTray','setTypography','setColors','saveModelConfig','setOnboardingStep','prepareTownFeature','prepareTownAssistance','prepareFiresideDraft','discussFeatureTask','deployPortal']);
   serialized.add('changeChatSession');
   serialized.add('renameChatSession');
   serialized.add('saveOrchestration');
@@ -160,17 +163,15 @@ function boot() {
   async function desktopEnvironment(sessionId) {
     const enabled=orchestration.mode.enabled;
     if(orchestration.configuring)throw Object.assign(new Error('编排模式正在切换，请完成后再发送消息。'),{code:'ORCHESTRATION_NOT_ENFORCED'});
-    if(desktopConnectPromise)await desktopConnectPromise;
-    if(enabled)await orchestrationPolicy.assertEnforced();
+    const executionPolicy=await orchestrationPolicy.inspectForMessage();
     if(enabled!==orchestration.mode.enabled||orchestration.configuring)throw Object.assign(new Error('编排模式已变化，请重新发送。'),{code:'ORCHESTRATION_NOT_ENFORCED'});
     const bridge=desktopTools.link.capabilities();
-    if(enabled&&!bridge.tools.includes('desktop_worker_start'))throw Object.assign(new Error('Worker 工具尚未连接，禁止发送执行任务。'),{code:'ORCHESTRATION_NOT_ENFORCED'});
     const terminalCallable=bridge.tools.includes('desktop_terminal_create');
     return desktopMessageContext({runtime:{
       desktopId,capturedAt:new Date().toISOString(),application:{name:'Being Desktop',version:app.getVersion()},
       chatSessionId:sessionId,workspace:state.workspace.path || null,
-      portal:{name:DESKTOP_PORTAL_NAME,status:state.portal.status,health:state.portal.health},
-      bridge,mode:orchestration.mode.enabled?'orchestrator':'direct',
+      portal:{name:portal.state.owned ? DESKTOP_PORTAL_NAME : null,configuredName:portal.state.deployment?.name || null,workspace:town.state().portalWorkspace.path || null,management:portal.state.management || 'desktop',status:portal.state.status,health:portal.state.health},
+      bridge,executionPolicy,mode:orchestration.mode.enabled?'orchestrator':'direct',
       terminal:{present:desktopPlatform().terminalSupported,interactive:desktopPlatform().terminalSupported,shell:desktopPlatform().shell,callable:terminalCallable,
         approval:'本会话自建终端内的已授权任务可直接执行；账户凭据和必须本人确认的授权交给用户',
         scope:terminalCallable?desktopTools.terminalTools.scope(sessionId):null,
@@ -179,7 +180,7 @@ function boot() {
       console:{interactive:false,callable:bridge.tools.includes('desktop_console_run'),approval:'现有非交互命令逐次本地确认'},
     }});
   }
-  const portal = new PortalService({readExternalVersion:readPortalVersion,onEvent(event) {
+  const portal = new PortalService({readExternalVersion:readPortalVersion,discoverDeployment:observation=>discoverPortalDeployment({settings:disk,...observation}),onEvent(event) {
     state.portal = portal.state;
     if (['Portal 已退出','Portal 进程错误'].includes(event.title)) portalWatchdog?.wake();
     activity(event.level, event.title, event.detail);
@@ -220,26 +221,23 @@ function boot() {
   });
   const town = new TownController({installer,portal,
     defaultWorkspace:path.join(app.getPath('userData'),'portal-workspace'),
-    getContext:()=>({beingName:state.connection.beingName,configured:state.connection.configured,connected:state.connection.status==='connected',connectionId:generation,identityRevision,portalIdentityRevision,workspace:state.workspace.path,portalExecutable:disk.portalExecutable,portalConfig:disk.portalConfig,managedPortal:disk.managedPortal,exiting:exitStarted}),
+    getContext:()=>({beingName:state.connection.beingName,configured:state.connection.configured,connected:state.connection.status==='connected',connectionId:generation,identityRevision,portalIdentityRevision,workspace:state.workspace.path,portalWorkspace:disk.portalWorkspace || '',portalExecutable:disk.portalExecutable,portalConfig:disk.portalConfig,managedPortal:disk.managedPortal,exiting:exitStarted}),
     saveDeployment:async deployment=>{
-      const files=await safeListWorkspace(deployment.workspace,'');
-      const previous={workspace:disk.workspace,portalExecutable:disk.portalExecutable,portalConfig:disk.portalConfig,managedPortal:disk.managedPortal};
+      const previous={portalWorkspace:disk.portalWorkspace,portalExecutable:disk.portalExecutable,portalConfig:disk.portalConfig,managedPortal:disk.managedPortal};
       portal.configure({executable:deployment.executable,configPath:deployment.configPath});
-      Object.assign(disk,{workspace:deployment.workspace,portalExecutable:deployment.executable,portalConfig:deployment.configPath,managedPortal:deployment});
+      Object.assign(disk,{portalWorkspace:deployment.workspace,portalExecutable:deployment.executable,portalConfig:deployment.configPath,managedPortal:deployment});
       try { await persist(); }
       catch {
         Object.assign(disk,previous);
         portal.configure({executable:previous.portalExecutable,configPath:previous.portalConfig});
         throw new Error('Portal 配置未能保存，程序未启动。');
       }
-      state.workspace={path:deployment.workspace,files};
-      desktopTools?.changed();
       if(portalUpdateChecksEnabled)void portalUpdates.changed();
     },startPortal:()=>startCurrentPortal(),onChange:()=>broadcast()});
 
   portalWatchdog = new PortalWatchdog({portal,
     startPortal:()=>startCurrentPortal(false,true),
-    getContext:()=>({identity:identityRevision,ready:Boolean(connection),blocked:exitStarted || townSuspended || portalPermissionsBusy || Boolean(town._deploying)}),
+    getContext:()=>({identity:identityRevision,ready:Boolean(connection),allowAutomaticStart:Boolean(disk.managedPortal && disk.managedPortal.executable===disk.portalExecutable && disk.managedPortal.configPath===disk.portalConfig),blocked:exitStarted || townSuspended || portalPermissionsBusy || Boolean(town._deploying)}),
     checkHealth:signal=>testPortalConnection(signal),
     serialize:fn=>{
       const operation=mutationTail.then(fn);
@@ -274,18 +272,20 @@ function boot() {
       } catch { return null; }
     },results:localTownResults,
   });
+  let townWriter;
   const beingTownReader=new BeingTownReader({
     allowBonfireRelay:true,
     fallbackFetchImpl:(url,options)=>globalThis.fetch(url,options),
     getConnection:()=>!exitStarted&&state.connection.status==='connected'?connection:null,
-    getRuntime:()=>({activeStream:{active:channelBeing.state().status==='working'}}),
+    getRuntime:()=>({activeStream:{active:channelBeing.state().status==='working'||Boolean(townWriter?.state().active)}}),
     fetchImpl:(url,options)=>net.fetch(url,options),
     toolResults:localTownResults,
     onRequest:record=>registerFeatureRequest(record),
   });
-  function resetTownReader() { beingTownReader.reset(); sbsTownResults.reset(); townRoomCache={owned:[],joined:[],cached:false};townMemberCache.clear(); }
+  function resetTownReader() { beingTownReader.reset(); townWriter?.reset(); sbsTownResults.reset(); townRoomCache={owned:[],joined:[],cached:false};townMemberCache.clear(); }
   const townSession=new TownSession({
     getContext:()=>({configured:state.connection.configured,connected:state.connection.status==='connected',exiting:exitStarted,connectionId:generation,identityRevision,beingName:state.connection.beingName}),
+    writeImpl:request=>townWriter.send(request),
     fetchImpl:(url,options)=>net.fetch(url,{...options,credentials:'omit',referrerPolicy:'no-referrer'}),
     readImpl:(route,options)=>{
       const owner=taskRunner.currentTask();
@@ -315,6 +315,13 @@ function boot() {
     onRequest:record=>registerFeatureRequest(record),
   });
   const bonfireCache=new BonfireCache({directory:path.join(app.getPath('userData'),'bonfire-cache'),safeStorage});
+  townWriter=new BeingTownWriter({
+    getContext:()=>({connection,connected:state.connection.status==='connected',exiting:exitStarted,connectionId:generation,identityRevision,beingName:state.connection.beingName}),
+    getRuntime:()=>({busy:beingTownReader.state().active||channelBeing.state().status==='working'}),
+    fetchImpl:(url,options)=>net.fetch(url,options),fallbackFetchImpl:(url,options)=>globalThis.fetch(url,options),
+    journalPath:path.join(app.getPath('userData'),'town-send-journal.json'),
+    onRequest:record=>registerFeatureRequest(record),onChange:()=>broadcast(),
+  });
   const townDataCache=new TownDataCache({directory:path.join(app.getPath('userData'),'town-data-cache'),safeStorage});
   const townCachedReads=new TownCachedReads({cache:townDataCache,
     getContext:()=>({identityKey:connection?sessionPartition(connection):'',revision:generation,identityRevision,connected:!exitStarted&&state.connection.status==='connected'}),
@@ -393,6 +400,7 @@ function boot() {
     result.bonfire=access.bonfire;
     result.channel=channel;
     result.access.firesideRead=access.fireside?.status || 'unknown';
+    result.access.firesideSend=state.connection.status==='connected'?'ready':'disconnected';
     result.fireside=access.fireside || {status:'unknown',detail:''};
     result.access.scroll=access.scroll?.status || 'unknown';
     result.access.beings=access.beings?.status || 'unknown';
@@ -1051,7 +1059,11 @@ function boot() {
     handle('getFiresides',()=>loadCachedFiresides());
     handle('getFiresideMessages',value=>sbsTownResults.readSnapshot({kind:'fireside',firesideId:value?.firesideId,limit:value?.limit||10}));
     handle('getFiresideMembers',value=>loadCachedFiresideMembers(value));
-    for(const name of ['sendFiresideMessage','createFireside','joinFireside']) handle(name,requireTownIdentity);
+    handle('sendFiresideMessage',value=>{
+      if(!value||Object.getPrototypeOf(value)!==Object.prototype||Object.keys(value).some(key=>!['firesideId','message','connectionRevision','requestId'].includes(key)))throw Object.assign(new Error('围炉发送参数无效。'),{code:'INVALID_REQUEST'});
+      return townWriter.send({kind:'fireside',content:value.message,firesideId:value.firesideId,connectionRevision:value.connectionRevision,requestId:value.requestId});
+    });
+    for(const name of ['createFireside','joinFireside']) handle(name,requireTownIdentity);
     handle('getPortalPermissions',async()=>{
       const result=await inspectPortalPermissions(disk);
       return {permissions:result.permissions,revision:result.revision,configPath:disk.portalConfig};
@@ -1116,10 +1128,22 @@ function boot() {
       disk.workspace=selected;await persist();state.workspace={path:selected,files};
       desktopTools?.changed();activity('info','工作区已选择','用于文件浏览与控制台起始目录；Portal 的实际权限仍以其配置为准。');return publicState();
     });
+    handle('selectPortalWorkspace',async()=>{
+      await portal.inspect();
+      if (town.state().portalWorkspace.readOnly || portal.state.status==='error') throw new Error('已有 Portal 的工作区以原配置为准，请在原部署位置管理。');
+      const result=await dialog.showOpenDialog(win,{title:'选择新 Portal 的工作区',properties:['openDirectory']});
+      if(result.canceled)return publicState();
+      const selected=result.filePaths[0];
+      await safeListWorkspace(selected,'');
+      const previous=disk.portalWorkspace;
+      disk.portalWorkspace=selected;
+      try { await persist(); } catch(error) { disk.portalWorkspace=previous;throw error; }
+      broadcast();return publicState();
+    });
     handle('listWorkspace',async(relative='')=>{if(!state.workspace.path)return [];return safeListWorkspace(state.workspace.path,relative);});
     handle('openWorkspace',async()=>{if(!state.workspace.path)throw new Error('请先选择工作区。');const error=await shell.openPath(state.workspace.path);if(error)throw new Error('工作区无法打开。');return publicState();});
-    handle('selectPortalExecutable',async()=>{if(portalPermissionsBusy)throw new Error('Portal 权限正在保存，请稍后重试。');const selected=await chooseFile('选择 heart-portal 可执行文件',process.platform==='win32'?['exe']:['*']);if(selected){portal.configure({executable:selected});disk.portalExecutable=selected;await persist();if(portalUpdateChecksEnabled)void portalUpdates.changed();activity('info','Portal 程序已选择','自动守护将使用已保存的连接与配置检查并启动 Portal。');}return publicState();});
-    handle('selectPortalConfig',async()=>{if(portalPermissionsBusy)throw new Error('Portal 权限正在保存，请稍后重试。');const selected=await chooseFile('选择已有 portal.toml 配置',['toml']);if(selected){portal.configure({configPath:selected});disk.portalConfig=selected;await persist();activity('info','Portal 配置已选择','自动守护将使用此配置定义的工作区和权限启动 Portal。');}return publicState();});
+    handle('selectPortalExecutable',async()=>{if(portalPermissionsBusy)throw new Error('Portal 权限正在保存，请稍后重试。');await portal.inspect();if(portal.state.management==='external')throw new Error('已有 Portal 优先，请在原部署位置管理。');const selected=await chooseFile('选择 heart-portal 可执行文件',process.platform==='win32'?['exe']:['*']);if(selected){portal.configure({executable:selected});disk.portalExecutable=selected;await persist();if(portalUpdateChecksEnabled)void portalUpdates.changed();activity('info','Portal 程序已选择','程序路径已保存；已有部署优先，自动守护仅用于 Desktop 托管的 Portal。');}return publicState();});
+    handle('selectPortalConfig',async()=>{if(portalPermissionsBusy)throw new Error('Portal 权限正在保存，请稍后重试。');await portal.inspect();if(portal.state.management==='external')throw new Error('已有 Portal 优先，请在原部署位置管理。');const selected=await chooseFile('选择已有 portal.toml 配置',['toml']);if(selected){portal.configure({configPath:selected});disk.portalConfig=selected;await persist();activity('info','Portal 配置已选择','沿用此配置定义的工作区和权限，已有部署由原启动方式管理。');}return publicState();});
     handle('startPortal',async()=>{await startCurrentPortal();if(portalUpdateChecksEnabled)void portalUpdates.check({force:true});broadcast();return publicState();});
     handle('testPortalConnection',()=>testPortalConnection());
     handle('stopPortal',async()=>{if(portalPermissionsBusy)throw new Error('Portal 权限正在保存，请稍后重试。');portalWatchdog.pause();await portal.stop();broadcast();return publicState();});
