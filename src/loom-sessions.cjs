@@ -23,15 +23,37 @@ function installSessions(requestedId = null, routingFactory = createSessionRoute
   const own = JSON.parse(localStorage.getItem(key + ':' + selected.id) || 'null') || selected;
   function modelError(value) {
     if(typeof value!=='string')return null;
-    const match=/^\s*(?:⚠\uFE0F?\s*)?(?:LLM API error\s+|模型接口请求失败（HTTP )([45]\d\d)\b/i.exec(value);
+    const match=/^\s*(?:⚠\uFE0F?\s*)?(?:LLM API error\s+|(?:模型接口请求失败|编排响应已拦截|编排响应校验失败|模型生成失败|模型输出未完成|编排响应超出限制)（HTTP )([45]\d\d)\b/i.exec(value);
     if(!match)return null;
     const status=Number(match[1]);
+    // Already formatted messages must survive native rendering and reload unchanged.
+    if(!/^\s*(?:⚠\uFE0F?\s*)?LLM API error/i.test(value))return {status,message:value};
+    let detail;
+    try{detail=JSON.parse(value.slice(value.indexOf('{')))?.error;}catch{}
+    if(detail && ['orchestration_policy_error','orchestration_response_error'].includes(detail.type)) {
+      const descriptions={
+        worker_only:['编排响应已拦截','旧网关未区分工具违规与响应格式错误，无法确认具体原因。'],
+        disallowed_tool:['编排响应已拦截','模型请求了本轮未授权的工具，该调用未执行。'],
+        unsupported_output:['编排响应已拦截','模型返回了编排模式不允许的输出类型，未交付给 Being。'],
+        invalid_response:['编排响应校验失败','模型响应格式异常或响应流不完整，本轮输出未交付。'],
+        upstream_response_failed:['模型生成失败','上游模型生成失败，本轮输出未交付。'],
+        upstream_stream_error:['模型生成失败','上游模型返回流错误，本轮输出未交付。'],
+        upstream_response_incomplete:['模型输出未完成','上游模型提前结束生成，本轮输出未交付。'],
+        response_too_large:['编排响应超出限制','模型返回超出网关容量，本轮输出未交付。']
+      };
+      const [title,description]=Object.hasOwn(descriptions,detail.code)?descriptions[detail.code]:['编排响应校验失败','编排网关未能确认模型响应符合要求，本轮输出未交付。'];
+      return {status,message:`${title}（HTTP ${status}）。${description}已有 Worker 状态保留；本轮请求未自动重发。`};
+    }
     return {status,message:`模型接口请求失败（HTTP ${status}），Being 本轮回复已中断。已启动的 Worker 状态保留，请查看左侧任务。`};
   }
   function cleanTranscript(messages) {
-    const receipts=[];
+    const receipts=[],errorsByRequest=new Map();
     for(let index=0;index<localStorage.length;index++){
-      const name=localStorage.key(index);if(!name?.startsWith(key+':reply:'))continue;
+      const name=localStorage.key(index);
+      if(name?.startsWith(key+':events:'+own.id+':')){
+        try{const group=JSON.parse(localStorage.getItem(name));if(group.requestId)for(const entry of group.entries||[])if(entry.event==='error'&&modelError(entry.data?.message))errorsByRequest.set(group.requestId,entry.data.message);}catch{}
+      }
+      if(!name?.startsWith(key+':reply:'))continue;
       try{const receipt=JSON.parse(localStorage.getItem(name));if(receipt.session_id===own.id&&receipt.route_id)receipts.push(receipt);}catch{}
     }
     const identity=item=>item.delivery_id||item.route_id;
@@ -39,8 +61,14 @@ function installSessions(requestedId = null, routingFactory = createSessionRoute
     for(const receipt of receipts.sort((a,b)=>String(a.at).localeCompare(String(b.at))))latest.set(identity(receipt),receipt);
     const cleaned=[],positions=new Map();
     for(const item of messages) {
-      const error=item.role!=='user'&&modelError(item.content);
-      let next=error?{...item,content:error.message,model_error_status:error.status}:item;
+      const originalError=item.role!=='user'&&modelError(item.content);
+      // Native history reconciliation may drop the request ID from a duplicate error.
+      const candidates=originalError&&!item.request_id&&item.at?messages.filter(other=>other.role!=='user'&&other.at===item.at&&other.request_id&&modelError(other.content)?.status===originalError.status):[];
+      const requestIds=new Set(candidates.map(other=>other.request_id));
+      const errorRequestId=item.request_id||(requestIds.size===1?candidates[0].request_id:undefined);
+      const recordedError=originalError&&modelError(errorsByRequest.get(errorRequestId));
+      const error=recordedError?.status===originalError?.status?recordedError:originalError;
+      let next=error?{...item,request_id:errorRequestId,content:error.message,model_error_status:error.status}:item;
       if(item.role!=='user'){
         // Old native history rows lost receipt metadata. Recover only unambiguous matches.
         const matches=receipts.filter(receipt=>receipt.content===item.content&&(!item.request_id||item.request_id===receipt.request_id)&&(!identity(item)||identity(item)===identity(receipt)));
@@ -253,7 +281,7 @@ function installSessions(requestedId = null, routingFactory = createSessionRoute
       if (eventHistory) {
         replay.process.push({deliveryId:replay.deliveryId,streamId:replay.id,event,data,seq});
         if (replay.owned) {
-          for (const entry of replay.process) eventHistory.record({...entry,requestId:replay.requestId});
+          for (const entry of replay.process) eventHistory.record({...entry,requestId:replay.requestId,startedAt:replay.startedAt});
           replay.process=[];
         }
       }
@@ -276,12 +304,13 @@ function installSessions(requestedId = null, routingFactory = createSessionRoute
     const active = url.pathname.endsWith('/api/stream/active');
     const chat = url.pathname.endsWith('/api/chat/stream');
     if (!history && !active && !chat) return nativeFetch(input, options);
-    let init = options,requestId='';
+    let init = options,requestId='',requestStartedAt;
     if (chat) {
       const body = JSON.parse(options?.body ?? await input.clone().text());
       const plain = typeof body.message === 'string' ? body.message : Array.isArray(body.content) ? body.content.filter(part=>part.type==='text').map(part=>part.text).join('\n') : '';
       if (plain.trimStart().startsWith('[Being Desktop Town sync:')) return nativeFetch(input,options);
       requestId = crypto.randomUUID();
+      requestStartedAt=new Date().toISOString();
       liveErrorKey=requestId;
       const userRows=document.querySelectorAll?.('#messages > .message.user');
       if(userRows?.length)userRows[userRows.length-1].dataset.requestId=requestId;
@@ -342,6 +371,7 @@ function installSessions(requestedId = null, routingFactory = createSessionRoute
       if (response.headers.get('content-type')?.includes('text/event-stream') && response.body) {
         let buffer = '', sequence=0,replay=replayFor(crypto.randomUUID(),true);
         replay.requestId=requestId;
+        replay.startedAt=requestStartedAt;
         async function frameEvent(frame,controller) {
           const lines=frame.split('\n');
           const raw=lines.filter(line=>line.startsWith('data:')).map(line=>line.slice(5).trimStart()).join('\n');
@@ -351,6 +381,7 @@ function installSessions(requestedId = null, routingFactory = createSessionRoute
           try { data=JSON.parse(raw); } catch { throw new TypeError('回复流数据不完整，正在恢复。'); }
           if(event==='meta' && typeof data.stream_id==='string')replay=replayFor(data.stream_id,true);
           replay.requestId=requestId;
+          replay.startedAt=requestStartedAt;
           if(event!=='meta')await replayEvent(replay,event,data,++sequence);
           controller.enqueue(`event: ${event}\ndata: ${JSON.stringify(visibleEvent(event,data))}\n\n`);
         }
@@ -399,6 +430,9 @@ function installSessions(requestedId = null, routingFactory = createSessionRoute
           text=error.message;
           const errorKey=liveErrorKey+':'+error.status;
           const rows=[...document.querySelectorAll('#messages > .message')];
+          const savedErrors=time[1]?own.messages.filter(item=>item.role!=='user'&&item.at===time[1]&&modelError(item.content)?.status===error.status):[];
+          const restored=savedErrors.length===1?rows.find(row=>row.dataset.sessionAt===time[1]&&row.dataset.modelErrorKey?.endsWith(':'+error.status)):null;
+          if(restored)return restored.querySelector('.content');
           const previous=time[1]?null:liveErrorKey?rows.find(row=>row.dataset.modelErrorKey===errorKey):rows.at(-1);
           if(previous?.dataset.modelErrorKey===errorKey)return previous.querySelector('.content');
           const content=nativeAddMessage(role==='system'?'being':role,text,false,...time);

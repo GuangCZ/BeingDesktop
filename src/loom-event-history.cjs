@@ -28,6 +28,9 @@ function createEventHistory({key, ownId, messages, presentError=value=>value}) {
   }
   function duration(group) {
     if (group.finished && !group.endedAt) return '';
+    // A quarantined response can deliver its first error only after a long wait.
+    // Without a known request start, a first-event timestamp is not a duration.
+    if (!group.startedAt && group.entries.every(entry=>entry.event==='error')) return '';
     const seconds = Math.max(0, Math.floor(((group.endedAt || Date.now()) - Date.parse(group.at)) / 1000));
     if (!Number.isFinite(seconds)) return '';
     return seconds >= 60 ? `${Math.floor(seconds / 60)}分${seconds % 60}秒` : `${seconds}秒`;
@@ -163,7 +166,7 @@ function createEventHistory({key, ownId, messages, presentError=value=>value}) {
   function schedule() {
     if (!scheduled) { scheduled = true; requestAnimationFrame(render); }
   }
-  function record({deliveryId, streamId, requestId, event, data, seq}) {
+  function record({deliveryId, streamId, requestId, startedAt, event, data, seq}) {
     // Reply text already appears in its full message; render other delta fields.
     if (event === 'content_block_delta') {
       const delta = {...data?.delta}; delete delta.text; delete delta.type;
@@ -173,7 +176,8 @@ function createEventHistory({key, ownId, messages, presentError=value=>value}) {
     }
     let group = groups.get(deliveryId);
     if (!group) {
-      group = {id:deliveryId,streamId,requestId,at:new Date().toISOString(),startSeq:seq,entries:[],finished:false};
+      const knownStart=Number.isFinite(Date.parse(startedAt))&&Date.parse(startedAt)<=Date.now()?startedAt:undefined;
+      group = {id:deliveryId,streamId,requestId,startedAt:knownStart,at:knownStart||new Date().toISOString(),startSeq:seq,entries:[],finished:false};
       groups.set(deliveryId,group);
     }
     if (requestId) group.requestId = requestId;

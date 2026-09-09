@@ -43,6 +43,35 @@ test('saved model errors are compacted and deduplicated without changing user te
   }
 });
 
+test('orchestration errors retain their category across rendering and reload without exposing raw server text',async()=>{
+  for(const [code,label] of [['worker_only','旧网关未区分'],['disallowed_tool','未授权的工具'],['unsupported_output','不允许的输出类型'],['invalid_response','响应格式异常'],['upstream_response_failed','上游模型生成失败'],['upstream_response_incomplete','上游模型提前结束'],['upstream_stream_error','上游模型返回流错误'],['response_too_large','超出网关容量']]){
+    const f=fixture(),id=f.api.list().activeId,key='being-desktop-sessions-v1:/loom/Being';
+    const raw='LLM API error 502 Bad Gateway: '+JSON.stringify({error:{type:code==='worker_only'?'orchestration_policy_error':'orchestration_response_error',code,message:'PRIVATE_RAW_HTML',reason:'PRIVATE_REASON'}});
+    const session=JSON.parse(f.storage.get(key+':'+id));
+    session.messages=[{role:'user',content:raw},{role:'being',content:raw,request_id:'r'}];
+    f.storage.set(key+':'+id,JSON.stringify(session));
+    for(let reload=0;reload<2;reload++){
+      const next=fixture(f.storage),{messages}=await (await next.context.fetch('/api/history')).json();
+      assert.equal(messages[0].content,raw);assert.ok(messages[1].content.includes(label));
+      assert.doesNotMatch(messages[1].content,/PRIVATE_/);
+      assert.equal(messages[1].model_error_status,502);
+    }
+  }
+});
+
+test('legacy compacted errors recover the original category only from their own request and session',async()=>{
+  const f=fixture(),id=f.api.list().activeId,key='being-desktop-sessions-v1:/loom/Being';
+  const raw='LLM API error 502 Bad Gateway: '+JSON.stringify({error:{type:'orchestration_policy_error',code:'worker_only'}});
+  const content='模型接口请求失败（HTTP 502），Being 本轮回复已中断。';
+  const session=JSON.parse(f.storage.get(key+':'+id));
+  session.messages=[{role:'being',content,request_id:'matching',at:'2026-09-09T05:02:39.469Z'},{role:'being',content,at:'2026-09-09T05:02:39.469Z'},{role:'being',content,request_id:'other'}];
+  f.storage.set(key+':'+id,JSON.stringify(session));
+  for(const [sid,rid]of [[id,'matching'],['foreign','other']])f.storage.set(key+':events:'+sid+':delivery',JSON.stringify({requestId:rid,entries:[{event:'error',data:{message:raw}}]}));
+  const next=fixture(f.storage),{messages}=await (await next.context.fetch('/api/history')).json();
+  assert.equal(messages.length,2);
+  assert.match(messages[0].content,/旧网关未区分/);assert.equal(messages[1].content,content);
+});
+
 test('worker review is stored for the original conversation once while another conversation is active',async()=>{
   const f=fixture(),original=f.api.list().activeId;
   f.api.change(null);const other=fixture(f.storage),selected=other.api.list().activeId;

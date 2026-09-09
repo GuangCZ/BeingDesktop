@@ -34,6 +34,8 @@ To continue an already authorized task with SBS off, Desktop also schedules one 
 
 ## Strict model boundary
 
+The companion gateway must also suppress implicit tool injection in the downstream model proxy. CLIProxyAPI's Codex executor normally adds a hosted `image_generation` tool even after a caller has supplied a restricted function list. The gateway now sets the proxy's existing Responses Lite no-injection signal in both the request header and `client_metadata`. This preserves the Worker-only tool list through the executor without changing ordinary model requests or Worker image-generation access. Response quarantine remains active as a second check.
+
 This mode requires the updated desktop and a separately deployed model boundary implementing `being-orchestrator/1`. The reference deployment uses the companion proxy project's `internal/orchestration`; that code and gateway binary are not bundled in this Electron repository. The remote Being must use the OpenAI Responses provider through that boundary. It can run inside the updated CLIProxyAPI server or in the independent `cmd/orchestrator-gateway` process in front of an existing local proxy. A desktop-only update without either endpoint will refuse to enable the mode.
 
 The reference deployment runs the gateway in front of the existing model proxy. Publish its capability and strict Responses routes at an address reachable by both Desktop and the remote Being. Service startup, authentication and HTTPS exposure belong to the gateway deployment; do not assume local loopback addresses on the desktop are reachable from the remote runtime.
@@ -49,6 +51,10 @@ If Chromium cannot connect to the public capability endpoint, the desktop retrie
 This is enforced at the configured model boundary, not through remote runtime permissions. It does not revoke independent runtime background jobs, stop tasks already started elsewhere, or prevent an administrator from changing the model configuration. Such remote configuration changes are detected before the next desktop message or worker dispatch. The switch requires Being to be idle before changing endpoints.
 
 ## History synchronization and recovery
+
+Model failures retain their category: forbidden tools or hosted execution, unsupported response formats, upstream generation failures, incomplete output and response-size limits are reported separately. The companion gateway records fixed diagnostic codes without logging response text or tool arguments. All rejected output stays quarantined, including partial Worker calls; errors never trigger automatic task resubmission. Older `worker_only` errors cannot establish whether a tool violation or format problem occurred and are labeled accordingly.
+
+Desktop preserves these categories across stream replay and reload, recovers an older compacted error from its own request's saved event, and coalesces unambiguous duplicate error rows from native history. Error timing starts when the request was sent; legacy error-only records without a known start omit the duration rather than showing a misleading zero.
 
 Local result insertion and Loom history synchronization now share stable receipt identities. Native history reuses the matching visible row, restores its metadata after a rebuild and repairs unambiguous saved copies. It preserves user messages, distinct requests and ambiguous legacy text. This prevents the same local Worker result from being appended on every poll without rewriting remote Loom history.
 
