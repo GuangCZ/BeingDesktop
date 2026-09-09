@@ -44,6 +44,14 @@ function snapshot(content = 'Previously fetched Bonfire message', latestSeq = 1)
 
 const filename = (directory, key) => path.join(directory, createHash('sha256').update(key).digest('hex') + '.bin');
 
+test('persisted Being relay snapshots retain their unverified source label', async t => {
+  const dir = await directory(t), safeStorage = encryptedStorage();
+  const cache = new BonfireCache({directory: dir, safeStorage});
+  const value = {...snapshot(), source: 'being_relay'};
+  assert.equal(await cache.save('relay-test', value), true);
+  assert.deepEqual(await new BonfireCache({directory: dir, safeStorage}).load('relay-test'), value);
+});
+
 test('encrypted snapshots survive a new store instance without exposing message text', async t => {
   const dir = await directory(t), safeStorage = encryptedStorage(), identityKey = 'persist:being-alice';
   const first = new BonfireCache({directory: dir, safeStorage});

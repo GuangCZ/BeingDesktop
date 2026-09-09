@@ -3,6 +3,11 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {LocalTownResults}=require('../src/local-town-results.cjs');
 const record={requestId:'f9168c5e-ceb2-4faa-b6bf-329bf39fa1e4',beingId:'alice',route:'/api/bonfire/hear',query:{limit:'1'}};
 const config={baseUrl:'http://127.0.0.1:8317',key:'x'.repeat(64)};
+test('an absent mirror is distinct from a failed configured transport and never makes a request',async()=>{
+ const adapter=new LocalTownResults({getConfig:()=>null,fetchImpl:async()=>assert.fail('Unconfigured transport must stay offline')});
+ await adapter.prepare(record);await adapter.release(record);
+ for(const operation of ['read','poll'])await assert.rejects(adapter[operation](record),{code:'RESULT_SOURCE_NOT_CONFIGURED'});
+});
 test('local tool result traffic is authenticated, bounded to loopback, and never contains a Loom connection',async()=>{
  const calls=[];const adapter=new LocalTownResults({getConfig:()=>config,fetchImpl:async(url,options)=>{calls.push({url,options});return options.method==='GET'?Response.json({data:{messages:[]}}):new Response(null,{status:204});}});
  await adapter.prepare(record);assert.deepEqual(await adapter.read(record),{data:{messages:[]}});await adapter.release(record);

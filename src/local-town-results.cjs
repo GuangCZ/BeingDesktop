@@ -5,7 +5,7 @@ const MAX_ERROR_BYTES=4096;
 const BUSINESS_STATUS={AUTH_REQUIRED:403,IDENTITY_MISMATCH:403,RATE_LIMITED:429,SERVICE_ERROR:502,INCOMPLETE_RESULT:502};
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function failure(code='INCOMPLETE_RESULT') {
-  return Object.assign(new Error(code==='RESULT_SOURCE_UNAVAILABLE'?'本机工具结果通道尚未就绪。':'未取得完整工具结果，已保留上次同步内容。'),{code});
+  return Object.assign(new Error(code==='RESULT_SOURCE_NOT_CONFIGURED'?'未配置完整工具结果通道；Loom 摘要不能作为完整消息。':code==='RESULT_SOURCE_UNAVAILABLE'?'本机工具结果通道尚未就绪。':'未取得完整工具结果，已保留上次同步内容。'),{code});
 }
 
 async function readJson(response,maxBytes=MAX_BYTES) {
@@ -28,7 +28,8 @@ class LocalTownResults {
   constructor({getConfig,fetchImpl=globalThis.fetch}) { Object.assign(this,{getConfig,fetchImpl}); }
   async _request(method,record,{pending=false,signal}={}) {
     const config=this.getConfig();
-    if(!config||typeof config.key!=='string'||config.key.length<32||/[\r\n]/.test(config.key))throw failure('RESULT_SOURCE_UNAVAILABLE');
+    if(!config)throw failure('RESULT_SOURCE_NOT_CONFIGURED');
+    if(typeof config.key!=='string'||config.key.length<32||/[\r\n]/.test(config.key))throw failure('RESULT_SOURCE_UNAVAILABLE');
     let base;
     try { base=new URL(config.baseUrl); } catch { throw failure('RESULT_SOURCE_UNAVAILABLE'); }
     if(base.origin!=='http://127.0.0.1:8317'||base.username||base.password||base.search||base.hash||!UUID.test(record.requestId))throw failure('RESULT_SOURCE_UNAVAILABLE');

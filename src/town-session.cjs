@@ -3,6 +3,7 @@
 // Contracts: https://beings.town/api/{bonfire,fireside,beings,scrolls,channels}/help (2026-09-07).
 // Town uses IP Trust. A Loom token is never a Town credential.
 const {scrollId, libraryRoute, scrollListDto, scrollDto, beingsDto} = require('./town-library-contract.cjs');
+const {relaySource} = require('./town-result-source.cjs');
 const TOWN_ORIGIN = 'https://beings.town';
 const TOWN_AUTH_DETAIL = 'Town 拒绝了本机的 GET 读取请求（401/403），当前连接没有消息读取权限。';
 const MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -65,7 +66,7 @@ function messagesDto(value, members = []) {
       return {id: String(item.seq), beingId, beingName: text(item.being, 100), content: text(item.message, 4000), createdAt: text(item.at, 64), revisedAt: text(item.revised_at, 64), mentions: []};
     })
     .sort((left, right) => Number(left.id) - Number(right.id));
-  return {messages, latestSeq: value.global_latest_seq};
+  return {messages, latestSeq: value.global_latest_seq, ...relaySource(value)};
 }
 
 function firesidesDto(value) {

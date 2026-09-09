@@ -51,6 +51,20 @@ function harness(options = {}) {
   return {reader, clock, state};
 }
 
+test('Being relay provenance survives cache restoration, errors and later native replacement', async t => {
+  const {reader, state} = harness({overrides: {cached: true, automatic: false}});
+  t.after(() => reader.stop());
+  assert.equal(reader.restoreCache({...data(), source: 'being_relay', capturedAt: 500, revision: 'manual:1', manual: true}), true);
+  assert.equal(reader.snapshot().source, 'being_relay');
+  assert.equal(reader.cacheRecord().source, 'being_relay');
+  reader.start();
+  await assert.rejects(reader.requestRead(() => { throw fault('INCOMPLETE_RESULT'); }));
+  assert.equal(reader.snapshot().source, 'being_relay');
+  await reader.requestRead(() => data());
+  assert.equal(reader.snapshot().source, undefined);
+  assert.equal(reader.cacheRecord().source, undefined);
+});
+
 test('persistent cache rebinds the identity and retains manual receipts against older background results', async t => {
   const {reader, state} = harness({overrides: {cached: true, automatic: false}});
   t.after(() => reader.stop());
@@ -106,6 +120,17 @@ test('starts once immediately and schedules one unreferenced read after a full m
   await clock.advance(MINUTE - 1); assert.equal(state.calls.length, 1);
   await clock.advance(1); assert.equal(state.calls.length, 2);
   reader.stop(); assert.equal(clock.timers.size, 0);
+});
+
+test('missing native Town tools retain cached messages and expose the actionable error', async t => {
+  const {reader} = harness({overrides: {cached: true, automatic: false}});
+  t.after(() => reader.stop());
+  reader.restoreCache({...data([entry(7, 'Saved content')]), capturedAt: 500, revision: 'manual:1', manual: true});
+  reader.start();
+  await assert.rejects(reader.requestRead(async () => { throw fault('TOWN_TOOL_NOT_CALLED'); }), error =>
+    error.code === 'TOWN_TOOL_NOT_CALLED' && error.message.includes('模型设置') && !error.message.includes('PRIVATE_REMOTE_DETAIL'));
+  assert.equal(reader.status().errorCode, 'TOWN_TOOL_NOT_CALLED');
+  assert.equal(reader.snapshot().messages[0].content, 'Saved content');
 });
 
 test('manual mode never reads on start, reset, resume or restart', async () => {

@@ -19,7 +19,9 @@ const ERROR_DETAILS = Object.freeze({
   ABORTED: '本地等待已停止，远端执行状态需另行确认。',
   INCOMPLETE_RESULT: '返回结果不完整，请在功能页面检查后重试。',
   INVALID_RESPONSE: '返回结果无法读取，请在功能页面检查后重试。',
+  TOWN_TOOL_NOT_CALLED: 'Being 未执行 Town 读取工具，请在模型设置检查原生 http 工具是否被限制。',
   RESULT_SOURCE_UNAVAILABLE: '本机结果通道暂不可用，请稍后重试。',
+  RESULT_SOURCE_NOT_CONFIGURED: '未配置完整工具结果通道，无法从 Loom 摘要恢复消息。',
   REQUEST_FAILED: '功能执行失败，请在对应功能页面检查后重试。',
 });
 

@@ -13,6 +13,7 @@ const ERROR_MESSAGES = Object.freeze({
   NETWORK_ERROR: '后台消息连接暂时中断，稍后自动重试。',
   SERVICE_ERROR: '后台消息服务暂时不可用，稍后自动重试。',
   INVALID_RESPONSE: '后台消息返回格式无效，已保留上次同步内容。',
+  TOWN_TOOL_NOT_CALLED: 'Being 未执行 Town 读取工具，请在模型设置检查是否使用了限制原生 http 工具的入口。',
   SESSION_CHANGED: '后台消息读取已取消，连接或运行状态已变化。',
   NOT_RUNNING: '后台消息同步尚未启动。',
   PAUSED: '后台消息同步已暂停。',
@@ -24,6 +25,7 @@ const ERROR_MESSAGES = Object.freeze({
   SBS_NOT_CONFIGURED: '后台采集尚未设置，可请 Being 读取一次',
   INCOMPLETE_RESULT: 'Being 的工具结果不完整，已保留上次同步内容。',
   RESULT_SOURCE_UNAVAILABLE: '本机工具结果通道暂不可用，将自动重试。',
+  RESULT_SOURCE_NOT_CONFIGURED: '未配置完整工具结果通道，Loom 摘要无法用于同步消息；刷新显示不会补全结果。',
 });
 
 function failure(code, automatic = true) {
@@ -75,7 +77,7 @@ function snapshotDto(value, limit, identity) {
     // occurrence of an ID in this response wins; removed IDs stay removed.
     messages.set(id, message);
   }
-  return {identity: copy(identity), messages: [...messages.values()].sort((left, right) => Number(left.id) - Number(right.id)).slice(-limit), latestSeq: value.latestSeq};
+  return {identity: copy(identity), messages: [...messages.values()].sort((left, right) => Number(left.id) - Number(right.id)).slice(-limit), latestSeq: value.latestSeq, ...(value.source === 'being_relay' ? {source: 'being_relay'} : {})};
 }
 
 function receiptDto(value) {
@@ -122,6 +124,7 @@ class TownRefresh {
   cacheRecord() {
     if (this._cached.latestSeq === null || this._metadata.lastSuccessAt === null) return null;
     return copy({messages: this._cached.messages, latestSeq: this._cached.latestSeq,
+      ...(this._cached.source === 'being_relay' ? {source: 'being_relay'} : {}),
       capturedAt: this._metadata.lastSuccessAt, revision: this._receipt?.revision || `local:${this._metadata.lastSuccessAt}`, manual: this._receipt?.manual ?? true});
   }
 

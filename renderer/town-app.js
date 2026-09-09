@@ -108,6 +108,8 @@
     NOT_CONNECTED: '请先连接 Being。', NETWORK_ERROR: '连接暂时中断，请稍后手动更新。',
     RATE_LIMITED: '请求较频繁，请稍后手动更新。', SERVICE_ERROR: 'Town 服务暂时不可用，请稍后手动更新。',
     INVALID_RESPONSE: '消息格式未通过检查，已保留上次同步内容。',
+    TOWN_TOOL_NOT_CALLED: 'Being 没有调用消息读取工具。请在模型设置检查工具限制，再请 Being 读取一次。',
+    RESULT_SOURCE_NOT_CONFIGURED: 'Being 的读取结果只有摘要，尚未配置完整结果通道；刷新显示不会补全消息。',
     BUSY: 'Being 正在处理其他消息，请空闲后再点击更新。',
     READINESS_UNKNOWN: '未能确认 Being 是否空闲，本次读取未发送。请重试。',
     RESULT_UNCONFIRMED: '读取已发送，但尚未取得可核对结果。自动检查已停止，请在功能任务中查看。',
@@ -142,6 +144,7 @@
     if (!connected() || !identity.beingId || identity.beingId !== expected.beingId || identity.connectionRevision !== expected.connectionRevision || identity.identityRevision !== expected.identityRevision) return false;
     const state = model[envelope.kind];
     state.messages = array(snapshot.messages);
+    state.source = snapshot.source === 'being_relay' ? 'being_relay' : '';
     state.latestSeq = snapshot.latestSeq ?? null;
     state.refresh = record(envelope.status);
     if (envelope.kind === 'bonfire') state.status = state.refresh.status === 'refreshing' ? 'loading' : state.refresh.status;
@@ -1220,7 +1223,7 @@
     const showStatus = true;
     text(ui.bonfireStatus, showStatus ? refreshLabel(state) : '');
     visible(ui.bonfireStatus, showStatus);
-    setNotice(ui.bonfireNotice, [state.sendError, state.error, state.memberError].filter(Boolean).join(' '), Boolean(state.sendError || state.error || state.memberError));
+    setNotice(ui.bonfireNotice, [state.sendError, state.error, state.memberError, state.source === 'being_relay' ? 'Being 转交 · 原文未独立核验' : ''].filter(Boolean).join(' '), Boolean(state.sendError || state.error || state.memberError));
     const membersKey = JSON.stringify([connected, state.members, state.sender, state.memberError]);
     if (ui.bonfireMembers.dataset.rendered !== membersKey) {
       ui.bonfireMembers.dataset.rendered = membersKey; ui.bonfireMembers.replaceChildren();

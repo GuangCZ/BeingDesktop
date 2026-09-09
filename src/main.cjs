@@ -102,6 +102,8 @@ function boot() {
   const townMethods=new Set(['getBeingMembers','listScrolls','getScroll','listBeings','getBonfireMessages','getFiresides','getFiresideMessages','getFiresideMembers','getTownMessageSnapshot','refreshTownMessages','requestTownRead','sendBonfireMessage','beginChannelConnection','updateFeishuCredentials','checkChannelStatus']);
   const townErrorCodes=new Set(['AUTH_REQUIRED','INVALID_REQUEST','IDENTITY_MISMATCH','NOT_CONNECTED','SESSION_CHANGED','BUSY','REQUEST_ACCEPTED','RATE_LIMITED','RESULT_UNKNOWN','NETWORK_ERROR','SERVICE_ERROR','INVALID_RESPONSE','BACKGROUND_UNAVAILABLE','NOT_RUNNING','PAUSED','INCOMPLETE_RESULT','RESULT_SOURCE_UNAVAILABLE','WAITING_SBS','SBS_NOT_CONFIGURED','TASK_LIMIT_REACHED']);
   townErrorCodes.add('READINESS_UNKNOWN');townErrorCodes.add('RESULT_UNCONFIRMED');
+  townErrorCodes.add('TOWN_TOOL_NOT_CALLED');
+  townErrorCodes.add('RESULT_SOURCE_NOT_CONFIGURED');
   townMethods.add('getTownCachedData');
   const serialized = new Set(['connect','disconnect','reconnect','selectWorkspace','selectPortalExecutable','selectPortalConfig','startPortal','stopPortal','setCloseToTray','setTypography','setColors','saveModelConfig','setOnboardingStep','prepareTownFeature','prepareTownAssistance','prepareFiresideDraft','discussFeatureTask','deployPortal']);
   serialized.add('changeChatSession');
@@ -273,6 +275,7 @@ function boot() {
     },results:localTownResults,
   });
   const beingTownReader=new BeingTownReader({
+    allowBonfireRelay:true,
     getConnection:()=>!exitStarted&&state.connection.status==='connected'?connection:null,
     getRuntime:()=>({activeStream:{active:channelBeing.state().status==='working'}}),
     fetchImpl:(url,options)=>net.fetch(url,options),

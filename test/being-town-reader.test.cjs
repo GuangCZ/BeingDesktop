@@ -3,6 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {BeingTownReader} = require('../src/being-town-reader.cjs');
+const {relaySource} = require('../src/town-result-source.cjs');
+const {messagesDto} = require('../src/town-session.cjs');
 const {parseConnection} = require('../src/security.cjs');
 
 const SECRET = 'only-for-loom-test-token';
@@ -51,6 +53,74 @@ function fixture(overrides = {}, change = {}) {
   return {reader, calls, requests, mirrorCalls, setConnection: value => { connection = value; }};
 }
 
+function relayFixture(change = {}, options = {}) {
+  const data = {ok: true, messages: [{seq: 9, being: 'other', message: '<script>untrusted message</script>', at: '2026-09-09T17:00:00+08:00', revised_at: null}], global_latest_seq: 9, returned: 1, total_count: 1};
+  const reader = new BeingTownReader({getConnection: () => CONNECTION, allowBonfireRelay: true, fetchImpl: async (_url, init) => {
+    if (init.method === 'GET') return idle();
+    const info = requestInfo(init);
+    const envelope = {protocol: 'being-town-relay/1', requestId: info.requestId, route: info.route, beingId: 'cz_being', httpStatus: 200, data, ...change.envelope};
+    return stream(init, {reply: JSON.stringify(envelope), ...change, result: {summary: JSON.stringify({body: JSON.stringify(data)}).slice(0, 120), ...change.result}});
+  }, ...options});
+  return {reader, data};
+}
+
+test('Bonfire compatibility mode transfers a real read with explicit unverified provenance', async () => {
+  const {LocalTownResults} = require('../src/local-town-results.cjs');
+  const {reader, data} = relayFixture({}, {toolResults: new LocalTownResults({getConfig: () => null})});
+  const result = await reader.read(ROUTE, {query: {limit: 10}});
+  assert.deepEqual(result, data);
+  assert.equal(reader.state().lastRead.source, 'being_relay');
+  assert.deepEqual(relaySource(result), {source: 'being_relay'});
+  assert.equal(messagesDto(result).source, 'being_relay');
+  assert.equal(messagesDto({...data, source: 'being_relay'}).source, undefined, 'remote fields cannot forge local provenance');
+});
+
+test('relay mode still prefers complete native results and trusted mirrors', async () => {
+  for (const viaMirror of [false, true]) {
+    const options = viaMirror ? {toolResults: {prepare: async () => {}, release: async () => {}, read: async item => ({protocol: 'being-town-tool-result/1', requestId: item.requestId, route: item.route, beingId: item.beingId, httpStatus: 200, data: RAW})}} : {};
+    const {reader} = relayFixture(viaMirror ? {reply: 'bad prose'} : {result: {content: JSON.stringify({status: 200, body: RAW})}}, options);
+    const result = await reader.read(ROUTE);
+    assert.deepEqual(result, RAW);
+    assert.equal(messagesDto(result).source, undefined);
+    assert.equal(reader.state().lastRead.source, viaMirror ? 'tool_result_mirror' : 'tool_result');
+  }
+});
+
+test('relay never accepts refusals, unrelated tools, failed reads or partial streams', async () => {
+  for (const change of [{noTool: true}, {noResult: true}, {noStop: true}, {name: 'portal_exec'}, {input: {url: 'https://example.com/'}}, {result: {summary: 'unrelated summary'}}, {result: {is_error: true}}, {result: {content: JSON.stringify({status: 401, body: {}})}}, {reply: '失败'}, {envelope: {requestId: 'different'}}, {envelope: {beingId: 'alice'}}]) {
+    const {reader} = relayFixture(change);
+    await assert.rejects(reader.read(ROUTE));
+    assert.equal(reader.state().lastRead, null);
+  }
+});
+
+test('relay rejects missing, duplicated, truncated, out-of-window and credential-bearing messages', async () => {
+  const {data} = relayFixture();
+  const bad = [
+    {...data, returned: 2}, {...data, total_count: 0}, {...data, total_count: 2}, {...data, truncated: true},
+    {...data, messages: [...data.messages, ...data.messages], returned: 2},
+    {...data, messages: [{...data.messages[0], seq: 10}]},
+    {...data, messages: [{...data.messages[0], at: 'not-a-date'}]},
+    {...data, messages: [{...data.messages[0], message: SECRET}]},
+    {...data, messages: [{...data.messages[0], full_length: 5000}]},
+    {...data, messages: [{...data.messages[0], message: 'a'.repeat(4001)}]},
+  ];
+  for (const value of bad) {
+    const {reader} = relayFixture({envelope: {data: value}});
+    await assert.rejects(reader.read(ROUTE, {query: {limit: 10}}));
+    assert.equal(reader.state().lastRead, null);
+  }
+});
+
+test('live Town contract allows absent revised_at on unedited messages', async () => {
+  const {data} = relayFixture();
+  delete data.messages[0].revised_at;
+  const {reader} = relayFixture({envelope: {data}});
+  const result = await reader.read(ROUTE, {query: {limit: 3}});
+  assert.equal(messagesDto(result).messages[0].revisedAt, '');
+  assert.equal(messagesDto(result).source, 'being_relay');
+});
+
 test('real Loom event shape: truncated summary requires the actual tool-result mirror', async () => {
   const {reader, calls, requests, mirrorCalls} = fixture({}, {chunked: true, crlf: true, reply: 'Completed.'});
   assert.deepEqual(await reader.read(ROUTE, {query: {limit: 100, compact: true}}), RAW);
@@ -85,9 +155,23 @@ test('complete tool_result has priority over model prose and supports tool IDs',
   assert.equal(reader.state().lastRead.source, 'tool_result');
 });
 
+test('a completed refusal without native tools reports the missing read and never uses the mirror', async () => {
+  const {reader, mirrorCalls} = fixture({}, {noTool: true, reply: '[Being Desktop Town sync:fixture] 失败。'});
+  await assert.rejects(reader.read(ROUTE), error => error.code === 'TOWN_TOOL_NOT_CALLED' && error.message.includes('原生 http'));
+  assert.equal(reader.state().lastRead, null);
+  assert.deepEqual(mirrorCalls.map(call => call.method), ['prepare', 'release']);
+});
+
+test('successful native HTTP with only a Loom summary requires a configured full-result transport', async () => {
+  const {LocalTownResults} = require('../src/local-town-results.cjs');
+  const {reader} = fixture({toolResults: new LocalTownResults({getConfig: () => null})}, {reply: '已完成。'});
+  await assert.rejects(reader.read(ROUTE), {code: 'RESULT_SOURCE_NOT_CONFIGURED'});
+  assert.equal(reader.state().lastRead, null);
+});
+
 test('tagged success, failure and incomplete receipts remain presentation only; actual tools determine task outcomes', async () => {
   for (const [receipt, change, expectedCode] of [
-    ['已完成。', {noTool:true}, 'INVALID_RESPONSE'],
+    ['已完成。', {noTool:true}, 'TOWN_TOOL_NOT_CALLED'],
     ['失败。', {result:{content:JSON.stringify({status:500,body:{error:'upstream unavailable'}})}}, 'SERVICE_ERROR'],
     ['结果不完整。', {result:{content:JSON.stringify({status:200,truncated:true,body:RAW})}}, 'INCOMPLETE_RESULT'],
   ]) {
@@ -321,7 +405,7 @@ test('an expired accepted result registration requests reconciliation instead of
 test('plain model output without a real matching http witness cannot become Town state', async () => {
   for (const change of [{noTool: true}, {noResult: true}, {name: 'shell'}, {input: {method: 'POST'}}, {input: {url: 'https://evil.example/api/bonfire/hear'}}, {input: {headers: {Authorization: 'secret'}}}, {input: {body: '{}'}}, {use: {id: 'a'}, result: {tool_use_id: 'b'}}]) {
     const {reader} = fixture({}, change);
-    await assert.rejects(reader.read(ROUTE), {code: 'INVALID_RESPONSE'});
+    await assert.rejects(reader.read(ROUTE), {code: change.noTool ? 'TOWN_TOOL_NOT_CALLED' : 'INVALID_RESPONSE'});
   }
 });
 

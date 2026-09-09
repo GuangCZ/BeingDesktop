@@ -29,7 +29,7 @@ function snapshot(value) {
     }
     messages.push(message);
   }
-  return {messages, latestSeq: value.latestSeq, capturedAt: value.capturedAt, revision: value.revision, manual: value.manual};
+  return {messages, latestSeq: value.latestSeq, capturedAt: value.capturedAt, revision: value.revision, manual: value.manual, ...(value.source === 'being_relay' ? {source: 'being_relay'} : {})};
 }
 
 // This store contains only validated message snapshots. Connection revisions
