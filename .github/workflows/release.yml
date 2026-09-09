@@ -19,6 +19,8 @@ jobs:
         with:
           node-version: '24'
           package-manager-cache: false
+      - name: Check release version and notes
+        run: node scripts/check-release.cjs
       - name: Install dependencies
         run: npm ci
       - name: Check source and documentation
@@ -43,8 +45,8 @@ jobs:
         run: |
           $releaseVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $releaseTag = "v$releaseVersion"
-          $releaseExe = "dist/Being-Desktop-$releaseVersion-win-x64.exe"
-          $releaseZip = "dist/Being-Desktop-$releaseVersion-win-x64.zip"
+          $releaseExe = "dist/Being-Desktop-$releaseVersion-windows-x64.exe"
+          $releaseZip = "dist/Being-Desktop-$releaseVersion-windows-x64.zip"
           if (-not (Test-Path -LiteralPath $releaseExe)) { throw 'Portable executable missing.' }
           Compress-Archive -LiteralPath dist/win-unpacked -DestinationPath $releaseZip -CompressionLevel Optimal
           $releaseChecksums = @($releaseExe, $releaseZip) | ForEach-Object {
@@ -52,29 +54,7 @@ jobs:
             "$releaseHash  $([IO.Path]::GetFileName($_))"
           }
           $releaseChecksums | Set-Content dist/SHA256SUMS.txt -Encoding utf8NoBOM
-          @"
-          Being Desktop $releaseVersion · Windows x64
-
-          EXE 可直接运行；ZIP 请完整解压，再运行 Being Desktop.exe。更新前请等待当前任务结束，并从托盘退出旧版。
-
-          ## 本轮更新：编排模式
-
-          - Being 负责细化需求、分派任务与验收，Codex CLI、Cursor CLI 或 Grok Build CLI Worker 执行代码与测试。
-          - 设置中提供模式开关、Agent Kit 检测、默认 Worker 与严格模型入口核验；关闭时相关配置灰显。
-          - 会话下展示 Worker 状态、工具调用和日志；完成后保存结果并回调 Being，通知送达与验收状态分别记录。
-          - 最终摘要、验收依据和预览入口回到原会话，网页通过 Desktop 内置浏览器展示。
-          - 修复历史同步重复追加 Worker 结果，并改善模型错误展示、会话恢复与新手引导。
-
-          ## 使用条件与范围
-
-          需要已有的 Being 与 Loom 连接。严格编排模式还需要已安装并完成登录的可用 CLI，以及独立部署的兼容 OpenAI Responses 严格模型入口；网关不包含在本安装包内。
-
-          Cursor SDK 与通用宿主 CLI 自动接续尚未接入。本次仅发布 Windows x64，未发布 macOS DMG。Windows 可执行文件未进行代码签名。
-
-          编排模式指南：https://GuangCZ.github.io/BeingDesktop/orchestration.html
-          完整文档：https://GuangCZ.github.io/BeingDesktop/
-          "@ | Set-Content dist/RELEASE.md -Encoding utf8NoBOM
           gh release view $releaseTag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) { throw "Release $releaseTag already exists; refusing to replace its assets." }
-          gh release create $releaseTag $releaseExe $releaseZip dist/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Being Desktop $releaseVersion" --notes-file dist/RELEASE.md
+          gh release create $releaseTag $releaseExe $releaseZip dist/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Being Desktop $releaseVersion" --notes-file "releases/$releaseVersion.md"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

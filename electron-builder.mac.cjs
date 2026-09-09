@@ -21,7 +21,7 @@ module.exports = {
     target: ['dmg', 'zip'],
     category: 'public.app-category.productivity',
     icon: 'renderer/assets/being/being-icon-512.png',
-    artifactName: 'Being-Desktop-${version}-mac-${arch}.${ext}',
+    artifactName: 'Being-Desktop-${version}-macos-${arch}.${ext}',
     identity: local ? null : selected.sha1,
     hardenedRuntime: false,
     notarize: false,
