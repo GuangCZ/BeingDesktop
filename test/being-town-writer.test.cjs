@@ -119,7 +119,8 @@ test('pending journal survives restart without storing content or credentials', 
   const restarted = fixture({}, {journalPath});
   await assert.rejects(restarted.writer.send({...value, requestId: randomUUID()}), {code: 'RESULT_UNKNOWN'});
   assert.equal(restarted.payloads.length, 0);
-  assert.equal((await fs.stat(journalPath)).mode & 0o777, 0o600);
+  // Windows reports compatibility mode bits; POSIX permissions are only meaningful on Unix.
+  if (process.platform !== 'win32') assert.equal((await fs.stat(journalPath)).mode & 0o777, 0o600);
 });
 
 test('corrupt persistence stops a new send before any network activity', async t => {
