@@ -15,7 +15,7 @@ class DesktopTools {
     this.requests=new Map();this.remoteJobs=new Set();this.jobOrigins=new Map();this.generation=0;this.disposed=false;this.notifyQueued=false;this.requestResult=null;
     this.browser=new Browser({WebContentsView,session,getWindow,onChange:()=>this.changed()});
     this.console=new Console({getWorkspace,onChange:()=>this.changed()});
-    this.link=new ToolLink({onChange:()=>this.changed(),toolAllowed:name=>orchestration?.mode.enabled?name.startsWith('desktop_worker_'):!name.startsWith('desktop_worker_') && (!name.startsWith('desktop_terminal_') || Boolean(getTerminal()) && process.platform==='win32'),invokeTool:(name,args,context)=>this.request(name,args,context)});
+    this.link=new ToolLink({onChange:()=>this.changed(),toolAllowed:name=>orchestration?.mode.enabled?name.startsWith('desktop_worker_'):!name.startsWith('desktop_worker_') && (!name.startsWith('desktop_terminal_') || Boolean(getTerminal()) && ['win32','darwin'].includes(process.platform)),invokeTool:(name,args,context)=>this.request(name,args,context)});
   }
   snapshot() {
     const consoleState=this.console.snapshot(),jobIds=new Set(consoleState.jobs.map(job=>job.id));
@@ -63,7 +63,7 @@ class DesktopTools {
     if(name.startsWith('desktop_worker_'))return Promise.reject(new Error('编排模式未开启。'));
     if(this.disposed || signal?.aborted)return Promise.reject(new Error('调用已取消。'));
     if(name.startsWith('desktop_terminal_'))return this.terminalTools.invoke(name,structuredClone(args),{signal}).then(textResult).catch(error=>({
-      content:[{type:'text',text:/^(终端|只能操作本会话|同一 requestId|当前会话的终端|交互终端|本版本的交互终端|最多同时保留|请先选择有效|无法启动 PowerShell|无法连接 PowerShell)/.test(error?.message || '') ? error.message : '交互终端操作未完成，请读取终端列表和当前消息的会话绑定后核对。'}],isError:true,
+      content:[{type:'text',text:/^(终端|只能操作本会话|同一 requestId|当前会话的终端|交互终端|本版本的交互终端|最多同时保留|请先选择有效|无法启动 (?:PowerShell|zsh)|无法连接 (?:PowerShell|zsh))/.test(error?.message || '') ? error.message : '交互终端操作未完成，请读取终端列表和当前消息的会话绑定后核对。'}],isError:true,
     }));
     if(this.requests.size>=8)return Promise.reject(new Error('待确认调用过多，请稍后重试。'));
     const frozen=structuredClone(args);

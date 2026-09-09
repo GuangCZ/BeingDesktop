@@ -36,7 +36,7 @@ class DesktopTerminalTools {
           try { check(); } catch(error) { await terminal.close(result.sessionId);throw error; }
           scope.terminals.add(result.sessionId);
           await this.showTerminal(result.sessionId);
-          return {terminalId:result.sessionId,shell:'PowerShell',interactive:true,visible:true,...terminal.readSince(result.sessionId,0)};
+          return {terminalId:result.sessionId,shell:terminal.shell || 'PowerShell',interactive:true,visible:true,...terminal.readSince(result.sessionId,0)};
         }
         case 'desktop_terminal_write': {
           const result=terminal.write({id:args.terminalId,data:args.data});

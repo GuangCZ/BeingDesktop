@@ -307,3 +307,27 @@ test('retaining PATH does not trust changed adapter code even with a matching fo
     assert.equal(await fs.readFile(file,'utf8'),altered);
   }
 });
+
+for (const arch of ['arm64','x64']) test(`Mac ${arch} reviewed Codex adapter preserves verification and detects tampering`,async t=>{
+  const f=await fixture(t,{platform:'darwin',arch});
+  const result=await f.engine.install(ID);
+  assert.equal(result.status,'installed',result.detail);
+  assert.equal(result.loaded,false);
+  assert.equal(f.probes.length,1);
+  assert.equal((await f.engine.prepare(ID)).status,'installed');
+  await fs.appendFile(path.join(result.installPath,'desktop-mcp-shim.cjs'),'\n// modified');
+  assert.equal((await f.engine.prepare(ID)).status,'needs_being');
+});
+
+test('Mac Homebrew symlinks resolve to verified executables for the reviewed Async worker', {skip:process.platform!=='darwin'},async t=>{
+  const id='OteJGwtOzLqL7jmyZ2PfM';
+  const f=await fixture(t,{platform:'darwin',arch:'arm64',recipeId:id,fixtureBundle:ASYNC_BUNDLE,probeMcp:async()=>({verified:true})});
+  const bin=path.join(f.root,'bin');await fs.mkdir(bin);
+  await fs.chmod(f.nodePath,0o700);await fs.chmod(f.codexPath,0o700);
+  await fs.symlink(f.nodePath,path.join(bin,'node'));await fs.symlink(f.codexPath,path.join(bin,'codex'));
+  f.engine.nodePath=undefined;f.engine.codexPath=undefined;f.engine.env.PATH=bin;
+  const result=await f.engine.install(id);
+  assert.equal(result.status,'installed',result.detail);
+  assert.equal((await f.engine.verifyInstalledRoot()).verified,true);
+  assert.ok(f.calls.some(call=>call.file===f.codexPath && call.args[0]==='login'));
+});

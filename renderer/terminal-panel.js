@@ -39,7 +39,7 @@ window.beingTerminal=(()=>{
   function createEntry(id,kind) {
     const key=`${kind}:${id}`;
     if(entries.has(key))return entries.get(key);
-    const surface=element('div','terminal-session');surface.hidden=true;surface.dataset.terminalId=id;surface.setAttribute('role','tabpanel');surface.setAttribute('aria-label',kind==='shell'?'PowerShell 终端':'Being 命令输出');
+    const surface=element('div','terminal-session');surface.hidden=true;surface.dataset.terminalId=id;surface.setAttribute('role','tabpanel');surface.setAttribute('aria-label',kind==='shell'?'交互终端':'Being 命令输出');
     const terminal=new window.Terminal(terminalOptions(kind==='job')),fitAddon=new window.FitAddon.FitAddon();
     const mount=element('div','terminal-mount');surface.append(mount);terminal.loadAddon(fitAddon);stage.append(surface);terminal.open(mount);
     const entry={key,id,kind,surface,terminal,fitAddon,sequence:0,replaying:false,pending:[],replayGeneration:0,writes:Promise.resolve(),lastSize:'',jobText:'',exitText:'',disposables:[]};
@@ -101,7 +101,7 @@ window.beingTerminal=(()=>{
     state=next;
     const ids=new Set(state.sessions.map(item=>keyFor(item.id)));
     for(const [key,entry] of entries)if(entry.kind==='shell'&&!ids.has(key))removeEntry(key);
-    for(const session of state.sessions){const entry=createEntry(session.id,'shell');entry.terminal.options.disableStdin=!['running','starting'].includes(session.status);entry.surface.setAttribute('aria-label',`${session.title||'PowerShell'} · ${session.cwd||''}`);}
+    for(const session of state.sessions){const entry=createEntry(session.id,'shell');entry.terminal.options.disableStdin=!['running','starting'].includes(session.status);entry.surface.setAttribute('aria-label',`${session.title||'终端'} · ${session.cwd||''}`);}
     if(!entries.has(selected))selected=keyFor(state.activeSessionId);
     if(!entries.has(selected))selected=entries.keys().next().value||'';
     renderTabs();renderStage();fit();
@@ -114,17 +114,17 @@ window.beingTerminal=(()=>{
       const session=entry.kind==='shell'?sessionFor(entry):jobs.find(job=>job.id===entry.id);
       if(!session)continue;
       const active=selected===entry.key,readonly=entry.kind==='job',running=readonly?busy(session):session.status==='running';
-      const row=element('div',`terminal-tab${active?' active':''}`),select=element('button','terminal-tab-select');select.type='button';select.setAttribute('role','tab');select.setAttribute('aria-selected',String(active));select.tabIndex=active?0:-1;select.dataset.terminalAction=`select:${entry.key}`;select.title=readonly?`Being · 独立非交互命令（只读）\n${session.command}\n${session.cwd}`:`${session.title||'PowerShell'}\n${session.cwd}${running?'':`\n已退出${session.exitCode===null||session.exitCode===undefined?'':` (${session.exitCode})`}`}`;
-      select.append(icon('terminal'),element('span','terminal-tab-title',readonly?'Being · 命令':session.title||'PowerShell'));
+      const row=element('div',`terminal-tab${active?' active':''}`),select=element('button','terminal-tab-select');select.type='button';select.setAttribute('role','tab');select.setAttribute('aria-selected',String(active));select.tabIndex=active?0:-1;select.dataset.terminalAction=`select:${entry.key}`;select.title=readonly?`Being · 独立非交互命令（只读）\n${session.command}\n${session.cwd}`:`${session.title||'终端'}\n${session.cwd}${running?'':`\n已退出${session.exitCode===null||session.exitCode===undefined?'':` (${session.exitCode})`}`}`;
+      select.append(icon('terminal'),element('span','terminal-tab-title',readonly?'Being · 命令':session.title||'终端'));
       if(!running)select.append(element('span','terminal-tab-ended','已退出'));
       select.addEventListener('click',()=>setSelected(entry.key));
       select.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const keys=[...entries.keys()],at=keys.indexOf(entry.key),next=event.key==='Home'?0:event.key==='End'?keys.length-1:(at+(event.key==='ArrowLeft'?-1:1)+keys.length)%keys.length;setSelected(keys[next],{focus:false});tabs.querySelectorAll('.terminal-tab-select')[next]?.focus();});
-      const close=button(readonly?'关闭 Being 命令输出':running?'关闭并结束 PowerShell 会话':'关闭 PowerShell 终端','close',()=>void closeEntry(entry));close.classList.add('terminal-tab-close');close.dataset.terminalAction=`close:${entry.key}`;
+      const close=button(readonly?'关闭 Being 命令输出':running?'关闭并结束 终端会话':'关闭 交互终端','close',()=>void closeEntry(entry));close.classList.add('terminal-tab-close');close.dataset.terminalAction=`close:${entry.key}`;
       row.append(select,close);tabs.append(row);
     }
     tabs.scrollLeft=scrollLeft;
     if(focusKey)tabs.querySelectorAll('button').forEach(node=>{if(node.dataset.terminalAction===focusKey)node.focus({preventScroll:true});});
-    newButton.disabled=creating;newButton.title=creating?'正在启动 PowerShell…':'新建 PowerShell 终端';
+    newButton.disabled=creating;newButton.title=creating?'正在启动 终端…':'新建 交互终端';
     const active=activeEntry(),job=active?.kind==='job'?jobs.find(item=>item.id===active.id):null;
     stopButton.hidden=!busy(job);stopButton.disabled=job?.status==='stopping';
   }
@@ -142,7 +142,7 @@ window.beingTerminal=(()=>{
   function menuItem(label,onClick,{disabled=false}={}) {const item=element('button','terminal-menu-item',label);item.type='button';item.disabled=disabled;item.addEventListener('click',()=>{closeMenu();onClick();});menu.append(item);return item;}
   function toggleMenu() {
     if(!menu.hidden){closeMenu();return;}
-    menu.replaceChildren();menuItem('新建 PowerShell',()=>void create(),{disabled:creating});menuItem('选择工作目录…',()=>callbacks?.onSelectWorkspace?.());
+    menu.replaceChildren();menuItem('新建终端',()=>void create(),{disabled:creating});menuItem('选择工作目录…',()=>callbacks?.onSelectWorkspace?.());
     const active=activeEntry();menuItem('复制所选内容',()=>active&&void copy(active),{disabled:!active?.terminal.hasSelection()});menuItem('粘贴',()=>active&&void paste(active),{disabled:active?.kind!=='shell'||!['running','starting'].includes(sessionFor(active)?.status)});
     menuItem('清除终端显示',()=>active?.terminal.clear(),{disabled:!active});
     const hiddenJobs=jobs.filter(job=>closedJobs.has(job.id));
@@ -187,8 +187,8 @@ window.beingTerminal=(()=>{
     toolbar=element('div','terminal-toolbar');tabs=element('div','terminal-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','终端');
     const actions=element('div','terminal-toolbar-actions');
     stopButton=button('停止 Being 命令','stop',()=>{const entry=activeEntry();if(entry?.kind==='job')void bridge.desktopAction('console.stop',entry.id).catch(fail);});stopButton.hidden=true;
-    newButton=button('新建 PowerShell 终端','plus',()=>void create());menuButton=button('终端选项','chevron',toggleMenu);menuButton.setAttribute('aria-haspopup','menu');menuButton.setAttribute('aria-expanded','false');actions.append(stopButton,newButton,menuButton);toolbar.append(tabs,actions);
-    stage=element('div','terminal-stage');empty=element('div','terminal-empty');const open=element('button','terminal-open-button','打开 PowerShell');open.type='button';open.prepend(icon('terminal'));open.addEventListener('click',()=>void create());empty.append(open);stage.append(empty);
+    newButton=button('新建 交互终端','plus',()=>void create());menuButton=button('终端选项','chevron',toggleMenu);menuButton.setAttribute('aria-haspopup','menu');menuButton.setAttribute('aria-expanded','false');actions.append(stopButton,newButton,menuButton);toolbar.append(tabs,actions);
+    stage=element('div','terminal-stage');empty=element('div','terminal-empty');const open=element('button','terminal-open-button','打开终端');open.type='button';open.prepend(icon('terminal'));open.addEventListener('click',()=>void create());empty.append(open);stage.append(empty);
     menu=element('div','terminal-menu');menu.hidden=true;menu.setAttribute('aria-label','终端选项');host.replaceChildren(toolbar,stage,menu);
     const outside=event=>{if(!menu.contains(event.target)&&!menuButton.contains(event.target))closeMenu();};document.addEventListener('pointerdown',outside);unsubscribers.push(()=>document.removeEventListener('pointerdown',outside));
     menu.addEventListener('keydown',event=>{if(event.key==='Escape'){closeMenu();menuButton.focus();event.preventDefault();}if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const items=[...menu.querySelectorAll('button:not(:disabled)')],at=items.indexOf(document.activeElement),index=event.key==='Home'?0:event.key==='End'?items.length-1:(at+(event.key==='ArrowUp'?-1:1)+items.length)%items.length;items[index]?.focus();}});

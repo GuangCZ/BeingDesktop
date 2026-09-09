@@ -112,12 +112,31 @@ test('inherited, accessor, symbol, and hidden confirmation fields are not accept
 });
 
 test('unsupported platform or architecture fails before inspecting processes or installing', async t => {
-  for (const [platform, arch] of [['darwin', 'x64'], ['linux', 'x64'], ['win32', 'arm64']]) {
+  for (const [platform, arch] of [['darwin', 'ia32'], ['linux', 'x64'], ['win32', 'arm64']]) {
     const h = await harness(t, { platform, arch });
     assert.equal(h.controller.state().platformSupported, false);
-    await assert.rejects(h.controller.deploy(confirmation()), /Windows x64/);
+    await assert.rejects(h.controller.deploy(confirmation()), /已校验/);
     assert.deepEqual(h.calls, []);
   }
+});
+
+test('Mac deployment supports both architectures and retains external Portal ownership', async t => {
+  for (const arch of ['arm64','x64']) {
+    const h = await harness(t,{platform:'darwin',arch,portalState:{status:'external',pid:123,owned:false}});
+    assert.equal(h.controller.state().platformSupported,true);
+    const result=await h.controller.deploy(confirmation());
+    assert.equal(result.status,'external');
+    assert.deepEqual(h.calls,['portal.inspect']);
+    assert.equal(h.saved,null);
+  }
+});
+
+test('Mac fresh deployment persists the selected release metadata before starting', async t => {
+  const h = await harness(t,{platform:'darwin',arch:'arm64'});
+  const result=await h.controller.deploy(confirmation());
+  assert.equal(result.status,'running');
+  assert.ok(h.calls.indexOf('save')<h.calls.indexOf('start'));
+  assert.equal(h.controller.state().portalInstall.totalBytes,12930864);
 });
 
 test('unconfigured, disconnected, and exiting contexts cannot begin deployment', async t => {

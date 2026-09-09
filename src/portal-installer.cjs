@@ -11,6 +11,18 @@ const PORTAL_RELEASE = Object.freeze({
   size: 12193280,
   sha256: '9f0fb1200d756b5c450cc3ff57752648ab4df70622b82df92033f4167426d355',
 });
+const PORTAL_RELEASES = Object.freeze({
+  'win32-x64': PORTAL_RELEASE,
+  'darwin-arm64': Object.freeze({version:'0.8.0',
+    url:'https://github.com/d5z/heart-portal/releases/download/v0.8.0/heart-portal-macos-arm64',
+    size:12930864, sha256:'eb3696c04bb3972832443311ffa84e00b50cca92ca35347fa955fb116e23074b'}),
+  'darwin-x64': Object.freeze({version:'0.8.0',
+    url:'https://github.com/d5z/heart-portal/releases/download/v0.8.0/heart-portal-macos-x86_64',
+    size:13560240, sha256:'2c74efc68e2f24fc2849e122ea450ee90d51dba850b5a92c5c2409ed8c21e622'}),
+});
+function portalRelease(platform = process.platform, arch = process.arch) {
+  return PORTAL_RELEASES[`${platform}-${arch}`] || null;
+}
 const DOWNLOAD_HOSTS = new Set([
   'github.com', 'release-assets.githubusercontent.com',
   'objects.githubusercontent.com', 'github-releases.githubusercontent.com',
@@ -49,11 +61,15 @@ async function directoryChain(directory, createLeaf = false) {
 }
 
 class PortalInstaller {
-  constructor({ userDataDir, requestImpl = https.request, createHashImpl = crypto.createHash } = {}) {
+  constructor({ userDataDir, requestImpl = https.request, createHashImpl = crypto.createHash, platform = process.platform, arch = process.arch } = {}) {
+    this.release = portalRelease(platform, arch);
+    if (!this.release) throw new Error('当前平台没有已校验的 Portal 安装包。');
+    this.platform = platform;
+    this.arch = arch;
     this.userDataDir = localPath(userDataDir);
     this.managedDir = path.join(this.userDataDir, 'managed-portal');
-    this.versionDir = path.join(this.managedDir, `v${PORTAL_RELEASE.version}`);
-    this.executable = path.join(this.versionDir, 'heart-portal.exe');
+    this.versionDir = path.join(this.managedDir, platform === 'win32' ? `v${this.release.version}` : `v${this.release.version}-${platform}-${arch}`);
+    this.executable = path.join(this.versionDir, platform === 'win32' ? 'heart-portal.exe' : 'heart-portal');
     this.requestImpl = requestImpl;
     this.createHashImpl = createHashImpl;
     this._installation = null;
@@ -61,14 +77,14 @@ class PortalInstaller {
 
   _state(status) {
     return {
-      status, phase: 'not_started', version: PORTAL_RELEASE.version,
+      status, phase: 'not_started', version: this.release.version,
       executable: this.executable, verified: status === 'installed', started: false,
-      size: PORTAL_RELEASE.size, sha256: PORTAL_RELEASE.sha256,
+      size: this.release.size, sha256: this.release.sha256,
     };
   }
 
   _progress(callback, phase, receivedBytes = 0) {
-    try { callback?.({ phase, receivedBytes, totalBytes: PORTAL_RELEASE.size }); }
+    try { callback?.({ phase, receivedBytes, totalBytes: this.release.size }); }
     catch { /* Progress observers must not interrupt installation. */ }
   }
 
@@ -80,7 +96,8 @@ class PortalInstaller {
 
   async _verifiedFile() {
     const before = await fs.lstat(this.executable);
-    if (before.isSymbolicLink() || !before.isFile() || before.size !== PORTAL_RELEASE.size) return false;
+    if (before.isSymbolicLink() || !before.isFile() || before.size !== this.release.size
+      || (this.platform === 'darwin' && !(before.mode & 0o100))) return false;
     const handle = await fs.open(this.executable, 'r');
     try {
       const opened = await handle.stat();
@@ -92,14 +109,14 @@ class PortalInstaller {
         const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
         if (!bytesRead) break;
         received += bytesRead;
-        if (received > PORTAL_RELEASE.size) return false;
+        if (received > this.release.size) return false;
         hash.update(buffer.subarray(0, bytesRead));
       }
       const after = await fs.lstat(this.executable);
       return !after.isSymbolicLink() && after.ino === before.ino && after.dev === before.dev
         && after.size === before.size && after.mtimeMs === before.mtimeMs && after.ctimeMs === before.ctimeMs
-        && received === PORTAL_RELEASE.size
-        && hash.digest('hex') === PORTAL_RELEASE.sha256;
+        && received === this.release.size
+        && hash.digest('hex') === this.release.sha256;
     } finally { await handle.close(); }
   }
 
@@ -137,7 +154,7 @@ class PortalInstaller {
             response.resume(); reject(new Error('Portal 下载失败，请稍后重试。')); return;
           }
           const length = response.headers['content-length'];
-          if (length !== undefined && (!/^\d+$/.test(String(length)) || Number(length) !== PORTAL_RELEASE.size)) {
+          if (length !== undefined && (!/^\d+$/.test(String(length)) || Number(length) !== this.release.size)) {
             response.destroy(); reject(new Error('Portal 下载文件大小不符。')); return;
           }
           resolve(response);
@@ -160,7 +177,7 @@ class PortalInstaller {
       await this._directories(true);
       const existing = await this.inspect();
       if (existing.verified) {
-        this._progress(onProgress, 'not_started', PORTAL_RELEASE.size);
+        this._progress(onProgress, 'not_started', this.release.size);
         return existing;
       }
       // Never replace a user-created link or directory at the managed binary path.
@@ -173,20 +190,21 @@ class PortalInstaller {
       handle = await fs.open(temporary, 'wx', 0o600);
       temporaryOwned = true;
       this._progress(onProgress, 'download');
-      response = await this._response(PORTAL_RELEASE.url);
+      response = await this._response(this.release.url);
       const hash = this.createHashImpl('sha256');
       let received = 0;
       for await (const data of response) {
         const chunk = Buffer.isBuffer(data) ? data : Buffer.from(data);
         received += chunk.length;
-        if (received > PORTAL_RELEASE.size) throw new Error('Portal 下载文件超过大小限制。');
+        if (received > this.release.size) throw new Error('Portal 下载文件超过大小限制。');
         hash.update(chunk);
         await handle.writeFile(chunk);
         this._progress(onProgress, 'download', received);
       }
-      if (received !== PORTAL_RELEASE.size) throw new Error('Portal 下载不完整。');
+      if (received !== this.release.size) throw new Error('Portal 下载不完整。');
       this._progress(onProgress, 'hash', received);
-      if (hash.digest('hex') !== PORTAL_RELEASE.sha256) throw new Error('Portal 文件校验失败，未安装。');
+      if (hash.digest('hex') !== this.release.sha256) throw new Error('Portal 文件校验失败，未安装。');
+      if (this.platform === 'darwin') await handle.chmod(0o700);
       await handle.sync();
       await handle.close();
       handle = null;
@@ -217,4 +235,4 @@ class PortalInstaller {
   }
 }
 
-module.exports = { PORTAL_RELEASE, PortalInstaller, isAllowedPortalAssetUrl };
+module.exports = { PORTAL_RELEASE, PORTAL_RELEASES, portalRelease, PortalInstaller, isAllowedPortalAssetUrl };

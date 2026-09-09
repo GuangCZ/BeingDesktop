@@ -47,3 +47,24 @@ test('missing config and malformed runtime are failures', async () => {
   assert.equal(result.checks[0].status, 'failed');
   assert.equal(result.checks[2].status, 'failed');
 });
+
+test('external Portal is verified without requiring desktop-managed configuration', async () => {
+  const input = fixture();
+  input.portal.state = {status:'external',executable:'',configPath:'',pid:42,owned:false,health:'unknown'};
+  input.portal.inspectProcesses = async () => [{pid:42,name:'heart-portal',executable:'/opt/portal/heart-portal'}];
+  const result = await runPortalSelfTest(input);
+  assert.equal(result.status,'unknown');
+  assert.equal(result.checks[0].status,'unknown');
+  assert.equal(result.checks[1].status,'passed');
+  assert.equal(result.checks[3].status,'unknown');
+  assert.ok(!JSON.stringify(result).includes('文件缺失'));
+});
+
+test('external Portal PID reused by an unrelated process is not accepted', async () => {
+  const input = fixture();
+  input.portal.state = {status:'external',executable:'',configPath:'',pid:42,owned:false,health:'unknown'};
+  input.portal.inspectProcesses = async () => [{pid:42,name:'other',executable:'/usr/bin/other'}];
+  const result = await runPortalSelfTest(input);
+  assert.equal(result.checks[1].status,'failed');
+  assert.match(result.checks[1].detail,/原启动位置/);
+});

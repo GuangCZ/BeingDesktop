@@ -239,17 +239,21 @@ window.beingOnboarding = (() => {
     feedback('loom', errors.loom || connectionError || (checking ? '正在读取 Being 身份、模型和 Channel 配置…' : connecting ? '正在打开 Loom，随后检查 Being 当前配置…' : ''), Boolean(errors.loom || connectionError));
     renderInspection(checking);
     const running = ['running', 'external'].includes(portal.status);
+    $('setup-title-portal').textContent = portal.status === 'external' ? '继续使用已有的 Portal' : '现在部署 Portal 吗？';
+    $('setup-workspace-path').closest('.setup-workspace').hidden = portal.status === 'external';
+    $('setup-portal-permission-note').hidden = portal.status === 'external';
     const existing = Boolean(portal.executable && portal.configPath);
     const hasConfiguration = Boolean(portal.executable || portal.configPath);
     const needsSettings = (hasConfiguration && !existing) || (portal.owned && portal.status === 'error');
     const workspace = state.workspace?.path || state.townApp?.portalWorkspace?.path || '';
-    $('setup-portal-description').textContent = hasConfiguration ? '已发现本机 Portal 配置。可以继续使用已有程序，或稍后在设置中检查配置。' : '让 Being 通过本机 Portal 读写工作区中的文件。点击部署后，自动下载、校验并配置官方程序。';
+    $('setup-portal-description').textContent = portal.status === 'external' ? '已检测到由其他程序或登录服务管理的本机 Portal。保留它的现有连接、权限与工作区，可直接继续。' : hasConfiguration ? '已发现本机 Portal 配置。可以继续使用已有程序，或稍后在设置中检查配置。' : '让 Being 通过本机 Portal 读写工作区中的文件。点击部署后，自动下载、校验并配置官方程序。';
     $('setup-workspace-label').textContent = hasConfiguration ? (portal.configPath ? '已有 Portal 配置' : '已有 Portal 程序') : '本机工作区';
     $('setup-workspace-path').textContent = hasConfiguration ? portal.configPath || portal.executable : workspace || '部署时自动创建专用工作区';
     $('setup-workspace-note').textContent = hasConfiguration ? '保留原有配置，可在连接设置中查看和调整。' : state.workspace?.path ? `位于 ${state.machine?.hostname || '当前这台电脑'}。` : '点击部署时创建此文件夹，也可以选择已有工作区。';
-    $('setup-portal-permissions').hidden = hasConfiguration;
+    $('setup-portal-permissions').hidden = hasConfiguration || portal.status === 'external';
+    $('setup-portal-next').textContent = portal.status === 'external' ? '保留已有 Portal，继续 →' : '继续 →';
     $('setup-portal-permission-note').textContent = hasConfiguration ? '启动后使用原有的工具权限和工作区，以已有 Portal 配置为准。' : '网络与 OAuth 基础能力保留；工作区不是系统沙箱。';
-    $('setup-workspace-select').hidden = hasConfiguration;
+    $('setup-workspace-select').hidden = hasConfiguration || portal.status === 'external';
     $('setup-workspace-select').disabled = busy || running || hasConfiguration;
     $('setup-portal-deploy').hidden = running;
     $('setup-portal-deploy').disabled = busy || (!needsSettings && (!connected() || state.townApp?.platformSupported === false));
@@ -280,9 +284,9 @@ window.beingOnboarding = (() => {
     let portalError = Boolean(detail);
     if (deploying) { detail = phases[installation.phase] || '正在准备 Portal 配置…'; portalError = false; }
     else if (!detail && needsSettings) detail = '现有程序或配置不完整，请在 Portal 设置中补全，也可以暂时跳过。';
-    else if (!detail && running) detail = portal.connectionCurrent === false ? 'Portal 仍连接之前的 Being，可稍后在设置中处理。' : portal.status === 'external' ? '已检测到已有 Portal，请在原启动位置管理。' : ['healthy', 'connected', 'ok'].includes(portal.health) ? 'Portal 已启动，连接已确认。可以继续下一步。' : 'Portal 已启动，连接健康待确认。可以继续下一步。';
+    else if (!detail && running) detail = portal.connectionCurrent === false ? 'Portal 仍连接之前的 Being，可稍后在设置中处理。' : portal.status === 'external' ? '已有 Portal 进程正在运行，当前 Being 的连接状态尚未验证。请在原启动位置管理。' : ['healthy', 'connected', 'ok'].includes(portal.health) ? 'Portal 已启动，连接已确认。可以继续下一步。' : 'Portal 已启动，连接健康待确认。可以继续下一步。';
     else if (!detail && !connected()) detail = 'Loom 尚未连接，可以返回上一步重新连接，或暂时跳过。';
-    else if (!detail && state.townApp?.platformSupported === false) detail = '自动部署支持 Windows x64，你可以暂时跳过。';
+    else if (!detail && state.townApp?.platformSupported === false) detail = '当前平台暂无已校验的 Portal 安装包，你可以暂时跳过。';
     else if (!detail && !running && installation.detail) detail = installation.detail;
     feedback('portal', detail || '', portalError);
     feedback('channel', errors.channel || (!connected() ? 'Loom 尚未连接，可以返回前面的步骤重新连接，或暂时跳过。' : ''), Boolean(errors.channel));

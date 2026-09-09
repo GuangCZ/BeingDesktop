@@ -849,7 +849,7 @@
     }
     const ready = Boolean(workspace) && publicState.connection?.status === 'connected' && town.platformSupported !== false;
     if (publicState.connection?.status !== 'connected') page.append(node('p', 'ta-muted', '请先连接 Being，等待会话加载完成后再部署 Portal。'));
-    if (town.platformSupported === false) page.append(node('p', 'ta-warning', '当前自动部署支持 Windows x64。'));
+    if (town.platformSupported === false) page.append(node('p', 'ta-warning', '当前平台暂无已校验的 Portal 安装包。'));
     const deploy = button(existing || existingConfiguration ? '一键检查并连接 Portal' : '一键部署 Heart Portal', () => void deployPortal(), 'ta-primary', 'portal-app-deploy');
     deploy.disabled = !ready;
     const launch = append(node('section', 'ta-panel ta-portal-launch'), node('h4', '', '一键部署'), node('p', '', `将 ${machine} 的工作区连接给 ${beingName()}。点击后自动下载、校验、配置并启动官方 Portal。`), node('p', 'ta-muted', '文件读写与搜索开启 · 命令执行关闭 · 第三方工具包不加载。网络与 OAuth 基础能力保留。'), deploy);

@@ -5,7 +5,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const {normalizeAppMenuRequest, commandForInput, createDesktopMenuTemplate} = require('../src/desktop-menu.cjs');
+const commandForInput = input => platformCommand(input,'win32');
+const createDesktopMenuTemplate = (name,options) => platformMenu(name,options,'win32');
+const {normalizeAppMenuRequest, commandForInput: platformCommand, createDesktopMenuTemplate: platformMenu} = require('../src/desktop-menu.cjs');
 
 test('native menu positions stay inside content bounds and reject unsupported payloads', () => {
   const bounds = {width: 1000, height: 700};

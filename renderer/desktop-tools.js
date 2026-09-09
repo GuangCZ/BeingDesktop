@@ -48,7 +48,7 @@ window.beingTools=(()=>{
     for(const request of state.requests || []) {
       const card=element('article','tools-request');
       card.append(element('strong','',`Being 请求：${labels[request.name] || request.name}`));
-      const summary=request.name==='desktop_console_run'?`新建独立 PowerShell 会话 · 非交互命令\n${request.args.cwd || '未选择目录'}\n\n${request.args.command}`:
+      const summary=request.name==='desktop_console_run'?`新建独立命令会话 · 非交互命令\n${request.args.cwd || '未选择目录'}\n\n${request.args.command}`:
         ['desktop_console_status','desktop_console_stop'].includes(request.name)?`${request.name==='desktop_console_status'?'读取以下命令截至执行时保留的状态与输出（每条最多 256 KiB，保留尾部，含审批后同一任务新增的输出）':'停止以下命令及桌面管理的子进程'}\n${(request.reviewJobs||[]).map(job=>`${job.id}\nPS ${job.cwd}> ${job.command}`).join('\n\n') || '没有可读取的命令'}`:
         `${request.target || ''}\n${request.targetSummary?`${request.targetSummary}\n`:''}${JSON.stringify(request.args,null,2)}`;
       card.append(element('pre','',summary));

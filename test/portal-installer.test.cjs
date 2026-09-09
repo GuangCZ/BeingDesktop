@@ -42,7 +42,7 @@ async function fixture(t, options = {}) {
     assert.ok(path.basename(root).startsWith('being-portal-install-test-'));
     return fs.rm(root, { recursive: true, force: true });
   });
-  const installer = new PortalInstaller({ userDataDir: root, ...options });
+  const installer = new PortalInstaller({ userDataDir: root, platform:'win32', arch:'x64', ...options });
   return { root, installer };
 }
 

@@ -2,6 +2,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
+const {desktopEnvironment} = require('./platform.cjs');
 const {launchAgent} = require('./agent-process.cjs');
 
 const AGENTS = Object.freeze([
@@ -10,7 +11,7 @@ const AGENTS = Object.freeze([
   {id:'grok',name:'Grok Build CLI',commands:['grok'],help:['--help'],features:['--output-format','--prompt-file'],args:['--output-format','streaming-json']},
 ]);
 async function executable(commands, override = '') {
-  const dirs = [...new Set((process.env.PATH || '').split(path.delimiter).filter(dir=>path.isAbsolute(dir)).concat([
+  const dirs = [...new Set((desktopEnvironment().PATH || '').split(path.delimiter).filter(dir=>path.isAbsolute(dir)).concat([
     path.join(os.homedir(),'.local','bin'),path.join(os.homedir(),'.cargo','bin'),
     ...(process.env.APPDATA ? [path.join(process.env.APPDATA,'npm')] : []),
   ]))];

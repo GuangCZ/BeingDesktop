@@ -2,6 +2,8 @@
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const {PORTAL_NAME} = require('./services.cjs');
+const {portalRelease} = require('./portal-installer.cjs');
 const {execFile} = require('node:child_process');
 const {promisify} = require('node:util');
 
@@ -42,29 +44,31 @@ function compareVersions(left, right) {
   return 0;
 }
 
-function parsePortalRelease(value) {
+function parsePortalRelease(value, {platform = process.platform, arch = process.arch} = {}) {
   const tag = value?.tag_name;
   const parsed = parseVersion(tag);
   if (!parsed || !/^v?\d+\.\d+\.\d+$/.test(tag) || value.draft !== false || value.prerelease !== false
       || value.html_url !== `${RELEASE_ROOT}/tag/${tag}` || !Array.isArray(value.assets)) {
     throw new Error('官方 Portal 版本信息暂不可用，请稍后重试。');
   }
-  const name = 'heart-portal-windows-x86_64.exe';
+  const target = portalRelease(platform,arch);
+  if (!target) throw new Error('当前平台没有已校验的 Portal 安装包。');
+  const name = new URL(target.url).pathname.split('/').at(-1);
   const asset = value.assets.find(item => item?.name === name && item.state === 'uploaded'
     && Number.isSafeInteger(item.size) && item.size > 0
     && item.browser_download_url === `${RELEASE_ROOT}/download/${tag}/${name}`);
-  if (!asset) throw new Error('官方 Portal 的 Windows 新版本尚未就绪，请稍后重试。');
+  if (!asset) throw new Error('官方 Portal 的当前平台新版本尚未就绪，请稍后重试。');
   return {version: parsed.version, url: value.html_url};
 }
 
 async function readPortalVersion(executable, {statImpl = fs.lstat, execImpl = execFileAsync} = {}) {
   if (typeof executable !== 'string' || !path.isAbsolute(executable) || /[\x00-\x1f\x7f]/.test(executable)
-      || !/^heart-portal(?:[a-z0-9._-]*\.exe)?$/i.test(path.basename(executable))) return '';
+      || !PORTAL_NAME.test(path.basename(executable))) return '';
   try {
     const stat = await statImpl(executable);
     if (!stat.isFile() || stat.isSymbolicLink()) return '';
     // This deadline applies only to a local version probe, never to a Portal session.
-    const result = await execImpl(executable, ['--version'], {windowsHide: true, shell: false, timeout: 5000, maxBuffer: 4096});
+    const result = await execImpl(executable, ['--version'], {windowsHide: true, shell: false, timeout: 5000, maxBuffer: 4096, env:{PATH:process.env.PATH || '', ...(process.env.SystemRoot ? {SystemRoot:process.env.SystemRoot} : {})}});
     const match = /^heart-portal\s+(\S+)$/.exec(String(result.stdout || '').trim());
     return match ? parseVersion(match[1])?.version || '' : '';
   } catch { return ''; }
@@ -99,10 +103,10 @@ function emptyState() {
 }
 
 class PortalUpdates {
-  constructor({getExecutable = () => '', readVersion = readPortalVersion, fetchImpl = globalThis.fetch, now = Date.now,
+  constructor({getExecutable = () => '', getPortal = () => ({}), readVersion = readPortalVersion, fetchImpl = globalThis.fetch, now = Date.now,
     onChange = () => {}, onAvailable = () => {}, getNotifiedVersion = () => '',
-    setIntervalImpl = setInterval, clearIntervalImpl = clearInterval} = {}) {
-    Object.assign(this, {getExecutable, readVersion, fetchImpl, now, onChange, onAvailable, getNotifiedVersion, setIntervalImpl, clearIntervalImpl});
+    setIntervalImpl = setInterval, clearIntervalImpl = clearInterval, platform = process.platform, arch = process.arch} = {}) {
+    Object.assign(this, {platform, arch, getExecutable, getPortal, readVersion, fetchImpl, now, onChange, onAvailable, getNotifiedVersion, setIntervalImpl, clearIntervalImpl});
     this._state = emptyState();
     this._executable = '';
     this._nextCheck = 0;
@@ -114,6 +118,12 @@ class PortalUpdates {
   }
 
   state() {
+    const portal = this.getPortal();
+    if (portal.status === 'external') {
+      const version = parseVersion(portal.observedVersion)?.version || '';
+      return {...emptyState(), status:'external', currentVersion:version, checkedAt:portal.observedAt || null,
+        detail:version ? `已读取外部 Portal 程序版本 ${version}，进程 PID ${portal.pid} 正在运行。更新仍由原启动位置管理。` : '外部 Portal 正在运行，暂未读取到程序版本；可刷新状态重试。'};
+    }
     return {...(this.getExecutable() === this._executable ? this._state : emptyState())};
   }
 
@@ -152,6 +162,13 @@ class PortalUpdates {
   }
 
   check({force = false} = {}) {
+    if (this.getPortal().status === 'external') {
+      this._revision++;
+      this._controller?.abort();
+      this._controller = null;
+      this._pending = null;
+      return Promise.resolve(this.state());
+    }
     const executable = this.getExecutable();
     if (executable !== this._executable) return this.changed();
     if (this._pending) return this._pending;
@@ -163,7 +180,7 @@ class PortalUpdates {
     const revision = ++this._revision;
     const controller = new AbortController();
     this._controller = controller;
-    const current = () => revision === this._revision && executable === this.getExecutable() && !controller.signal.aborted;
+    const current = () => this.getPortal().status !== 'external' && revision === this._revision && executable === this.getExecutable() && !controller.signal.aborted;
     this._publish({checking: true, status: 'checking', detail: '正在检查官方 Portal 新版本…'});
     const pending = this._check(executable, controller.signal, current).finally(() => {
       if (this._pending === pending) { this._pending = null; this._controller = null; }
@@ -181,7 +198,7 @@ class PortalUpdates {
       const response = await this.fetchImpl(RELEASE_API, {method: 'GET', credentials: 'omit', redirect: 'error',
         referrerPolicy: 'no-referrer', cache: 'no-store', signal,
         headers: {Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'Being-Desktop-Portal-Updates'}});
-      const release = parsePortalRelease(await readReleaseResponse(response));
+      const release = parsePortalRelease(await readReleaseResponse(response), {platform:this.platform,arch:this.arch});
       if (!current()) return this.state();
       this._nextCheck = this.now() + CHECK_INTERVAL_MS;
       const available = Boolean(version && compareVersions(release.version, version) > 0);

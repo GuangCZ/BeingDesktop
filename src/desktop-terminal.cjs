@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { randomUUID } = require('node:crypto');
+const {desktopPlatform, desktopEnvironment, shellPath: defaultShellPath} = require('./platform.cjs');
 const { consoleEnvironment } = require('./desktop-console.cjs');
 
 const MAX_INPUT_BYTES = 64 * 1024;
@@ -35,9 +36,10 @@ class DesktopTerminal {
     this.pty = pty;
     this.platform = platform;
     this.environment = {
-      ...consoleEnvironment(environment), TERM: 'xterm-256color', COLORTERM: 'truecolor', TERM_PROGRAM: 'BeingDesktop',
+      ...consoleEnvironment(desktopEnvironment(environment, platform)), TERM: 'xterm-256color', COLORTERM: 'truecolor', TERM_PROGRAM: 'BeingDesktop',
     };
-    this.shellPath = shellPath || path.win32.join(environment.SystemRoot || environment.SYSTEMROOT || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    this.shellPath = shellPath || defaultShellPath(platform, environment);
+    this.shell = desktopPlatform(platform).shell;
     this.sessions = new Map();
     this.activeSessionId = null;
     this.pendingCreates = 0;
@@ -67,7 +69,7 @@ class DesktopTerminal {
 
   async create({ cwd, cols, rows } = {}) {
     if (this.disposed) throw new Error('终端已经关闭。');
-    if (this.platform !== 'win32') throw new Error('本版本的交互终端仅支持 Windows。');
+    if (!desktopPlatform(this.platform).terminalSupported) throw new Error('当前平台不支持交互终端。');
     const size = dimensions(cols, rows);
     if (this.sessions.size + this.pendingCreates >= MAX_SESSIONS) throw new Error(`最多同时保留 ${MAX_SESSIONS} 个终端，请先关闭一个终端。`);
     this.pendingCreates++;
@@ -84,16 +86,16 @@ class DesktopTerminal {
       try {
         this.pty ||= require('node-pty');
         // ConPTY creates a pseudoconsole, never a separate visible console window.
-        processHandle = this.pty.spawn(this.shellPath, ['-NoLogo', '-NoProfile'], {
+        processHandle = this.pty.spawn(this.shellPath, this.platform === 'darwin' ? ['-f', '-i'] : ['-NoLogo', '-NoProfile'], {
           name: 'xterm-256color', cwd: directory, cols: size.cols, rows: size.rows,
-          env: { ...this.environment }, useConpty: true,
-          useConptyDll: true, conptyInheritCursor: false, handleFlowControl: false,
+          env: { ...this.environment }, handleFlowControl: false,
+          ...(this.platform === 'win32' ? {useConpty: true, useConptyDll: true, conptyInheritCursor: false} : {}),
         });
       } catch (error) {
-        throw new Error('无法启动 PowerShell 交互终端，请检查终端组件与系统安装。', { cause: error });
+        throw new Error(`无法启动 ${this.shell} 交互终端，请检查终端组件与系统安装。`, { cause: error });
       }
       const item = {
-        id: randomUUID(), title: 'PowerShell', cwd: directory, status: 'running',
+        id: randomUUID(), title: this.shell, cwd: directory, status: 'running',
         pid: processHandle.pid || null, ...size, exitCode: null, process: processHandle,
         sequence: 0, chunks: [], replayBytes: 0, truncated: false, subscriptions: [], closing: null,
         nativeReleased: false, didExit: false,
@@ -111,6 +113,7 @@ class DesktopTerminal {
           item.exitCode = Number.isInteger(exitCode) ? exitCode : null;
           // A naturally exited shell still owns ConPTY's input pipe until kill()
           // releases it. Keep the output history, not the native pipe handles.
+          if (this.platform === 'darwin') item.nativeReleased = true;
           if (!item.nativeReleased) {
             item.nativeReleased = true;
             try { processHandle.kill(); } catch { item.nativeReleased = false; }
@@ -128,7 +131,7 @@ class DesktopTerminal {
           const onError = () => {
             if (item.didExit) return;
             item.status = 'failed';
-            this.append(item, '\r\n\x1b[31mPowerShell 终端连接已中断。请关闭此会话并重新打开终端。\x1b[0m\r\n');
+            this.append(item, `\r\n\x1b[31m${this.shell} 终端连接已中断。请关闭此会话并重新打开终端。\x1b[0m\r\n`);
             this.changed();
             item.nativeReleased = true;
             try { processHandle.kill(); } catch { item.nativeReleased = false; }
@@ -139,7 +142,7 @@ class DesktopTerminal {
       } catch (error) {
         try { processHandle.kill(); } catch { /* Only this owned pseudoconsole may be stopped. */ }
         this.remove(item);
-        throw new Error('无法连接 PowerShell 交互终端。', { cause: error });
+        throw new Error(`无法连接 ${this.shell} 交互终端。`, { cause: error });
       }
       this.changed();
       return { sessionId: item.id };

@@ -247,7 +247,7 @@ test('failed spawn releases the create slot and unsupported platforms do not lau
   assert.equal(service.snapshot().sessions.length, 0);
   await service.dispose();
   const unsupported = fixture({ platform: 'linux' });
-  await assert.rejects(unsupported.service.create(), /Windows/);
+  await assert.rejects(unsupported.service.create(), /不支持/);
   assert.equal(unsupported.calls.length, 0);
   await unsupported.service.dispose();
 });

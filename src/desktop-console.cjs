@@ -3,9 +3,11 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const {desktopPlatform, desktopEnvironment, shellPath: defaultShellPath} = require('./platform.cjs');
 const { spawn } = require('node:child_process');
 
 const ENVIRONMENT_KEYS = new Set([
+  'tmpdir', 'lang', 'lc_all', 'lc_ctype', 'user', 'logname', 'shell',
   'systemroot', 'windir', 'systemdrive', 'comspec', 'pathext', 'path',
   'home', 'userprofile', 'homedrive', 'homepath', 'appdata', 'localappdata',
   'temp', 'tmp', 'username', 'userdomain', 'computername', 'os',
@@ -109,12 +111,14 @@ function outputTail(text, bytes) {
 class DesktopConsole {
   constructor({ getWorkspace = () => '', onChange = () => {}, shellPath,
     maxOutputBytes = 256 * 1024, maxJobs = 20, maxConcurrent = 3,
-    spawnImpl = spawn, environment = process.env, platform = process.platform } = {}) {
+    spawnImpl = spawn, environment = process.env, platform = process.platform, killGroup = (pid, signal) => process.kill(-pid, signal) } = {}) {
     this.getWorkspace = getWorkspace;
     this.onChange = onChange;
     this.platform = platform;
-    this.environment = consoleEnvironment(environment);
-    this.shellPath = shellPath || path.win32.join(environment.SystemRoot || environment.SYSTEMROOT || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    this.environment = consoleEnvironment(desktopEnvironment(environment, platform));
+    this.killGroup = killGroup;
+    this.shell = desktopPlatform(platform).shell;
+    this.shellPath = shellPath || defaultShellPath(platform, environment);
     this.maxOutputBytes = Math.max(1024, Math.min(1024 * 1024, Number(maxOutputBytes) || 256 * 1024));
     this.maxJobs = Math.max(1, Math.min(50, Math.floor(Number(maxJobs) || 20)));
     this.maxConcurrent = Math.max(1, Math.min(this.maxJobs, 5, Math.floor(Number(maxConcurrent) || 3)));
@@ -128,7 +132,7 @@ class DesktopConsole {
 
   snapshot() {
     return {
-      shell: 'PowerShell',
+      shell: this.shell,
       limits: { maxConcurrent: this.maxConcurrent, maxOutputBytes: this.maxOutputBytes, maxJobs: this.maxJobs },
       jobs: this._jobs.map(({ outputBytes, ...job }) => ({ ...job, output: job.output.map(item => ({ ...item })) })),
     };
@@ -178,7 +182,7 @@ class DesktopConsole {
     if (signal !== undefined && (!signal || typeof signal.aborted !== 'boolean' || typeof signal.addEventListener !== 'function' || typeof signal.removeEventListener !== 'function')) throw new Error('命令取消信号无效。');
     const checkCancelled = () => { if (signal?.aborted) throw new Error('命令调用已取消，尚未启动。'); };
     checkCancelled();
-    if (this.platform !== 'win32') throw new Error('本版本的本机控制台仅支持 Windows PowerShell。');
+    if (!desktopPlatform(this.platform).terminalSupported) throw new Error('当前平台不支持本机控制台。');
     if (typeof command !== 'string' || !command.trim() || command.includes('\0') || command.length > 65536) throw new Error('请输入有效命令，长度不能超过 65536 个字符。');
     if (this._children.size + this._pendingRuns >= this.maxConcurrent) throw new Error(`最多同时运行 ${this.maxConcurrent} 个命令，请先停止或等待现有命令。`);
     this._pendingRuns++;
@@ -210,12 +214,12 @@ class DesktopConsole {
       let child;
       try {
         child = this.spawnImpl(this.shellPath,
-          ['-NoLogo', '-NoProfile', '-NonInteractive', '-OutputFormat', 'Text', '-EncodedCommand', Buffer.from(WINDOWS_RUNNER, 'utf16le').toString('base64')],
-          { cwd: directory, env: { ...this.environment }, windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
+          this.platform === 'darwin' ? ['-f', '-s'] : ['-NoLogo', '-NoProfile', '-NonInteractive', '-OutputFormat', 'Text', '-EncodedCommand', Buffer.from(WINDOWS_RUNNER, 'utf16le').toString('base64')],
+          { cwd: directory, env: { ...this.environment }, detached: this.platform === 'darwin', windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
       } catch {
         job.status = 'failed';
         job.endedAt = new Date().toISOString();
-        this._append(job, 'stderr', '无法启动 PowerShell，请检查系统安装。\n');
+        this._append(job, 'stderr', `无法启动 ${this.shell}，请检查系统安装。\n`);
         this._notify(true);
         return { jobId: job.id };
       }
@@ -242,6 +246,14 @@ class DesktopConsole {
         this._notify(true);
       });
       child.stdin.on('error', () => { /* A failed or stopped shell can close input before it is written. */ });
+      if (this.platform === 'darwin') child.once('exit', () => {
+        // Clean up ordinary descendants of this freshly exited, detached shell.
+        // Never look up processes by name or signal a saved PID after close.
+        if (!owned.stopping && Number.isInteger(child.pid) && child.pid > 1) {
+          try { this.killGroup(child.pid, 'SIGKILL'); }
+          catch (error) { if (error.code !== 'ESRCH') { job.status = 'failed'; this._append(job, 'stderr', '命令子进程清理未完成。\n'); } }
+        }
+      });
       child.once('close', (code, signal) => {
         removeAbort();
         job.exitCode = Number.isInteger(code) ? code : null;
@@ -282,7 +294,15 @@ class DesktopConsole {
     const job = this._jobs.find(item => item.id === jobId);
     if (job) job.status = 'stopping';
     this._notify(true);
-    if (!owned.child.kill()) {
+    let killed = false;
+    try {
+      if (this.platform === 'darwin') {
+        if (!Number.isInteger(owned.child.pid) || owned.child.pid <= 1) throw new Error('Invalid owned PID');
+        this.killGroup(owned.child.pid, 'SIGKILL');
+        killed = true;
+      } else killed = owned.child.kill();
+    } catch (error) { if (error.code === 'ESRCH') killed = true; }
+    if (!killed) {
       owned.stopping = false;
       if (job) job.status = 'running';
       this._notify(true);

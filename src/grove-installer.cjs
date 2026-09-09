@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
+const {desktopEnvironment} = require('./platform.cjs');
 const {spawn} = require('node:child_process');
 const {getGroveDetail,assessKit} = require('./grove.cjs');
 
@@ -113,7 +114,11 @@ async function findProgram(name,env,platform) {
   for (const directory of pathValue.split(path.delimiter).filter(Boolean)) {
     if (!path.isAbsolute(directory)) continue;
     const candidate = path.join(directory,executable);
-    try { return await regularFile(candidate); } catch { /* Continue through actual PATH entries. */ }
+    try {
+      const file = await regularFile(platform === 'darwin' ? await fs.realpath(candidate) : candidate);
+      if (platform === 'darwin') await fs.access(file, require('node:fs').constants.X_OK);
+      return file;
+    } catch { /* Continue through actual PATH entries. */ }
   }
   throw new Error(`本机缺少可用的 ${name} 运行程序。`);
 }
@@ -254,7 +259,7 @@ function retainInstalledPath(name,expected,installed) {
 class GroveInstaller {
   constructor({kitsDir,fetchImpl = globalThis.fetch,nodePath,codexPath,workerCodexPath,pythonPath,platform = process.platform,arch = process.arch,env = process.env,runCommand:execute = runCommand,probeMcp:probe = probeMcp} = {}) {
     if (typeof kitsDir !== 'string' || !path.isAbsolute(kitsDir)) throw new Error('请提供 Kit 安装目录的绝对路径。');
-    Object.assign(this,{kitsDir:path.resolve(kitsDir),fetchImpl,nodePath,codexPath,workerCodexPath,pythonPath,platform,arch,env:{...env},execute,probe});
+    Object.assign(this,{kitsDir:path.resolve(kitsDir),fetchImpl,nodePath,codexPath,workerCodexPath,pythonPath,platform,arch,env:desktopEnvironment(env,platform),execute,probe});
     this._tail = Promise.resolve();
   }
 
@@ -280,7 +285,7 @@ class GroveInstaller {
         else reasons.unshift('此版本尚未形成可执行的一键安装方案，需要 Being 核对平台、依赖及配置。');
         return {result:{status:'needs_being',detail:'需要 Being 协助处理安装条件。',kit,loaded:false,assessment:{...base,installable:false,blocked:true,mode:'being',checks,reasons}}};
       }
-      if (this.platform !== 'win32' || this.arch !== 'x64') throw new Error('当前一键安装方案仅验证了 Windows x64，请 Being 核对目标平台。');
+      if (!((this.platform === 'win32' && this.arch === 'x64') || (this.platform === 'darwin' && ['arm64','x64'].includes(this.arch)))) throw new Error('当前一键安装方案支持 Windows x64 和 macOS arm64/x64，请 Being 核对目标平台。');
       const raw = await this._fetch(`${ORIGIN}/api/grove/${id}`,MAX_JSON,true);
       if (!record(raw) || raw.id !== id || raw.name !== recipe.name || raw.version !== recipe.version || raw.bundle_hash !== recipe.hash || raw.bundle_size !== recipe.size || raw.has_bundle !== true || raw.download_url !== `${ORIGIN}/api/grove/${id}/download`) throw new Error('Grove 版本、下载地址或摘要已变更，需要 Being 重新评估后安装。');
       const archive = await this._fetch(`${ORIGIN}/api/grove/${id}/download`,recipe.size);
@@ -297,21 +302,21 @@ class GroveInstaller {
       checks.push(check('安装目录','passed','独立 Kit 目录存在且可写。'));
       const target = path.join(this.kitsDir,recipe.name);
       if (recipe.python) {
-        const python = await regularFile(this.pythonPath || await findProgram('python',this.env,this.platform));
+        const python = await regularFile(this.pythonPath || await findProgram(this.platform === 'darwin' ? 'python3' : 'python',this.env,this.platform));
         const version = await this.execute(python,['--version'],{env:this.env});
         const match = `${version.stdout}\n${version.stderr}`.trim().match(/^Python (\d+)\.(\d+)\.\d+/);
         if (version.code !== 0 || !match || Number(match[1]) !== 3 || Number(match[2]) < 10) throw new Error('需要 Python 3.10 或更高的 Python 3 版本。');
         checks.push(check('Python','passed',`Python ${match[1]}.${match[2]}，标准库运行，无需安装依赖。`));
-        const adapted = {...manifest,command:[python,'-B',path.join(target,'grove_publish_mcp.py')],platform:['windows'],tools:manifest.tools.map(tool=>({...tool,params:tool.inputSchema}))};
+        const adapted = {...manifest,command:[python,'-B',path.join(target,'grove_publish_mcp.py')],platform:[this.platform === 'darwin' ? 'macos' : 'windows'],tools:manifest.tools.map(tool=>({...tool,params:tool.inputSchema}))};
         const environment = {...this.env,PYTHONDONTWRITEBYTECODE:'1'};
         delete environment.GROVE_BEARER;
         const result = {status:'ready',detail:'本机 Python 与发布包检查通过，可以一键安装。',kit,loaded:false,installPath:target,assessment:{...base,manifestCompatible:true,installable:true,blocked:false,mode:'one_click',localInstalled:false,localMcpRegistered:false,reasons:[],checks,runtime:{name:'python',version:`${match[1]}.${match[2]}`,verified:true}}};
         return {result,recipe,files,manifest:adapted,environment,target};
       }
       const node = await regularFile(this.nodePath || await findProgram('node',this.env,this.platform));
-      const codex = await regularFile(this.codexPath || nativeCodexPath(this.env));
-      const worker = recipe.name === 'codex-async' ? await regularFile(this.workerCodexPath || nativeCodexPath(this.env)) : codex;
-      if (recipe.name === 'codex-async' && path.resolve(worker) !== path.resolve(nativeCodexPath(this.env))) throw new Error('Codex Async 需要验证 APPDATA 下实际使用的原生 Codex 程序。');
+      const codex = await regularFile(this.codexPath || (this.platform === 'darwin' ? await findProgram('codex',this.env,this.platform) : nativeCodexPath(this.env)));
+      const worker = recipe.name === 'codex-async' ? await regularFile(this.workerCodexPath || (this.platform === 'darwin' ? codex : nativeCodexPath(this.env))) : codex;
+      if (this.platform === 'win32' && recipe.name === 'codex-async' && path.resolve(worker) !== path.resolve(nativeCodexPath(this.env))) throw new Error('Codex Async 需要验证 APPDATA 下实际使用的原生 Codex 程序。');
       const nodeVersion = await this.execute(node,['--version'],{env:this.env});
       const nodeMatch = String(nodeVersion.stdout).trim().match(/^v(\d+)\.\d+\.\d+/);
       if (nodeVersion.code !== 0 || !nodeMatch || Number(nodeMatch[1]) < recipe.nodeMajor) throw new Error(`需要 Node.js ${recipe.nodeMajor} 或更高版本。`);
@@ -328,6 +333,9 @@ class GroveInstaller {
       for (const key of Object.keys(environment)) if (key.toUpperCase() === 'PATH') delete environment[key];
       const originalPath = Object.entries(this.env).find(([key])=>key.toUpperCase() === 'PATH')?.[1] || '';
       environment.PATH = [path.dirname(node),path.dirname(codex),originalPath].filter(Boolean).join(path.delimiter);
+      if (this.platform === 'darwin' && recipe.name === 'codex-async' && await findProgram('codex',environment,this.platform) !== worker) {
+        throw new Error('Codex Async 的 PATH 解析与已验证 CLI 不一致，请检查程序路径。');
+      }
       const adapted = {...manifest,command:recipe.name === 'codex-win' ? [codex,'mcp-server'] : [node,path.join(target,'server.mjs')]};
       if (recipe.name === 'codex-win') {
         // Portal 0.8 normalizes request hyphens, so expose an underscore and translate at stdio.

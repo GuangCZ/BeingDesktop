@@ -3,12 +3,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  PortalUpdates, parseVersion, compareVersions, parsePortalRelease, readPortalVersion,
+  PortalUpdates, parseVersion, compareVersions, parsePortalRelease: parseRelease, readPortalVersion,
   RELEASE_API, CHECK_INTERVAL_MS, RETRY_INTERVAL_MS,
 } = require('../src/portal-updates.cjs');
 
-const EXECUTABLE = 'C:\\Portal\\heart-portal.exe';
-const NEW_EXECUTABLE = 'C:\\Portal-next\\heart-portal.exe';
+const parsePortalRelease = value => parseRelease(value,{platform:'win32',arch:'x64'});
+const EXECUTABLE = require('node:path').resolve('fixture-portal', 'heart-portal');
+const NEW_EXECUTABLE = require('node:path').resolve('fixture-portal-next', 'heart-portal');
 
 function release(version = '0.9.0') {
   return {
@@ -48,7 +49,7 @@ function fixture(t, overrides = {}) {
   const changes = [];
   const timers = [];
   const clearedTimers = [];
-  const service = new PortalUpdates({
+  const service = new PortalUpdates({platform:'win32',arch:'x64',
     getExecutable: () => executable,
     readVersion: async value => { reads.push(value); return '0.8.0'; },
     fetchImpl: async (url, options) => { requests.push({ url: String(url), options }); return response(); },
@@ -470,4 +471,18 @@ test('the automatic timer checks again when the successful check interval expire
   await updated.promise;
   assert.equal(calls, 2);
   assert.equal(f.service.state().latestVersion, '0.10.0');
+});
+
+test('external Portal overrides unconfigured and stale update metadata without probing it', async t => {
+  let portal = {status:'external'};
+  let reads=0;
+  const {service} = fixture(t,{getPortal:()=>portal,readVersion:async()=>{reads++;return '0.8.0';}});
+  service._state={status:'available',currentVersion:'0.1.0',latestVersion:'0.8.0',available:true};
+  const external=await service.check({force:true});
+  assert.equal(external.status,'external');
+  assert.equal(external.currentVersion,'');
+  assert.equal(external.available,false);
+  assert.equal(reads,0);
+  portal={status:'stopped'};
+  assert.notEqual(service.state().status,'external');
 });

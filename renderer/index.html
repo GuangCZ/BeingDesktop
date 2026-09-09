@@ -290,8 +290,24 @@
                 <div class="path-setting"><div><span class="field-label">Portal 程序</span><code id="portal-executable">尚未选择</code></div><button class="button secondary small-button" id="select-portal-executable">选择程序</button></div>
                 <div class="path-setting"><div><span class="field-label">Portal 配置</span><code id="portal-config">尚未选择</code></div><button class="button secondary small-button" id="select-portal-config">选择配置</button></div>
               </details>
-              <div class="portal-runtime-group"><div class="portal-state-info"><div class="detail-row"><span>运行状态</span><strong id="portal-process-detail">尚未配置</strong></div><div class="detail-row"><span>连接</span><strong id="portal-health-detail">待确认</strong></div><p class="field-help" id="portal-detail" hidden></p></div>
-              <p id="portal-watchdog-detail" class="field-help" role="status" hidden></p><details id="portal-auto-health" class="settings-note" hidden><summary id="portal-auto-health-summary">自动健康检查</summary><div id="portal-auto-health-result" class="field-help"></div></details><div id="portal-self-test-result" class="field-help" role="status" aria-live="polite" hidden></div><div class="settings-action-row"><details class="settings-note"><summary>运行详情</summary><p class="field-help" id="portal-owner-detail">仅管理由桌面启动的进程。</p></details><div class="inline-actions"><button class="button secondary small-button" id="test-portal-connection">连接自测</button><button class="button secondary small-button" id="stop-portal" disabled>停止</button><button class="button primary small-button" id="start-portal" disabled>启动</button></div></div></div>
+              <div class="portal-runtime-group">
+                <div class="portal-state-info">
+                  <div class="detail-row"><span>运行状态</span><strong id="portal-process-detail">尚未配置</strong></div>
+                  <div class="detail-row"><span>连接</span><strong id="portal-health-detail">待确认</strong></div>
+                  <p class="field-help" id="portal-detail" hidden></p><p class="field-help" id="portal-observed-path" hidden></p>
+                </div>
+                <div class="portal-diagnostics">
+                  <p id="portal-watchdog-detail" class="field-help" role="status" hidden></p>
+                  <details id="portal-auto-health" class="settings-note" hidden>
+                    <summary id="portal-auto-health-summary">自动健康检查</summary>
+                    <pre id="portal-auto-health-result" class="portal-log-box" tabindex="0" aria-label="自动健康检查结果"></pre>
+                  </details>
+                  <pre id="portal-self-test-result" class="portal-log-box" tabindex="0" role="status" aria-label="连接自测结果" aria-live="polite" hidden></pre>
+                  <div class="portal-log-heading"><span id="portal-log-label">Portal 日志</span><span class="field-help">只读 · 可选择复制</span></div>
+                  <pre id="portal-log-output" class="portal-log-box" tabindex="0" aria-labelledby="portal-log-label">暂无日志。</pre>
+                </div>
+                <div class="settings-action-row"><details class="settings-note"><summary>运行详情</summary><p class="field-help" id="portal-owner-detail">仅管理由桌面启动的进程。</p></details><div class="inline-actions"><button class="button secondary small-button" id="test-portal-connection">连接自测</button><button class="button secondary small-button" id="stop-portal" disabled>停止</button><button class="button primary small-button" id="start-portal" disabled>启动</button></div></div>
+              </div>
             </section>
             <section class="settings-card reading-settings" id="reading-settings" aria-labelledby="reading-heading">
               <div class="card-heading"><div class="setting-icon"><svg class="icon"><use href="#i-eye"/></svg></div><div><h3 id="reading-heading">阅读</h3><p>调整桌面显示，保留统一的系统字体。</p></div></div>
@@ -324,7 +340,7 @@
             </section>
             <section class="settings-card diagnostics-card"><div><h3>诊断</h3><p class="field-help">导出连接状态与近期桌面活动。</p></div><button class="button secondary small-button" id="export-diagnostics"><svg class="icon"><use href="#i-download"/></svg>导出诊断</button></section>
             <section class="settings-card diagnostics-card"><div><h3>新手引导</h3><p class="field-help">依次连接 Loom、部署 Portal 和配置 Channel。</p></div><button class="button secondary small-button" id="setup-restart">继续新手引导</button></section>
-            <p class="settings-footnote">Being Desktop <span id="settings-version">0.1.0</span> · Windows</p>
+            <p class="settings-footnote">Being Desktop <span id="settings-version">0.1.0</span> · <span id="settings-platform"></span></p>
           </section>
         </div>
 

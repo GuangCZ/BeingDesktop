@@ -6,7 +6,7 @@ const { spawn, execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 
 const execFileAsync = promisify(execFile);
-const PORTAL_NAME = /^heart-portal(?:[a-z0-9._-]*\.exe)?$/i;
+const PORTAL_NAME = /^heart-portal(?:(?:-macos-(?:arm64|x86_64))|(?:[a-z0-9._-]*\.exe))?$/i;
 const INSPECT_WINDOWS_SCRIPT = "@(Get-CimInstance Win32_Process -Filter \"Name LIKE 'heart-portal%'\" -ErrorAction Stop | Select-Object ProcessId,Name,ExecutablePath) | ConvertTo-Json -Compress";
 
 function sanitizeText(value, secrets = []) {
@@ -82,13 +82,34 @@ async function inspectWindowsProcesses() {
   return (Array.isArray(parsed) ? parsed : [parsed]).filter(Boolean).map((item) => ({ pid: Number(item.ProcessId), name: String(item.Name || ''), executable: item.ExecutablePath || '' }));
 }
 
+function parseMacProcesses(output) {
+  const lines = String(output).split('\n').filter(line => line.trim());
+  if (!lines.length) throw new Error('macOS 进程列表为空，无法确认状态。');
+  return lines.map(line => {
+    const match = /^\s*([1-9]\d*)\s+([^\x00-\x1f\x7f]+)$/.exec(line);
+    if (!match || !Number.isSafeInteger(Number(match[1]))) throw new Error('无法解析 macOS 进程列表。');
+    const executable = match[2].trim();
+    return {pid: Number(match[1]), name: path.posix.basename(executable), executable};
+  });
+}
+
+async function inspectMacProcesses(execImpl = execFileAsync) {
+  // comm contains the executable only. Never request args/command: Portal's
+  // connection token can occur in its process arguments.
+  const {stdout} = await execImpl('/bin/ps', ['-axo', 'pid=,comm='], {shell: false, timeout: 5000, maxBuffer: 4 * 1024 * 1024});
+  return parseMacProcesses(stdout);
+}
+
 class PortalService {
-  constructor({ onEvent = () => {}, workspace = '', spawnImpl = spawn, inspectProcesses, platform = process.platform } = {}) {
+  constructor({ onEvent = () => {}, workspace = '', spawnImpl = spawn, inspectProcesses, platform = process.platform, readExternalVersion = async () => '', now = Date.now } = {}) {
     this.onEvent = onEvent;
     this.workspace = workspace;
     this.spawnImpl = spawnImpl;
     this.platform = platform;
-    this.inspectProcesses = inspectProcesses || (platform === 'win32' ? inspectWindowsProcesses : async () => { throw new Error('此版本的 Portal 进程识别仅支持 Windows。'); });
+    this.readExternalVersion = readExternalVersion;
+    this.now = now;
+    this._externalVersionCache = null;
+    this.inspectProcesses = inspectProcesses || (platform === 'win32' ? inspectWindowsProcesses : platform === 'darwin' ? inspectMacProcesses : async () => { throw new Error('当前平台不支持 Portal 进程识别。'); });
     this._state = { status: 'not_configured', health: 'unknown', executable: '', configPath: '', pid: null, owned: false, detail: '' };
     this._child = null;
     this._logs = [];
@@ -124,7 +145,7 @@ class PortalService {
     try { this.onEvent({ ...event }); } catch { /* Observers must not interrupt process management. */ }
   }
 
-  async inspect() {
+  async inspect({forceVersion = false} = {}) {
     if (this._child) return this.state;
     const lifecycleVersion = this._lifecycleVersion;
     try {
@@ -133,13 +154,32 @@ class PortalService {
       const configured = this._state.executable.toLowerCase();
       const existing = processes.find((item) => Number.isInteger(item.pid) && item.pid > 0 && (PORTAL_NAME.test(item.name || '') || (configured && String(item.executable || '').toLowerCase() === configured)));
       if (existing) {
-        this._state = { ...this._state, status: 'external', health: 'unknown', pid: existing.pid, owned: false, detail: '检测到已有 Portal。桌面端不会重复启动或停止它；中继连接尚未验证。' };
+        const observedExecutable = typeof existing.executable === 'string' && path.isAbsolute(existing.executable) && !/[\x00-\x1f\x7f]/.test(existing.executable) ? existing.executable : '';
+        const key = `${existing.pid}:${observedExecutable}`;
+        let observation = this._externalVersionCache;
+        if (forceVersion || observation?.key !== key || this.now() - observation.at >= 60000) {
+          let version = '';
+          try { if (observedExecutable) version = await this.readExternalVersion(observedExecutable); } catch { /* Version failure does not imply process failure. */ }
+          // Confirm that a delayed version probe still refers to this process.
+          const verified = await this.inspectProcesses();
+          if (this._child || lifecycleVersion !== this._lifecycleVersion) return this.state;
+          if (!verified.some(item => item.pid === existing.pid && item.executable === existing.executable && item.name === existing.name)) {
+            this._externalVersionCache = null;
+            this._state = {...this._state,status:'error',health:'unknown',pid:null,owned:false,observedExecutable:'',observedVersion:'',observedAt:null,detail:'读取期间 Portal 进程发生变化，等待重新检查。'};
+            return this.state;
+          }
+          observation = {key, version: typeof version === 'string' && /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?$/.test(version) ? version : '', at:this.now()};
+          this._externalVersionCache = observation;
+        }
+        this._state = { ...this._state, status: 'external', health: 'unknown', pid: existing.pid, owned: false, observedExecutable, observedVersion:observation.version, observedAt:new Date(this.now()).toISOString(), detail: '检测到已有 Portal。桌面端不会重复启动或停止它；中继连接尚未验证。' };
       } else {
-        this._state = { ...this._state, status: this._configured ? 'stopped' : 'not_configured', health: 'unknown', pid: null, owned: false, detail: '' };
+        this._externalVersionCache = null;
+        this._state = { ...this._state, observedExecutable:'',observedVersion:'',observedAt:null, status: this._configured ? 'stopped' : 'not_configured', health: 'unknown', pid: null, owned: false, detail: '' };
       }
     } catch {
       if (this._child || lifecycleVersion !== this._lifecycleVersion) return this.state;
-      this._state = { ...this._state, status: 'error', health: 'unknown', pid: null, owned: false, detail: '无法确认已有 Portal 进程。为避免重复启动，已阻止启动。' };
+      this._externalVersionCache = null;
+      this._state = { ...this._state, observedExecutable:'',observedVersion:'',observedAt:null, status: 'error', health: 'unknown', pid: null, owned: false, detail: '无法确认已有 Portal 进程。为避免重复启动，已阻止启动。' };
     }
     return this.state;
   }
@@ -151,6 +191,7 @@ class PortalService {
       const stat = await fs.lstat(file).catch(() => null);
       if (!stat || !stat.isFile() || stat.isSymbolicLink()) throw new Error('Portal 可执行文件或配置文件不存在，或不是实际文件。');
     }
+    if (this.platform === 'darwin') await fs.access(executable, require('node:fs').constants.X_OK).catch(() => { throw new Error('Portal 程序没有可执行权限。'); });
     const configStat = await fs.stat(configPath);
     if (configStat.size > 1024 * 1024) throw new Error('Portal 配置文件过大，请选择有效配置。');
     const contents = await fs.readFile(configPath, 'utf8');
@@ -299,7 +340,7 @@ class PortalService {
       child.once('exit', onExit);
       child.once('error', onError);
       // On Windows, Node terminates the owned process; it does not send Ctrl+C.
-      try { if (!child.kill('SIGTERM')) { cleanup(); reject(new Error('未能停止桌面端启动的 Portal。')); } }
+      try { if (!child.kill(this.platform === 'darwin' ? 'SIGINT' : 'SIGTERM')) { cleanup(); reject(new Error('未能停止桌面端启动的 Portal。')); } }
       catch { cleanup(); reject(new Error('停止 Portal 失败。')); }
     });
     return this.state;
@@ -308,4 +349,4 @@ class PortalService {
   async dispose() { return this.stop(); }
 }
 
-module.exports = { PortalService, safeListWorkspace, sanitizeText };
+module.exports = { PortalService, safeListWorkspace, sanitizeText, PORTAL_NAME, parseMacProcesses, inspectMacProcesses };

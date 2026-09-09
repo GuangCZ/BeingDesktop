@@ -23,7 +23,7 @@ const {restoreOnboarding,saveOnboardingStep,completeOnboardingAfterBonfire} = re
 const {normalizeAppMenuRequest,commandForInput,captureMenuEditingTarget,getDesktopWindowState,createDesktopMenuTemplate} = require('./desktop-menu.cjs');
 const {getTownCatalog,townPageUrl,prepareTownFeature,prepareTownAssistance,prepareFiresideDraft,prepareLoomDraft} = require('./town.cjs');
 const {PortalInstaller} = require('./portal-installer.cjs');
-const {PortalUpdates} = require('./portal-updates.cjs');
+const {PortalUpdates, readPortalVersion} = require('./portal-updates.cjs');
 const {inspectPortalPermissions,savePortalPermissions} = require('./portal-permissions.cjs');
 const {normalizePortalPermissions} = require('./portal-config.cjs');
 const {portalRequestAdapter} = require('./desktop-network.cjs');
@@ -55,7 +55,10 @@ const {FeatureTaskRunner} = require('./feature-task-runner.cjs');
 const {discussFeatureTask} = require('./feature-task-discussion.cjs');
 const {applyLoomComposer,updateLoomComposerData,takeLoomComposerIntents,reportLoomComposerResult,detachLoomComposer} = require('./loom-composer.cjs');
 
+const {desktopPlatform, desktopEnvironment} = require('./platform.cjs');
+
 function startDesktop({onReady = null, portalUpdateChecksEnabled = true} = {}) {
+if (process.platform === 'darwin') process.env.PATH = desktopEnvironment().PATH;
 // Windows GPU compositing can leave stale text tiles in embedded conversation
 // views after streaming layout changes. Use software painting for this shell.
 if (process.platform === 'win32') app.disableHardwareAcceleration();
@@ -106,7 +109,7 @@ function boot() {
   let disk = {workspace:'', portalExecutable:'', portalConfig:'', closeToTray:true, credential:''};
   const state = {
     version: app.getVersion(),
-    machine:{hostname:os.hostname(),user:os.userInfo().username},
+    machine:{hostname:os.hostname(),user:os.userInfo().username,...desktopPlatform()},
     connection:{configured:false,displayUrl:'',beingName:'',status:'disconnected',error:'',updatedAt:null},
     onboarding:restoreOnboarding(),
     onboardingInspection:null,
@@ -163,7 +166,7 @@ function boot() {
       chatSessionId:sessionId,workspace:state.workspace.path || null,
       portal:{name:DESKTOP_PORTAL_NAME,status:state.portal.status,health:state.portal.health},
       bridge,mode:orchestration.mode.enabled?'orchestrator':'direct',
-      terminal:{present:process.platform==='win32',interactive:process.platform==='win32',shell:'PowerShell',callable:terminalCallable,
+      terminal:{present:desktopPlatform().terminalSupported,interactive:desktopPlatform().terminalSupported,shell:desktopPlatform().shell,callable:terminalCallable,
         approval:'本会话自建终端内的已授权任务可直接执行；账户凭据和必须本人确认的授权交给用户',
         scope:terminalCallable?desktopTools.terminalTools.scope(sessionId):null,
         sessions:desktopTools.terminalTools.sessions(sessionId),lifetime:'跨回复和聊天切换保留；退出应用或明确关闭终端时结束'},
@@ -171,7 +174,7 @@ function boot() {
       console:{interactive:false,callable:bridge.tools.includes('desktop_console_run'),approval:'现有非交互命令逐次本地确认'},
     }});
   }
-  const portal = new PortalService({onEvent(event) {
+  const portal = new PortalService({readExternalVersion:readPortalVersion,onEvent(event) {
     state.portal = portal.state;
     if (['Portal 已退出','Portal 进程错误'].includes(event.title)) portalWatchdog?.wake();
     activity(event.level, event.title, event.detail);
@@ -181,6 +184,7 @@ function boot() {
   const groveInstaller=new GroveInstaller({kitsDir:groveKitsDir,fetchImpl:(url,options)=>net.fetch(url,{...options,credentials:'omit',referrerPolicy:'no-referrer'})});
   const groveActions=new GroveActions({installer:groveInstaller,fetchImpl:(url,options)=>net.fetch(url,{...options,credentials:'omit',referrerPolicy:'no-referrer'}),inspectPortal:inspectCurrentGrovePortal,activate:activateGroveKits});
   const portalUpdates = new PortalUpdates({
+    getPortal:()=>portal.state,
     getExecutable:()=>typeof disk.portalExecutable==='string'?disk.portalExecutable:'',
     fetchImpl:(url,options)=>net.fetch(url,options),
     getNotifiedVersion:()=>disk.portalUpdateNotifiedVersion,
@@ -393,7 +397,7 @@ function boot() {
   }
   function publicState() {
     const portalState=portal.state;
-    return structuredClone({...state,orchestration:orchestration.snapshot(),portal:{...portalState,watchdog:portalWatchdog?.state(),connectionBeingName:portalState.owned?portalBeingName:'',connectionCurrent:portalState.owned?portalIdentityRevision===identityRevision:null},portalUpdate:portalUpdates.state(),townApp:townState()});
+    return structuredClone({...state,orchestration:orchestration.snapshot(),portal:{...portalState,logs:portalState.owned?portal.logs:[],watchdog:portalWatchdog?.state(),connectionBeingName:portalState.owned?portalBeingName:'',connectionCurrent:portalState.owned?portalIdentityRevision===identityRevision:null},portalUpdate:portalUpdates.state(),townApp:townState()});
   }
   function broadcast() {
     if (win && !win.isDestroyed()) win.webContents.send('being:state',publicState());
@@ -501,7 +505,7 @@ function boot() {
   }
   async function storeConnection(input) {
     const parsed = parseConnection(input);
-    if (!safeStorage.isEncryptionAvailable()) throw new Error('Windows 凭据保护暂不可用，连接信息未保存。');
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('系统凭据保护暂不可用，连接信息未保存。');
     const encrypted = safeStorage.encryptString(parsed.url).toString('base64');
     const previous = disk.credential;
     disk.credential = encrypted;
@@ -1076,6 +1080,7 @@ function boot() {
     handle('deployPortal',value=>{if(portalPermissionsBusy)throw new Error('Portal 权限正在保存，请稍后重试。');return town.deploy(value);});
     handle('checkPortalUpdates',async()=>{
       if(exitStarted)throw new Error('桌面端正在退出。');
+      await portal.inspect({forceVersion:true});
       await portalUpdates.check({force:true});
       return publicState();
     });
@@ -1200,6 +1205,7 @@ function boot() {
     app.quit();
   }
   app.on('second-instance',showDesktopWindow);
+  app.on('activate',showDesktopWindow);
   app.on('web-contents-created',(_event,contents)=>{
     contents.on('focus',()=>{
       if(win && !win.isDestroyed() && contents!==win.webContents
@@ -1217,7 +1223,20 @@ function boot() {
     session.defaultSession.setPermissionCheckHandler(()=>false);
     await restore();
     win=new BrowserWindow({width:1440,height:940,minWidth:1000,minHeight:700,frame:false,backgroundColor:state.settings.colors.background,show:false,title:'Being Desktop',icon:path.join(__dirname,'../renderer/assets/being/being-icon.ico'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true}});
-    win.removeMenu();
+    if (process.platform === 'darwin') {
+      const nativeMenu=name=>createDesktopMenuTemplate(name,{sendCommand:sendShellCommand,closeWindow:()=>win.close()});
+      const fileMenu=nativeMenu('file');
+      fileMenu[fileMenu.length-1]={role:'close',label:'关闭窗口'};
+      Menu.setApplicationMenu(Menu.buildFromTemplate([
+        {role:'appMenu'},
+        {label:'文件',submenu:fileMenu},
+        {role:'editMenu'},
+        {label:'视图',submenu:[...nativeMenu('view'),{type:'separator'},{role:'togglefullscreen'}]},
+        {role:'windowMenu'},
+        {role:'help',submenu:nativeMenu('help')},
+      ]));
+    }
+    else win.removeMenu();
     desktopTools=new DesktopTools({WebContentsView,session,getWindow:()=>win,getConnection:()=>connection,getWorkspace:()=>state.workspace.path,orchestration,
       getTerminal:()=>desktopTerminal,showTerminal:async id=>{
         if(exitStarted || !win || win.isDestroyed())throw new Error('桌面窗口已关闭。');

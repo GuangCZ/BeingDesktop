@@ -267,11 +267,23 @@ if (!process.versions.electron) {
     fixtureState.portal.watchdog = {status:'monitoring',detail:'自动守护中：每 5 秒检查进程，退出后自动拉起。',health:{status:'unknown',checkedAt:new Date().toISOString(),detail:'自测完成，连接仍有未确认项。',checks:[{label:'中继握手',status:'unknown',detail:'尚无当前 Being 的握手成功记录。'}]}};
     await publish();
     check('watchdog-status-and-automatic-health-are-visible', await execute("!document.getElementById('portal-watchdog-detail').hidden&&document.getElementById('portal-watchdog-detail').textContent.includes('自动拉起')&&!document.getElementById('portal-auto-health').hidden&&document.getElementById('portal-auto-health-summary').textContent.includes('未确认')"));
+    fixtureState.portal.logs = Array.from({length:35},(_,i)=>({time:'2026-09-09T06:00:00Z',level:'info',title:'Portal 输出',detail:`line ${i}: 中文日志 <script>window.injected=true</script> ${'long-path/'.repeat(30)}`}));
+    await publish();
+    await execute("document.getElementById('portal-auto-health').open=true");
+    await settle();
+    check('logs-use-bounded-selectable-text-box',await execute("(()=>{const el=document.getElementById('portal-log-output'),s=getComputedStyle(el);return el.tagName==='PRE'&&s.overflowY==='auto'&&s.userSelect==='text'&&el.scrollHeight>el.clientHeight&&el.scrollWidth<=el.clientWidth&&el.textContent.includes('<script>')&&!window.injected})()"));
+    check('diagnostics-have-inset-and-compact-status-rows',await execute("(()=>{const group=document.querySelector('.portal-runtime-group').getBoundingClientRect(),box=document.getElementById('portal-log-output').getBoundingClientRect(),row=document.querySelector('.portal-state-info .detail-row').getBoundingClientRect();return box.left-group.left>=16&&group.right-box.right>=16&&row.height<=44})()"));
     await capture('04-configured-900');
     await execute("document.getElementById('portal-self-test-result').scrollIntoView({block:'center'})");
     await settle();
     await fs.writeFile(path.join(runRoot,'self-test-result.png'),(await win.webContents.capturePage()).toPNG());
 
+    const ownedPortal = structuredClone(fixtureState.portal);
+    fixtureState.portal={...ownedPortal,status:'external',owned:false,health:'unknown',pid:37109};
+    await publish();
+    check('external-portal-explains-log-source-and-disables-start',await execute("document.getElementById('portal-log-output').textContent.includes('原启动位置')&&!document.getElementById('portal-log-output').textContent.includes('line 0')&&document.getElementById('start-portal').disabled&&document.getElementById('stop-portal').disabled"));
+    fixtureState.portal=ownedPortal;
+    await publish();
     fixtureState.portal.connectionBeingName = 'previous_being';
     fixtureState.portal.connectionCurrent = false;
     await publish();

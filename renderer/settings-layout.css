@@ -20,6 +20,7 @@ body[data-page="settings"] #content-grid { grid-template-columns: minmax(0, 1fr)
 .settings-search input { width: 100%; min-width: 0; padding: 6px 0; border: 0; background: transparent; color: var(--sidebar-text); font-size: 13px; outline: none; }
 .settings-search:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .settings-search-empty { padding: 0 12px; color: var(--sidebar-muted); font-size: 13px; }
+.settings-content-frame { display: contents; }
 .settings-content { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 44px 48px 64px; }
 .settings-content-inner { width: 100%; max-width: 768px; margin: 0 auto; }
 #page-settings .settings-intro { padding: 0; margin-bottom: 32px; }
@@ -106,6 +107,20 @@ body[data-page="settings"] #content-grid { grid-template-columns: minmax(0, 1fr)
 #page-settings .portal-permission-row input:disabled { opacity: .4; cursor: not-allowed; }
 #page-settings .portal-state-info { padding: 0; }
 #page-settings .portal-state-info .detail-row strong { font-size: 12px; font-weight: 400; }
+#page-settings .portal-state-info .detail-row { min-height: 40px; padding: 10px 16px; align-items: center; line-height: 20px; }
+#page-settings .portal-state-info > .field-help { margin: 0; padding: 4px 16px 14px; line-height: 20px; overflow-wrap: anywhere; }
+#page-settings .portal-diagnostics { min-width: 0; padding: 16px; border-top: 1px solid var(--line); }
+#page-settings .portal-diagnostics > .field-help { margin: 0 0 12px; line-height: 20px; overflow-wrap: anywhere; }
+#page-settings .portal-diagnostics > .settings-note { margin-bottom: 16px; }
+#page-settings .portal-diagnostics summary { width: auto; line-height: 20px; }
+#page-settings .portal-log-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-size: 12px; }
+#page-settings .portal-log-heading .field-help { margin: 0; font-size: 11px; }
+#page-settings .portal-log-box { display: block; box-sizing: border-box; width: 100%; min-width: 0; min-height: 88px; max-height: 240px; margin: 0; padding: 12px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 8px; background: var(--background); color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; font-weight: 400; line-height: 1.75; user-select: text; cursor: text; }
+#page-settings .portal-log-box[hidden] { display: none; }
+#page-settings .portal-log-box:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#page-settings #portal-auto-health-result { margin-top: 10px; }
+#page-settings #portal-self-test-result { margin-bottom: 16px; }
+#page-settings .portal-runtime-group > .settings-action-row { border-top: 1px solid var(--line); }
 #page-settings .settings-feedback { padding: 0 16px 12px; font-size: 12px; }
 #page-settings .settings-feedback:empty { display: none; }
 @media (max-width: 1100px) {

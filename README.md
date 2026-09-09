@@ -1,6 +1,6 @@
 # Being Desktop
 
-A Windows desktop home for your existing Being: Loom conversations, local files, browser, PowerShell, Grove tools, and Heart Portal.
+A Windows and macOS desktop home for your existing Being: Loom conversations, local files, browser, PowerShell, Grove tools, and Heart Portal.
 
 [中文](README_CN.md) · [Documentation](https://GuangCZ.github.io/BeingDesktop/) · [Downloads](https://github.com/GuangCZ/BeingDesktop/releases)
 
@@ -28,7 +28,7 @@ Read the [user guide](docs/orchestration.html) for setup and recovery, or the [i
 
 ## Develop
 
-Use Windows x64 with Node.js 24 and npm:
+Use Windows x64 or macOS with Node.js 24 and npm:
 
 ```powershell
 npm ci
@@ -65,17 +65,12 @@ Intel. Build and test each architecture on a matching Mac where possible;
 these are separate packages, not a universal binary. You can also use
 `npm run pack:mac -- --arm64` or `--x64` for an explicit directory build.
 
-The macOS configuration reuses the shared package settings and rebuilds native
-dependencies for Electron. It uses local ad-hoc signing without a Developer ID
-certificate or notarization; these packages are for local preview, not a signed
-public release. Signing details follow the pinned
-[electron-builder v26 configuration](https://www.electron.build/v26/docs/mac/).
-
-This adds build configuration only. macOS packaging and launch still need to be
-verified on a Mac. The terminal and console remain Windows-only; automatic
-Portal installation, updates and process discovery, and Grove one-click
-installation are not adapted for macOS. The existing package verification
-script and release workflow target Windows packages.
+The macOS configuration rebuilds native dependencies for Electron. Test packages
+use the persistent local signing certificate in Keychain; a missing certificate
+stops the build. These DMGs are not Apple-notarized, so recipients may see a
+Gatekeeper warning and upgrades may require Keychain approval. Optional
+`BEING_SIGNING_MODE=developer-id` packaging uses a pinned Apple Developer ID team.
+See [macOS signing details](docs/macos.md#stable-signing-and-keychain-access).
 
 ## Documentation
 
@@ -91,3 +86,9 @@ GitHub Pages serves the root of `gh-pages`; documentation sources and generated 
 ## License
 
 MIT. Third-party assets and dependencies retain their respective licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). [BeingAnywhere](https://github.com/GuangCZ/BeingAnywhere) is the related browser extension.
+
+## macOS integration
+
+This branch (`0.8.22-mac.5`) supports the official arm64/x86_64 Heart Portal binaries, architecture-specific hash verification, existing-process detection, zsh terminals and console jobs, Command shortcuts, and Homebrew runtime discovery when launched from Finder. External Portal services retain ownership of their own process and configuration. Reviewed Grove recipes remain pinned to verified package versions and hashes.
+
+Run `npm run test:mac` on a Mac, and `npm run dist:mac:arm64` to build an Apple Silicon DMG and ZIP. Test packages use a persistent local signing certificate without Apple notarization. See [macOS details](docs/macos.md) for validation and boundaries.

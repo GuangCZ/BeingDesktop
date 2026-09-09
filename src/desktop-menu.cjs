@@ -14,14 +14,14 @@ function normalizeAppMenuRequest(value, {width, height}) {
   };
 }
 
-function commandForInput(input) {
-  if (input.type !== 'keyDown' || input.shift || input.meta) return null;
+function commandForInput(input, platform = process.platform) {
+  if (input.type !== 'keyDown' || input.shift || (platform !== 'darwin' && input.meta)) return null;
   const key = String(input.key).toLowerCase();
-  if (input.alt && !input.control) {
+  if (input.alt && !input.control && !input.meta) {
     if (key === 'arrowleft') return 'navigate-back';
     if (key === 'arrowright') return 'navigate-forward';
   }
-  if (!input.control || input.alt) return null;
+  if (!(platform === 'darwin' ? input.meta : input.control) || input.alt) return null;
   switch (key) {
     case 'b': return 'toggle-sidebar';
     case '1': return 'chat';
@@ -41,16 +41,16 @@ function getDesktopWindowState(window) {
   return {maximized: Boolean(window && !window.isDestroyed() && window.isMaximized())};
 }
 
-function createDesktopMenuTemplate(name, {sendCommand, closeWindow, editTarget}) {
+function createDesktopMenuTemplate(name, {sendCommand, closeWindow, editTarget}, platform = process.platform) {
   const separator = () => ({type: 'separator'});
   const command = (label, id, accelerator) => ({
     label,
     click: () => sendCommand(id),
     // The renderer and Loom input handler already own these shortcuts.
-    ...(accelerator ? {accelerator, registerAccelerator: false} : {}),
+    ...(accelerator ? {accelerator:platform === 'darwin' ? accelerator.replace('Ctrl+', 'Cmd+') : accelerator, registerAccelerator: false} : {}),
   });
   const edit = (label, role, accelerator) => editTarget ? {
-    label, accelerator, registerAccelerator: false,
+    label, accelerator:platform === 'darwin' ? accelerator.replace('Ctrl+', 'Cmd+') : accelerator, registerAccelerator: false,
     click: () => { if (!editTarget.isDestroyed()) editTarget[role](); },
   } : {label, role};
   switch (name) {
@@ -61,7 +61,7 @@ function createDesktopMenuTemplate(name, {sendCommand, closeWindow, editTarget})
       separator(),
       command('连接与设置…', 'settings', 'Ctrl+,'),
       separator(),
-      {label: '关闭窗口', accelerator: 'Alt+F4', registerAccelerator: false, click: closeWindow},
+      {label: '关闭窗口', accelerator: platform === 'darwin' ? 'Cmd+W' : 'Alt+F4', registerAccelerator: false, click: closeWindow},
     ];
     case 'edit': return [
       edit('撤销', 'undo', 'Ctrl+Z'),

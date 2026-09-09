@@ -1,15 +1,15 @@
 # Being Desktop
 
-你的 Being 桌面工作区。连接现有 Loom，在 Windows 中使用对话、项目文件、浏览器、PowerShell、Grove 工具和本机 Portal。
+你的 Being 桌面工作区。连接现有 Loom，在 Windows 或 macOS 中使用对话、项目文件、浏览器、本机终端、Grove 工具和 Portal。
 
 [使用文档](https://GuangCZ.github.io/BeingDesktop/) · [下载](https://github.com/GuangCZ/BeingDesktop/releases) · [English](README.md)
 
-当前源码：**0.8.22 · Windows x64**。下载附件以 GitHub Releases 为准。需要已有的 Being 与 Loom 连接；身份和记忆仍由原运行时管理。
+当前源码：**0.8.22-mac.5 · Windows x64 / macOS arm64、x64**。下载附件以 GitHub Releases 为准。需要已有的 Being 与 Loom 连接；身份和记忆仍由原运行时管理。
 
 ## 当前功能
 
 - 多会话、图片输入、工具选择与消息定位。
-- 本机文件浏览、内置浏览器与持续 PowerShell 会话。
+- 本机文件浏览、内置浏览器与持续终端会话（Windows PowerShell / macOS zsh）。
 - Portal 一键配置、进程与连接状态、权限管理和更新提示。
 - Grove 环境检查、受支持 Kit 的单项与批量安装。
 - Town、篝火、围炉与 Channel 入口。
@@ -34,7 +34,7 @@ Worker 内再次启动 CLI 可能受外层沙箱、登录及网络环境影响�
 
 ## 从源码运行
 
-准备 Windows x64、Node.js 24 和 npm。
+准备 Windows x64 或 macOS、Node.js 24 和 npm。
 
 ```powershell
 npm ci
@@ -62,6 +62,8 @@ npm run pack
 ```sh
 npm ci
 npm run check
+npm test
+npm run test:mac
 npm run pack:mac
 npm run dist:mac
 ```
@@ -73,6 +75,8 @@ npm run dist:mac
 
 默认使用当前 Node.js 进程的架构。目录包也可通过 `npm run pack:mac -- --arm64` 或 `--x64` 指定架构。建议分别在对应架构的 Mac 上构建和测试；当前输出独立架构包，不是 Universal 包。
 
-`electron-builder.mac.cjs` 复用公共打包设置，并单独开启 Electron 原生依赖重建。默认使用不需要开发者证书的本地 ad-hoc 签名，不进行公证，适用于本机预览；正式分发仍需配置 Developer ID 签名和公证。配置依据为当前锁定的 [electron-builder v26 文档](https://www.electron.build/v26/docs/mac/)。
+`electron-builder.mac.cjs` 复用公共打包设置，并开启 Electron 原生依赖重建。测试分发默认复用钥匙串中的固定本地签名证书，缺少证书会停止构建，不会生成新身份或退回 ad-hoc 签名。DMG 尚未经过 Apple 公证，接收者可能看到开发者验证提示；首次安装与旧版本覆盖升级的钥匙串行为不同，不能保证升级免授权。可选的 `BEING_SIGNING_MODE=developer-id` 模式支持固定 Apple 开发者团队。详见 [macOS 签名说明](docs/macos.md#stable-signing-and-keychain-access)。
 
-本次仅提供构建配置，实际打包和启动仍需在 Mac 上验证。终端、控制台仍仅支持 Windows；Portal 自动安装、更新、进程识别及 Grove 一键安装尚未适配 macOS。现有包校验脚本和发布工作流仍面向 Windows。
+此分支已接入官方 macOS Portal 包（arm64 / x86_64），支持按架构校验安装、进程识别、版本更新检查、zsh 终端与控制台、Command 快捷键及 Finder 启动时的 Homebrew 路径发现。已有外部 Portal 会被保留，Desktop 不接管或重复启动它；检测到进程并不代表已验证它连接了当前 Being。
+
+Grove 的已评估安装方案支持 macOS，但仍要求版本、包摘要、运行时和 MCP 检查全部匹配；发布内容变化时会要求重新评估，不会自动运行变化后的代码。详见 [macOS 配套说明](docs/macos.md)。Apple Silicon 版本已在真机完成原生模块、终端和应用启动验证；Intel 选择逻辑有自动化测试，尚未在 Intel Mac 上进行运行验证。

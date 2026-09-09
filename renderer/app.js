@@ -50,7 +50,7 @@ function portalSetupIdentity(value = state) {
 }
 
 const connectionNames = { disconnected: '已断开', connecting: '连接中', connected: '已连接', error: '连接失败' };
-const portalNames = { not_configured: '未配置', stopped: '已停止', running: '运行中', external: '已有进程', error: '状态异常' };
+const portalNames = { not_configured: '未配置', stopped: '已停止', running: '运行中', external: '运行中（外部）', error: '状态异常' };
 const statusTone = (value) => ({ connected: 'good', healthy: 'good', ok: 'good', available: 'good', reachable: 'good', running: 'good', connecting: 'warning', external: 'warning', error: 'error', unhealthy: 'error', unavailable: 'error', unreachable: 'error' }[value] || 'unknown');
 const text = (id, value) => {
   const target = $(id);
@@ -233,6 +233,7 @@ function render() {
   text('header-status-label', label);
   text('app-version', state.version);
   text('settings-version', state.version);
+  text('settings-platform', state.machine.name || state.machine.platform || '');
   renderMachine();
   $('onboarding').hidden = connection.configured;
   $('loom-panel').hidden = !connection.configured;
@@ -265,6 +266,8 @@ function render() {
   text('portal-owner-detail', portal.owned ? '此 Portal 由桌面应用启动，可以在这里停止。' : portal.status === 'external' ? '检测到其他方式启动的 Portal。请在原启动位置管理该进程。' : '应用只管理自己启动的 Portal 进程。');
   text('portal-detail', str(portal.detail));
   $('portal-detail').hidden = !portal.detail;
+  text('portal-observed-path', portal.status === 'external' && portal.observedExecutable ? `程序位置：${portal.observedExecutable}` : '');
+  $('portal-observed-path').hidden = !portal.observedExecutable || portal.status !== 'external';
   const watchdog = portal.watchdog;
   $('portal-watchdog-detail').hidden = !watchdog;
   text('portal-watchdog-detail', watchdog ? `${watchdog.detail}${watchdog.retryAt ? ` 下次重试：${new Date(watchdog.retryAt).toLocaleTimeString()}` : ''}` : '');
@@ -273,7 +276,16 @@ function render() {
   if (autoHealth) {
     const names = {passed:'通过', failed:'未通过', unknown:'未确认', checking:'检查中'};
     text('portal-auto-health-summary', `自动健康检查 · ${names[autoHealth.status] || '未确认'}${autoHealth.checkedAt ? ` · ${new Date(autoHealth.checkedAt).toLocaleTimeString()}` : ''}`);
-    $('portal-auto-health-result').replaceChildren(element('p', '', autoHealth.detail), ...(autoHealth.checks || []).map(check => element('p', '', `${check.label} · ${names[check.status] || '未确认'}：${check.detail}`)));
+    text('portal-auto-health-result', formatPortalReport(autoHealth));
+  }
+  const logBox = $('portal-log-output');
+  const followLogs = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 24;
+  const logText = portal.status === 'external'
+    ? '此 Portal 由外部程序管理，桌面端未接入它的日志。\n请在原启动位置查看日志；连接状态请参考上方健康检查。'
+    : (portal.logs || []).map(item => `[${item.time}] ${item.level} · ${item.title}\n${item.detail}`).join('\n\n') || '暂无 Portal 日志。桌面端启动 Portal 后，日志会显示在这里。';
+  if (logBox.textContent !== logText) {
+    logBox.textContent = logText;
+    if (followLogs) logBox.scrollTop = logBox.scrollHeight;
   }
   renderPortalSetup();
   renderConfiguration();
@@ -284,6 +296,11 @@ function render() {
   renderButtons();
   renderTownAvailability();
   scheduleView();
+}
+
+function formatPortalReport(report) {
+  const names = {passed:'通过', failed:'未通过', unknown:'未确认', checking:'检查中'};
+  return [report.detail, ...(report.checks || []).map(check => `${check.label} · ${names[check.status] || '未确认'}\n${check.detail}`)].filter(Boolean).join('\n\n');
 }
 
 function renderSideBySide() {
@@ -509,6 +526,9 @@ function renderPortalSetup() {
   button.disabled = busy || !connected || running || portal.status === 'external' || state.townApp?.platformSupported === false || !workspace || pending.has('startPortal') || pending.has('stopPortal');
   button.textContent = busy ? '连接中…' : failed ? '重试' : '连接';
   $('portal-settings').setAttribute('aria-busy', String(busy));
+  $('portal-setup-workspace').closest('.path-setting').hidden = portal.status === 'external';
+  $('portal-setup-workspace-note').closest('details').hidden = portal.status === 'external';
+  document.querySelector('.portal-setup-heading h4').textContent = portal.status === 'external' ? '已有 Portal' : '连接这台电脑';
   text('portal-setup-workspace', workspace || '正在读取默认文件夹…');
   text('portal-setup-workspace-note', state.workspace.path ? '使用当前工作区；已有 Portal 的实际目录以其配置为准。' : '点击一键配置时自动创建此文件夹，也可选择已有工作区。');
   $('portal-setup-choose-workspace').disabled = busy || running || pending.has('selectWorkspace');
@@ -520,11 +540,11 @@ function renderPortalSetup() {
   } else progress.removeAttribute('value');
   let detail;
   if (busy) detail = phases[installation.phase] || '正在准备工作区和 Portal 配置…';
+  else if (portal.status === 'external') detail = '已检测到外部 Portal，工作区与权限沿用其原有配置，请在原启动位置管理。';
   else if (!connected) detail = '先连接 Being，等待会话加载完成。';
-  else if (state.townApp?.platformSupported === false) detail = '一键配置支持 Windows x64。';
+  else if (state.townApp?.platformSupported === false) detail = '当前平台暂无已校验的 Portal 安装包。';
   else if (running && portal.connectionCurrent === false) detail = `Portal 仍连接 ${portal.connectionBeingName || '之前的 Being'}。先停止 Portal，再启动以连接当前 Being。`;
   else if (running) detail = ['connected', 'healthy', 'ok'].includes(portal.health) ? '配置已完成，Portal 已连接。' : portal.health === 'disconnected' ? 'Portal 连接中断，可等待重连或请 Being 协助。' : 'Portal 已启动，正在等待连接确认。';
-  else if (portal.status === 'external') detail = '已检测到其他方式启动的 Portal，请在原启动位置管理。';
   else if (failed) detail = portalSetup.detail || installation.detail || '配置未完成，请重试或请 Being 协助。';
   else if (existing) detail = '已保留现有程序与配置，可点击下方「启动 Portal」。';
   else detail = '点击一次即可完成下载、配置和连接。';
@@ -1153,7 +1173,7 @@ function mountMachineContext() {
   const machineCopy = element('div', 'machine-context-copy');
   machineCopy.append(element('span', 'field-label', '当前这台电脑'), identified('strong', '', 'workspace-machine-name', '尚未确认'));
   const userCopy = element('div', 'machine-user-copy');
-  userCopy.append(element('span', 'field-label', 'Windows 用户'), identified('span', '', 'workspace-machine-user', '尚未确认'));
+  userCopy.append(element('span', 'field-label', '本机用户'), identified('span', '', 'workspace-machine-user', '尚未确认'));
   machineCard.append(machineIcon, machineCopy, userCopy);
   const workspaceNote = $('page-workspace')?.querySelector('.permission-note');
   workspaceNote?.before(machineCard);
@@ -1244,14 +1264,12 @@ $('test-portal-connection').addEventListener('click', async () => {
   if (pending.has('testPortalConnection')) return;
   const revision = portalSelfTestRevision;
   const container = $('portal-self-test-result');
-  container.replaceChildren(element('p', '', '正在检查程序、进程、Being 运行时与中继握手…'));
+  container.textContent = '正在检查程序、进程、Being 运行时与中继握手…';
   container.hidden = false;
   const result = await perform('testPortalConnection');
   if (revision !== portalSelfTestRevision) return;
-  container.replaceChildren();
   const report = result.value;
-  container.append(element('p', '', result.ok ? `${report.detail}（${new Date(report.checkedAt).toLocaleTimeString()}）` : `自测未完成：${result.error || '桌面连接不可用'}`));
-  for (const check of report?.checks || []) container.append(element('p', '', `${check.label} · ${{passed:'通过', failed:'未通过', unknown:'未确认'}[check.status] || '未确认'}：${check.detail}`));
+  container.textContent = result.ok ? `连接自测 · ${new Date(report.checkedAt).toLocaleTimeString()}\n\n${formatPortalReport(report)}` : `自测未完成：${result.error || '桌面连接不可用'}`;
 });
 $('stop-portal').addEventListener('click', () => { void perform('stopPortal'); });
 $('configure-portal').addEventListener('click', () => openTownModule('portal'));
@@ -1313,7 +1331,7 @@ $('new-chat-session')?.addEventListener('click', () => selectChatSession(null));
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') dismissToast();
   if (event.defaultPrevented || event.repeat) return;
-  if (event.key === 'F10' && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
+  if (document.documentElement.dataset.platform !== 'darwin' && event.key === 'F10' && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
     event.preventDefault();
     focusAppMenu(appMenuButtons[0]);
     return;
@@ -1323,7 +1341,7 @@ document.addEventListener('keydown', (event) => {
     navigateHistory(event.key === 'ArrowLeft' ? -1 : 1);
     return;
   }
-  if (!event.ctrlKey || event.altKey || event.shiftKey || event.repeat) return;
+  if (!(state.machine.platform === 'darwin' ? event.metaKey : event.ctrlKey) || event.altKey || event.shiftKey || event.repeat) return;
   if (event.key.toLowerCase() === 'b') { event.preventDefault(); toggleSidebar(); }
   if (event.key === '1') { event.preventDefault(); changePage('chat'); }
   if (event.key === '2') { event.preventDefault(); changePage('workspace'); }
@@ -1395,7 +1413,9 @@ function initializeSettingsLayout() {
   $('settings-heading').tabIndex = -1;
   inner.append(intro);
   content.append(inner);
-  page.prepend(nav, content);
+  const contentFrame = element('div', 'settings-content-frame');
+  contentFrame.append(content);
+  page.prepend(nav, contentFrame);
   for (const section of settingsSections) {
     const button = element('button', 'settings-nav-item');
     button.type = 'button';

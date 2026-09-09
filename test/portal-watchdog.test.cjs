@@ -163,7 +163,7 @@ test('real child process exit is observed and recovered without duplicate proces
   const root = await fs.mkdtemp(path.join(os.tmpdir(),'portal-watchdog-'));
   const executable = path.join(root,'heart-portal-fixture.exe');
   const configPath = path.join(root,'portal.toml');
-  await fs.writeFile(executable,'Fixture placeholder, never executed.');
+  await fs.writeFile(executable,'Fixture placeholder, never executed.',{mode:0o700});
   await fs.writeFile(configPath,'name = "watchdog-fixture"');
   const children = [];
   const timers = new Map();

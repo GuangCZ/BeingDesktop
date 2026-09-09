@@ -2,7 +2,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const {PORTAL_RELEASE} = require('./portal-installer.cjs');
+const {PORTAL_RELEASE,portalRelease} = require('./portal-installer.cjs');
 const {createPortalConfig,preparePortalWorkspace} = require('./portal-config.cjs');
 const {grovePortalConfigText} = require('./grove-portal.cjs');
 
@@ -32,7 +32,8 @@ function confirmedDeployment(value) {
 class TownController {
   constructor({installer,portal,getContext,saveDeployment,startPortal,defaultWorkspace='',onChange=()=>{},platform=process.platform,arch=process.arch,configFactory=createPortalConfig}) {
     Object.assign(this,{installer,portal,getContext,saveDeployment,startPortal,defaultWorkspace,onChange,platform,arch,configFactory});
-    this.installation = {status:'unknown',phase:'idle',version:PORTAL_RELEASE.version,verified:false,started:false,detail:''};
+    this.release = installer.release || portalRelease(platform,arch) || PORTAL_RELEASE;
+    this.installation = {status:'unknown',phase:'idle',version:this.release.version,verified:false,started:false,detail:''};
     this._deploying = null;
     this._revision = 0;
   }
@@ -45,7 +46,7 @@ class TownController {
       accessDetail:AUTH_MESSAGE,
       portalInstall:{...this.installation},
       portalWorkspace:{path:context.workspace || this.defaultWorkspace,automatic:!context.workspace},
-      platformSupported:this.platform==='win32' && this.arch==='x64',
+      platformSupported:Boolean(portalRelease(this.platform,this.arch)),
       automaticKitInstallation:false,
     };
   }
@@ -84,7 +85,7 @@ class TownController {
   }
 
   async _deploy() {
-    if (this.platform!=='win32' || this.arch!=='x64') throw new Error('当前安装包仅支持 Windows x64。');
+    if (!portalRelease(this.platform,this.arch)) throw new Error('当前平台没有已校验的 Portal 安装包。');
     const context=this.getContext();
     if (!context.configured || !context.connected || context.exiting) throw new Error('请先连接 Being 并等待会话加载完成。');
     await this.portal.inspect();
@@ -136,18 +137,18 @@ class TownController {
       this._update({status:'installing',phase:'checking',detail:'正在核对官方安装包。',recovery:null});
       installed=await this.installer.install({onProgress:progress=>{
         if (!['download','hash','install','not_started'].includes(progress.phase)) return;
-        this._update({status:'installing',phase:progress.phase,receivedBytes:Number.isFinite(progress.receivedBytes)?Math.min(PORTAL_RELEASE.size,Math.max(0,progress.receivedBytes)):0,totalBytes:PORTAL_RELEASE.size});
+        this._update({status:'installing',phase:progress.phase,receivedBytes:Number.isFinite(progress.receivedBytes)?Math.min(this.release.size,Math.max(0,progress.receivedBytes)):0,totalBytes:this.release.size});
       }});
       this._requireCurrent(context);
       configPath=path.join(path.dirname(installed.executable),`desktop-${crypto.randomUUID()}.toml`);
       await fs.writeFile(configPath,configuration.toml,{encoding:'utf8',flag:'wx',mode:0o600});
       configOwned=true;
       this._requireCurrent(context);
-      const deployment={executable:installed.executable,configPath,version:PORTAL_RELEASE.version,workspace:configuration.capabilities.workspace};
+      const deployment={executable:installed.executable,configPath,version:this.release.version,workspace:configuration.capabilities.workspace};
       await this.saveDeployment(deployment);
       saved=true;
       this._requireCurrent({...context,workspace:deployment.workspace,portalExecutable:deployment.executable,portalConfig:deployment.configPath});
-      this._update({status:'installed',version:PORTAL_RELEASE.version,verified:installed.verified===true,executable:installed.executable,phase:'starting',capabilities:configuration.capabilities,detail:'程序与配置已保存，正在启动 Portal。'});
+      this._update({status:'installed',version:this.release.version,verified:installed.verified===true,executable:installed.executable,phase:'starting',capabilities:configuration.capabilities,detail:'程序与配置已保存，正在启动 Portal。'});
       const started=await this.startPortal();
       this._update({status:'installed',phase:started.status==='running'?'running':'not_started',started:started.status==='running',detail:started.status==='running'?'Portal 已运行，等待中继确认。':started.detail || 'Portal 已安装，尚未启动。'});
       return {status:started.status,detail:this.installation.detail};
