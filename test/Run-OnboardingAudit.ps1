@@ -19,7 +19,7 @@ try {
   $env:BEING_UI_AUDIT = '1'
   Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
   # The profile starts empty. No credentials, settings, or encryption state are copied.
-  $taskProcess = Start-Process -FilePath $taskElectron -ArgumentList ('"' + $taskAppRoot + '"') -WorkingDirectory $taskAppRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $taskRunRoot 'stdout.log') -RedirectStandardError (Join-Path $taskRunRoot 'stderr.log')
+  $taskProcess = Start-Process -FilePath $taskElectron -ArgumentList ('"' + (Join-Path $taskAppRoot 'test\desktop-harness.cjs') + '"') -WorkingDirectory $taskAppRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $taskRunRoot 'stdout.log') -RedirectStandardError (Join-Path $taskRunRoot 'stderr.log')
   [pscustomobject]@{Phase='started';RunId=$taskRunId;Pid=$taskProcess.Id;Report=$taskReportPath;ProfileStartedEmpty=$true}
   $taskDeadline = [DateTime]::UtcNow.AddSeconds(55)
   while (-not (Test-Path -LiteralPath $taskReportPath)) {

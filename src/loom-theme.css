@@ -41,11 +41,18 @@ button, input, textarea, select, optgroup, option { font-family: var(--font-sans
 #temperature-glow { opacity: 0 !important; pointer-events: none !important; }
 #messages {
   min-height: 0 !important;
+  /* Keep scrolling backgrounds and text in the same embedded-view paint context. */
+  position: relative !important;
+  isolation: isolate !important;
+  background: var(--background) !important;
   padding: 20px max(28px, calc((100% - 780px) / 2)) 28px !important;
   overflow-x: hidden !important;
   scroll-padding-bottom: 24px;
 }
-.message { padding: 0 !important; margin: 0 0 28px !important; }
+/* Desktop views have fixed viewport bounds; Loom's mobile keyboard transform
+   and message entrance transforms create unnecessary composited text layers. */
+#app { transform: none !important; }
+.message { padding: 0 !important; margin: 0 0 28px !important; animation: none !important; }
 .message .meta {
   color: var(--muted) !important;
   font-family: var(--font-sans) !important;
@@ -62,6 +69,7 @@ button, input, textarea, select, optgroup, option { font-family: var(--font-sans
   color: var(--text) !important;
 }
 .message.being .content { background: transparent !important; }
+.message.being .content:not(.stream-cursor) { white-space: normal !important; }
 .message.user {
   width: fit-content !important;
   max-width: 88% !important;
@@ -69,6 +77,8 @@ button, input, textarea, select, optgroup, option { font-family: var(--font-sans
 }
 .message.user .meta { text-align: right !important; }
 .message.user .content {
+  position: relative !important;
+  isolation: isolate !important;
   /* Markdown supplies explicit line breaks; collapse whitespace between its blocks. */
   white-space: normal !important;
   border: 1px solid var(--line) !important;
@@ -90,6 +100,68 @@ button, input, textarea, select, optgroup, option { font-family: var(--font-sans
 }
 .code-lang { background: var(--surface) !important; color: var(--surface-muted) !important; border-color: var(--surface-line) !important; }
 .message .content pre code { background: transparent !important; }
+/* A fenced block has one frame; its pre must not draw a second rounded box. */
+.message .content .code-block > pre {
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+/* Shell commands and plain output share a Windows terminal presentation. */
+.message .content .code-block:has(code:is(.lang-cmd, .lang-bat, .lang-batch, .lang-dos, .lang-powershell, .lang-ps1, .lang-ps, .lang-shell, .lang-shellscript, .lang-sh, .lang-bash, .lang-zsh, .lang-console, .lang-terminal, .lang-text, .lang-plaintext, .lang-txt)) {
+  --terminal-background: #0c0c0c;
+  --terminal-foreground: #cccccc;
+  background: var(--terminal-background) !important;
+  border: 1px solid #383838 !important;
+  border-radius: 6px !important;
+  margin: 12px 0 16px !important;
+  overflow: hidden !important;
+  color-scheme: dark;
+}
+.message .content .code-block:has(code:is(.lang-cmd, .lang-bat, .lang-batch, .lang-dos, .lang-powershell, .lang-ps1, .lang-ps, .lang-shell, .lang-shellscript, .lang-sh, .lang-bash, .lang-zsh, .lang-console, .lang-terminal, .lang-text, .lang-plaintext, .lang-txt)) > .code-lang {
+  justify-content: flex-start !important;
+  gap: 9px;
+  min-height: 32px;
+  box-sizing: border-box;
+  padding: 5px 12px !important;
+  background: #202020 !important;
+  color: #bdbdbd !important;
+  border-bottom: 1px solid #303030 !important;
+  font-family: "Segoe UI", sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  line-height: 20px !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+.message .content .code-block:has(code:is(.lang-cmd, .lang-bat, .lang-batch, .lang-dos, .lang-powershell, .lang-ps1, .lang-ps, .lang-shell, .lang-shellscript, .lang-sh, .lang-bash, .lang-zsh, .lang-console, .lang-terminal, .lang-text, .lang-plaintext, .lang-txt)) > .code-lang::before {
+  content: '>_';
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 14px;
+  border: 1px solid #858585;
+  border-radius: 2px;
+  color: #dedede;
+  font: 10px/1 Consolas, monospace;
+}
+.message .content .code-block:has(code:is(.lang-cmd, .lang-bat, .lang-batch, .lang-dos, .lang-powershell, .lang-ps1, .lang-ps, .lang-shell, .lang-shellscript, .lang-sh, .lang-bash, .lang-zsh, .lang-console, .lang-terminal, .lang-text, .lang-plaintext, .lang-txt)) > pre {
+  background: var(--terminal-background) !important;
+  padding: 14px 16px 16px !important;
+  scrollbar-color: #4a4a4a var(--terminal-background);
+}
+.message .content .code-block:has(code:is(.lang-cmd, .lang-bat, .lang-batch, .lang-dos, .lang-powershell, .lang-ps1, .lang-ps, .lang-shell, .lang-shellscript, .lang-sh, .lang-bash, .lang-zsh, .lang-console, .lang-terminal, .lang-text, .lang-plaintext, .lang-txt)) pre :is(code, code *) {
+  background: transparent !important;
+  color: var(--terminal-foreground) !important;
+  font-family: "Cascadia Mono", Consolas, "Lucida Console", monospace !important;
+  font-size: max(13px, var(--text-code)) !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  line-height: 1.55 !important;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
+  padding: 0 !important;
+}
 code, pre, kbd, samp, .code-lang, .readonly-value, .tui-cmd, .tui-arg, .tui-key-arg, .act-arg {
   font-family: var(--font-mono) !important;
   font-size: var(--text-code) !important;
@@ -423,6 +495,8 @@ code, pre, kbd, samp, .code-lang, .readonly-value, .tui-cmd, .tui-arg, .tui-key-
 }
 #tui-wrapper[data-desktop-inline-activity] .desktop-activity-empty { color: var(--surface-muted); }
 .side-panel { background: var(--surface) !important; color: var(--surface-text) !important; border-color: var(--surface-line) !important; }
+/* Offscreen panels must not cast a shadow into the conversation. */
+.side-panel:not(.active) { box-shadow: none !important; }
 .settings-header, .privacy-header, .panel-header { background: var(--surface) !important; border-color: var(--surface-line) !important; }
 .settings-section { border-color: var(--surface-line) !important; }
 .field-input { background: var(--input) !important; color: var(--input-text) !important; border-color: var(--surface-line) !important; border-radius: 7px !important; }
@@ -453,3 +527,57 @@ code, pre, kbd, samp, .code-lang, .readonly-value, .tui-cmd, .tui-arg, .tui-key-
 @media (prefers-reduced-motion: reduce) {
   #input-row, #desktop-attach, #send-btn { transition: none !important; }
 }
+.desktop-process {
+  display: block !important;
+  margin: 0 0 18px;
+  padding: 0;
+  color: var(--muted, #999);
+  min-width: 0;
+  font-family: var(--font-sans);
+}
+.desktop-process-heading, .desktop-process-label {
+  font-size: 13px;
+  line-height: 28px;
+  font-weight: 400;
+}
+.desktop-process summary { cursor: pointer; list-style: none; border-radius: 4px; }
+.desktop-process summary::-webkit-details-marker { display: none; }
+.desktop-process summary::before { content: '›'; display: inline-block; width: 16px; text-align: center; margin-right: 4px; }
+.desktop-process details[open] > summary::before, .desktop-process[open] > summary::before { transform: rotate(90deg); }
+.desktop-process summary:hover { color: var(--text, #ddd); background: var(--surface-hover); }
+.desktop-process summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.desktop-process-heading { width: fit-content; max-width: 100%; }
+.desktop-process-body { max-height: 264px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 4px 8px 4px 0; }
+.desktop-process-body > details { min-width: 0; }
+.desktop-process-body > details > summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-process [data-status="running"] > summary::after { content: ''; display: inline-block; width: 5px; height: 5px; margin: 0 6px; border-radius: 50%; background: var(--accent, #82aaff); }
+.desktop-process [data-status="error"] > summary { color: var(--error, #d58a7a); }
+.desktop-process [data-event="tool_result"] { padding: 0 0 8px 20px; }
+.desktop-process pre {
+  display: block !important;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  max-height: none !important;
+  max-width: 100%;
+  margin: 4px 0 10px 20px;
+  padding: 8px 12px;
+  border-left: 1px solid var(--line, #444);
+  color: var(--muted, #999);
+  font-size: 12px;
+  line-height: 1.7;
+}
+@media (max-width: 650px) {
+  .desktop-process-body { max-height: 220px; }
+}
+/* User-origin styles must override Loom's author-origin spacing reset. */
+.desktop-worker-result{border:1px solid var(--border,#383838)!important;border-radius:14px!important;padding:20px 22px!important;margin:8px 0!important;}
+.desktop-worker-result-status{font-size:12px!important;opacity:.7!important;margin-bottom:9px!important;}
+.message .content .desktop-worker-result-title{font-size:18px!important;line-height:1.4!important;margin:0 0 12px!important;}
+.desktop-worker-result-summary{white-space:pre-wrap!important;line-height:1.7!important;}
+.desktop-worker-result-open{display:inline-block!important;margin-top:18px!important;padding:8px 16px!important;border:1px solid currentColor!important;border-radius:8px!important;text-decoration:none!important;font-weight:600!important;}
+.desktop-worker-result-hint{font-size:12px!important;opacity:.6!important;margin-left:12px!important;}
+.desktop-worker-result-evidence{margin-top:16px!important;font-size:12px!important;}
+.desktop-worker-result-evidence summary{cursor:pointer!important;opacity:.7!important;}
+.desktop-worker-result-evidence pre{white-space:pre-wrap!important;overflow-wrap:anywhere!important;max-height:240px!important;overflow:auto!important;padding:12px!important;margin-top:8px!important;}

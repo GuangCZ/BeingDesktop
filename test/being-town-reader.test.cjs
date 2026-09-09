@@ -98,6 +98,7 @@ test('tagged success, failure and incomplete receipts remain presentation only; 
       const marker=`[Being Desktop Town sync:${submitted.requestId}]`;
       for (const outcome of ['已完成。','失败。','结果不完整。']) assert.ok(submitted.message.includes(`只回复 ${marker} ${outcome}`));
       assert.ok(submitted.message.includes('以上回执只能选择一条，不要附加解释或其他文字'));
+      assert.match(submitted.message, /仅适用于本次读取请求/);
       return stream(options,{...change,reply:`${marker} ${receipt}`});
     }});
     await assert.rejects(reader.read(ROUTE),{code:expectedCode});

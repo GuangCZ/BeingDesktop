@@ -24,7 +24,7 @@ test('legacy profiles with an existing connection, workspace, or Portal skip the
 });
 
 test('saved progress wins over legacy migration and exposes only canonical public fields', () => {
-  for (const step of ['loom', 'portal', 'channel', 'grove', 'town', 'bonfire', 'complete']) {
+  for (const step of ['loom', 'review', 'portal', 'channel', 'grove', 'town', 'bonfire', 'complete']) {
     const settings = {credential: 'encrypted-value', onboarding: {step,
       completed: step !== 'complete', url: 'https://example.test/?token=secret', token: 'secret'}};
     assert.deepEqual(restoreOnboarding(settings), {step, completed: step === 'complete'});
@@ -41,7 +41,7 @@ test('malformed stored steps recover according to the existing profile', () => {
 
 test('missing or locked credentials return unfinished guides to Loom while completed guides stay complete', () => {
   for (const credential of ['', 'unavailable-encrypted-value']) {
-    for (const step of ['loom', 'portal', 'channel', 'grove', 'town', 'bonfire', 'complete']) {
+    for (const step of ['loom', 'review', 'portal', 'channel', 'grove', 'town', 'bonfire', 'complete']) {
       const settings = {credential, onboarding: {step, completed: step === 'complete'}};
       assert.deepEqual(restoreOnboarding(settings, {configured: false}),
         step === 'complete' ? {step: 'complete', completed: true} : {step: 'loom', completed: false});
@@ -55,7 +55,7 @@ test('only explicit valid steps can advance and a configured Loom is required af
     assert.throws(() => validateOnboardingStep(value, true), /无效的新手引导步骤/);
   }
   assert.deepEqual(validateOnboardingStep('loom', false), {step: 'loom', completed: false});
-  for (const step of ['portal', 'channel', 'grove', 'town', 'bonfire', 'complete']) {
+  for (const step of ['review', 'portal', 'channel', 'grove', 'town', 'bonfire', 'complete']) {
     for (const configured of [undefined, false, 'true', 1]) {
       assert.throws(() => validateOnboardingStep(step, configured), /请先配置 Loom 连接/);
     }
@@ -71,7 +71,7 @@ test('a new connection retains Loom progress and each later step resumes from sa
   const persist = () => fs.writeFile(filename, JSON.stringify(settings));
   await persist();
   assert.deepEqual(restoreOnboarding(JSON.parse(await fs.readFile(filename, 'utf8'))), {step: 'loom', completed: false});
-  for (const step of ['portal', 'channel', 'grove', 'town', 'bonfire', 'complete']) {
+  for (const step of ['review', 'portal', 'channel', 'grove', 'town', 'bonfire', 'complete']) {
     const result = await saveOnboardingStep(step, {settings, configured: true, persist});
     const restored = restoreOnboarding(JSON.parse(await fs.readFile(filename, 'utf8')));
     assert.deepEqual(restored, {step, completed: step === 'complete'});

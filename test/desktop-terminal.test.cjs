@@ -79,6 +79,24 @@ test('resize validates before native calls and ignores identical dimensions', as
   } finally { await service.dispose(); }
 });
 
+test('incremental terminal reads paginate complete Unicode chunks and report expired cursors',async()=>{
+  const {service,calls}=fixture();
+  try {
+    const {sessionId:id}=await service.create();
+    const expected='中文🙂'.repeat(100000);calls[0].handle.emit(expected);
+    let data='',sequence=0,more=true;
+    while(more) {
+      const chunk=service.readSince(id,sequence);
+      assert.equal(chunk.truncated,false);assert.ok(Buffer.byteLength(chunk.data,'utf8')<=128*1024);
+      assert.ok(chunk.sequence>sequence);data+=chunk.data;sequence=chunk.sequence;more=chunk.hasMore;
+    }
+    assert.equal(data,expected);assert.equal(service.readSince(id,sequence).data,'');
+    calls[0].handle.emit('x'.repeat(2*1024*1024));
+    assert.equal(service.readSince(id,0).truncated,true);
+    assert.throws(()=>service.readSince(id,Number.MAX_SAFE_INTEGER),/游标/);
+  } finally {await service.dispose();}
+});
+
 test('invalid creation dimensions and invalid directories never spawn', async () => {
   const { service, calls } = fixture();
   for (const options of [{ cols: 0 }, { rows: 201 }, { cwd: 'relative' }, { cwd: __filename }, { cwd: path.join(__dirname, 'missing-terminal-fixture') }]) {

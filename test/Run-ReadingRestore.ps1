@@ -19,7 +19,7 @@ try {
   $env:BEING_SMOKE_REPORT = $taskReportPath
   $env:BEING_SMOKE_EXIT = '1'
   $env:BEING_SMOKE_ID = $taskRunId
-  $taskProcess = Start-Process -FilePath $taskElectron -ArgumentList ('"' + $taskAppRoot + '"') -WorkingDirectory $taskAppRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $taskRunRoot 'stdout.log') -RedirectStandardError (Join-Path $taskRunRoot 'stderr.log')
+  $taskProcess = Start-Process -FilePath $taskElectron -ArgumentList ('"' + (Join-Path $taskAppRoot 'test\desktop-harness.cjs') + '"') -WorkingDirectory $taskAppRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $taskRunRoot 'stdout.log') -RedirectStandardError (Join-Path $taskRunRoot 'stderr.log')
   [pscustomobject]@{Phase='started';RunId=$taskRunId;Pid=$taskProcess.Id;Report=$taskReportPath;ConnectionDataCopied=$false}
   $taskDeadline = [DateTime]::UtcNow.AddSeconds(45)
   while (-not (Test-Path -LiteralPath $taskReportPath)) {

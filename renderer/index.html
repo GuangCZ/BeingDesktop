@@ -16,6 +16,8 @@
   <link rel="stylesheet" href="vendor/xterm/xterm.css">
   <link rel="stylesheet" href="terminal-panel.css">
   <link rel="stylesheet" href="settings-layout.css">
+  <link rel="stylesheet" href="orchestration.css">
+  <script src="orchestration.js" defer></script>
   <script src="vendor/xterm/xterm.js" defer></script>
   <script src="vendor/xterm/addon-fit.js" defer></script>
   <script src="terminal-panel.js" defer></script>
@@ -108,6 +110,7 @@
               <span class="session-copy"><strong id="sidebar-being-name">Being</strong><span class="session-state"><i class="status-dot" id="sidebar-status-dot"></i><span id="sidebar-status">尚未连接</span></span></span>
             </button>
             <div id="chat-session-list"></div>
+            <p class="sidebar-hint" id="session-route-warning" role="status" hidden>有回复缺少有效会话 ID，已隔离，未混入会话。</p>
             <p class="sidebar-hint" id="session-empty">连接 Loom 后显示会话</p>
           </div>
         </section>
@@ -178,6 +181,7 @@
           </div>
 
           <section class="page" id="page-tasks" hidden aria-label="功能任务"></section>
+          <section class="page" id="page-workers" hidden aria-label="Worker 执行详情"></section>
           <section class="page town-app-page" id="page-town-app" hidden aria-label="Town 管理"></section>
           <section class="page town-page" id="page-town" hidden aria-labelledby="town-heading">
             <div class="section-topline town-topline">
@@ -287,7 +291,7 @@
                 <div class="path-setting"><div><span class="field-label">Portal 配置</span><code id="portal-config">尚未选择</code></div><button class="button secondary small-button" id="select-portal-config">选择配置</button></div>
               </details>
               <div class="portal-runtime-group"><div class="portal-state-info"><div class="detail-row"><span>运行状态</span><strong id="portal-process-detail">尚未配置</strong></div><div class="detail-row"><span>连接</span><strong id="portal-health-detail">待确认</strong></div><p class="field-help" id="portal-detail" hidden></p></div>
-              <div class="settings-action-row"><details class="settings-note"><summary>运行详情</summary><p class="field-help" id="portal-owner-detail">仅管理由桌面启动的进程。</p></details><div class="inline-actions"><button class="button secondary small-button" id="stop-portal" disabled>停止</button><button class="button primary small-button" id="start-portal" disabled>启动</button></div></div></div>
+              <p id="portal-watchdog-detail" class="field-help" role="status" hidden></p><details id="portal-auto-health" class="settings-note" hidden><summary id="portal-auto-health-summary">自动健康检查</summary><div id="portal-auto-health-result" class="field-help"></div></details><div id="portal-self-test-result" class="field-help" role="status" aria-live="polite" hidden></div><div class="settings-action-row"><details class="settings-note"><summary>运行详情</summary><p class="field-help" id="portal-owner-detail">仅管理由桌面启动的进程。</p></details><div class="inline-actions"><button class="button secondary small-button" id="test-portal-connection">连接自测</button><button class="button secondary small-button" id="stop-portal" disabled>停止</button><button class="button primary small-button" id="start-portal" disabled>启动</button></div></div></div>
             </section>
             <section class="settings-card reading-settings" id="reading-settings" aria-labelledby="reading-heading">
               <div class="card-heading"><div class="setting-icon"><svg class="icon"><use href="#i-eye"/></svg></div><div><h3 id="reading-heading">阅读</h3><p>调整桌面显示，保留统一的系统字体。</p></div></div>
@@ -304,6 +308,19 @@
             <section class="settings-card">
               <div class="card-heading"><div class="setting-icon"><svg class="icon"><use href="#i-settings"/></svg></div><div><h3>桌面偏好</h3></div></div>
               <label class="switch-row" for="close-to-tray"><span><strong>关闭窗口后保留在托盘</strong><span class="field-help">退出应用可在托盘菜单中操作。</span></span><input type="checkbox" id="close-to-tray" role="switch"><span class="switch-track" aria-hidden="true"></span></label>
+            </section>
+            <section class="settings-card" id="orchestration-settings" data-mode-disabled="true">
+              <div class="card-heading"><div><h3>Orchestrator 模式</h3><p class="field-help">Being 细化需求、拆分任务和验收结果，由外部 Agent 执行。</p></div></div>
+              <label class="switch-row" for="orchestration-enabled"><span><strong>让 Being 专职编排</strong><span class="field-help">自动检测并保存。成功后仅允许 Worker 调度；没有可用 CLI 时不执行任务。</span></span><input type="checkbox" id="orchestration-enabled" role="switch" aria-describedby="orchestration-status"><span class="switch-track" aria-hidden="true"></span></label>
+              <p id="orchestration-status" class="field-help orchestration-feedback" role="status" aria-live="polite">开启时会检测 Agent 与严格编排入口。</p>
+              <label class="worker-default-label" for="orchestration-default">默认 Worker</label>
+              <select id="orchestration-default"><option value="codex">Codex CLI</option><option value="cursor">Cursor CLI</option><option value="grok">Grok Build CLI</option></select>
+              <div id="agent-kit-list"></div>
+              <p class="field-help">Worker 在选定的工作区运行，沿用 CLI 的登录与权限配置。共享工作区的任务依次执行。Cursor 当前接入 CLI，SDK 尚未接入。</p>
+              <p class="field-help">开启后将此 Being 的模型地址切换到 CLIProxyAPI 的严格编排入口，仅支持 OpenAI Responses。该入口只提供 Worker 工具，并在结果返回 Being 前拦截直接执行调用。关闭时恢复原地址。</p>
+              <p id="orchestration-policy-status" class="field-help" role="status">严格编排入口尚未核验。</p>
+              <div class="worker-settings-actions"><button type="button" class="button secondary" id="agent-kit-detect">检测 Agent Kit</button><button type="button" class="button primary" id="orchestration-save">保存模式</button><button type="button" class="button secondary" id="worker-reconnect">重连调度工具</button></div>
+              <p id="worker-link-status" class="field-help" role="status"></p>
             </section>
             <section class="settings-card diagnostics-card"><div><h3>诊断</h3><p class="field-help">导出连接状态与近期桌面活动。</p></div><button class="button secondary small-button" id="export-diagnostics"><svg class="icon"><use href="#i-download"/></svg>导出诊断</button></section>
             <section class="settings-card diagnostics-card"><div><h3>新手引导</h3><p class="field-help">依次连接 Loom、部署 Portal 和配置 Channel。</p></div><button class="button secondary small-button" id="setup-restart">继续新手引导</button></section>

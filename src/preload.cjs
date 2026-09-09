@@ -1,6 +1,14 @@
 'use strict';
 const {contextBridge, ipcRenderer} = require('electron');
 const api = {};
+api.showSessionMenu=id=>ipcRenderer.invoke('being:showSessionMenu',id);
+api.renameChatSession=(id,title)=>ipcRenderer.invoke('being:renameChatSession',id,title);
+for(const name of ['getOrchestration','inspectAgents','saveOrchestration','getWorker','cancelWorker','retryWorkerCallback','reconnectWorkers'])api[name]=(...args)=>ipcRenderer.invoke(`being:${name}`,...args);
+api.onWorkers=callback=>{
+  if(typeof callback!=='function')throw new TypeError('Expected callback');
+  const listener=(_event,value)=>callback(value);ipcRenderer.on('being:workers',listener);
+  return ()=>ipcRenderer.removeListener('being:workers',listener);
+};
 api.changeChatSession=async id=>{
   const result=await ipcRenderer.invoke('being:changeChatSession',id);
   if(result?.ok===false)throw new Error(result.message);
@@ -11,6 +19,7 @@ for(const name of ['getFeatureTasks','getFeatureTask','discussFeatureTask','endF
 for (const name of ['checkPortalUpdates','openPortalUpdate']) api[name]=()=>ipcRenderer.invoke(`being:${name}`);
 api.setColors=colors=>ipcRenderer.invoke('being:setColors',colors);
 api.setOnboardingStep=step=>ipcRenderer.invoke('being:setOnboardingStep',step);
+for(const name of ['inspectOnboarding','cancelOnboardingInspection'])api[name]=()=>ipcRenderer.invoke(`being:${name}`);
 for(const name of ['getModelConfig','saveModelConfig'])api[name]=(...args)=>ipcRenderer.invoke(`being:${name}`,...args);
 for (const name of ['getDesktopTools','desktopAction','setBrowserView','copyDesktopText','getTerminalState','readTerminal','terminalAction','readNativeText']) api[name]=(...args)=>ipcRenderer.invoke(`being:${name}`,...args);
 for(const [name,channel] of [['onFeatureTasks','being:feature-tasks'],['onTerminalState','being:terminal-state'],['onTerminalData','being:terminal-data'],['onTownMessages','being:town-messages'],['onWindowState','being:window-state']])api[name]=callback=>{
@@ -24,7 +33,7 @@ api.onToolsState=callback=>{
   ipcRenderer.on('being:tools-state',listener);
   return ()=>ipcRenderer.removeListener('being:tools-state',listener);
 };
-for (const name of ['getPortalPermissions','savePortalPermissions','getState','refresh','getTownCatalog','openTownPage','prepareTownFeature','prepareTownAssistance','prepareFiresideDraft','getTownAppState','refreshTownApp','getGroveCatalog','getGroveDetail','prepareGroveInstallation','beginChannelConnection','updateFeishuCredentials','checkChannelStatus','getFiresides','getFiresideMessages','getFiresideMembers','sendFiresideMessage','createFireside','joinFireside','deployPortal','connect','disconnect','reconnect','selectWorkspace','openWorkspace','listWorkspace','selectPortalExecutable','selectPortalConfig','startPortal','stopPortal','setView','minimize','maximize','close','setCloseToTray','setTypography','exportDiagnostics']) {
+for (const name of ['getPortalPermissions','savePortalPermissions','getState','refresh','getTownCatalog','openTownPage','prepareTownFeature','prepareTownAssistance','prepareFiresideDraft','getTownAppState','refreshTownApp','getGroveCatalog','getGroveDetail','prepareGroveInstallation','beginChannelConnection','updateFeishuCredentials','checkChannelStatus','getFiresides','getFiresideMessages','getFiresideMembers','sendFiresideMessage','createFireside','joinFireside','deployPortal','connect','disconnect','reconnect','selectWorkspace','openWorkspace','listWorkspace','selectPortalExecutable','selectPortalConfig','startPortal','stopPortal','testPortalConnection','setView','minimize','maximize','close','setCloseToTray','setTypography','exportDiagnostics']) {
   api[name] = (...args) => ipcRenderer.invoke(`being:${name}`, ...args);
 }
 // Electron strips custom Error fields. Preserve only known Town error categories.

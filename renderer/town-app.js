@@ -815,14 +815,10 @@
     choose.disabled = busy.has('deploy') || busy.has('workspace');
     append(workspaceCard, node('p', 'ta-muted', publicState.workspace?.path ? '工作区是默认操作目录，不代表 Portal 的全部访问范围仅限于此目录。' : '一键配置时自动创建专用工作区，也可选择已有文件夹。'), choose);
     page.append(workspaceCard);
-    const permissions = append(node('section', 'ta-panel'), node('h4', '', '计划配置'), node('p', 'ta-muted', '当前实例：尚未验证实际能力。以下是本轮部署计划，不能代替运行时能力验证。'));
-    const permissionList = node('ul', 'ta-capability-list');
-    for (const [key, title, description] of [['files', '文件与搜索：计划启用', '支持读取、写入、编辑、列目录与搜索；本配置未提供删除工具。'], ['exec', '命令与截图：计划关闭', '计划在执行入口关闭命令执行、进程工具和截图；当前实例尚未验证。'], ['web', '网络与 OAuth：计划保留底层能力', '网络仍能请求网页与搜索。OAuth 仍可启动账号授权流程，但存在工具不等于账号已授权。'], ['extensions', '扩展工具包：计划不加载', '计划不加载第三方 Kits 与自定义工具，不代表禁止一切安装。']]) {
-      const item = append(node('li', 'ta-permission'), append(node('span'), node('strong', '', title), node('span', 'ta-muted', description)));
-      item.id = `portal-permission-${key}`;
-      permissionList.append(item);
-    }
-    append(permissions, permissionList, node('p', 'ta-muted', '启动 Portal 会让当前 Being 获得相应本机能力。基础配置不是操作系统沙箱，源码预期或工具清单都不等于当前实例已通过强制限制验证。'));
+    const permissions = append(node('section', 'ta-panel'), node('h4', '', '工具权限'),
+      node('p', 'ta-muted', '在设置 → 本机 Portal 中查看和修改文件、命令、截图及自定义工具权限。'),
+      button('打开权限设置', () => options.onNavigateSettings?.(), 'ta-quiet', 'portal-app-permissions'),
+      node('p', 'ta-muted', '工作区是默认操作目录，Portal 不是操作系统沙箱。'));
     page.append(permissions);
     const release = append(node('section', 'ta-panel'), node('h4', '', '计划安装：官方 Portal v0.8.0'), node('p', 'ta-mono', 'github.com/d5z/heart-portal'));
     release.append(node('p', 'ta-muted', installation.verified === true ? '托管安装包校验：已通过' : '托管安装包校验：尚未确认通过'));

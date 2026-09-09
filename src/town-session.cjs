@@ -378,13 +378,13 @@ class TownSession {
     });
   }
 
-  async getChannelStatus() {
+  async getChannelStatus({signal} = {}) {
     const expected = this._context();
     return this._read('channel', expected, async () => {
-      const value = await this._request('/api/channels/status', {expected, query: {being_id: expected.beingId}});
+      const value = await this._request('/api/channels/status', {expected, signal, query: {being_id: expected.beingId}});
       const list = Array.isArray(value.channels) ? value.channels : record(value.channels) ? Object.entries(value.channels).map(([channel, entry]) => ({...(record(entry) ? entry : {}), channel})) : [value];
       return {channels: ['feishu', 'wechat'].map(channel => channelDto(list.find(item => record(item) && item.channel === channel), channel))};
-    });
+    }, {signal});
   }
 
   async beginChannelConnection(value) {

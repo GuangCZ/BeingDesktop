@@ -170,6 +170,14 @@ window.beingTerminal=(()=>{
     fitFrame=requestAnimationFrame(()=>{fitFrame=null;if(!visible||disposed)return;const entry=activeEntry();if(!entry||entry.surface.clientWidth<30||entry.surface.clientHeight<20)return;try{const settings=typography();for(const item of entries.values())for(const [key,value] of Object.entries(settings))if(item.terminal.options[key]!==value)item.terminal.options[key]=value;entry.fitAddon.fit();resize(entry,entry.terminal.cols,entry.terminal.rows);}catch(error){fail(error);}});
   }
   async function show() {visible=true;await ready;if(disposed||!visible)return;if(!started){started=true;if(!state.sessions.length)await create();}fit();requestAnimationFrame(()=>{if(visible)activeEntry()?.terminal.focus();});}
+  async function reveal(id) {
+    await ready;if(disposed)return false;
+    accept(await bridge.getTerminalState());
+    if(!entries.has(keyFor(id)))return false;
+    setSelected(keyFor(id),{focus:false});await show();
+    await new Promise(resolve=>requestAnimationFrame(resolve));
+    return visible && selected===keyFor(id) && host.getBoundingClientRect().width>0 && host.getBoundingClientRect().height>0;
+  }
   function hide() {visible=false;closeMenu();}
   function init(options) {
     if(initialized)return;
@@ -192,5 +200,5 @@ window.beingTerminal=(()=>{
     ready=bridge.getTerminalState().then(accept).catch(fail);updateJobs(jobs);renderTabs();renderStage();
   }
   function dispose() {disposed=true;visible=false;resizeObserver?.disconnect();if(fitFrame!==null)cancelAnimationFrame(fitFrame);unsubscribers.forEach(unsubscribe=>{if(typeof unsubscribe==='function')unsubscribe();});for(const key of entries.keys())removeEntry(key);host?.replaceChildren();}
-  return {init,show,hide,fit,updateJobs,dispose};
+  return {init,show,reveal,hide,fit,updateJobs,dispose};
 })();

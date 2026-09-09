@@ -1,23 +1,29 @@
 {
   "name": "being-desktop",
-  "version": "0.8.19",
+  "version": "0.8.22",
   "description": "A desktop home for your existing Being, Loom and local Portal.",
   "author": {
     "name": "Being Desktop contributors"
   },
-  "main": "src/main.cjs",
+  "main": "src/desktop-entry.cjs",
   "private": true,
   "license": "MIT",
   "scripts": {
     "postinstall": "node node_modules/electron/install.js",
     "start": "electron .",
     "test": "node --test test/*.test.cjs",
-    "check": "node --check src/main.cjs && node --check src/preload.cjs && node --check src/portal-updates.cjs && node --check src/model-config.cjs && node --check src/onboarding.cjs && node --check src/ui-theme.cjs && node --check renderer/portal-updates.js && node --check renderer/model-settings.js && node --check renderer/onboarding.js && node --check renderer/theme-colors.js && node --check renderer/theme-settings.js && node --check renderer/app.js && node --check src/portal-config.cjs && node --check src/portal-permissions.cjs && node --check renderer/portal-permissions.js",
+    "check": "node --check src/main.cjs && node --check src/preload.cjs && node --check src/portal-updates.cjs && node --check src/model-config.cjs && node --check src/onboarding.cjs && node --check src/onboarding-inspection.cjs && node --check src/ui-theme.cjs && node --check renderer/portal-updates.js && node --check renderer/model-settings.js && node --check renderer/onboarding.js && node --check renderer/theme-colors.js && node --check renderer/theme-settings.js && node --check renderer/app.js && node --check src/portal-config.cjs && node --check src/portal-permissions.cjs && node --check renderer/portal-permissions.js && npm run check:workers",
     "test:portal-updates": "node --test test/portal-updates.test.cjs && node test/portal-updates-ui.cjs",
     "test:onboarding": "node test/onboarding-ui.cjs",
     "test:theme": "node scripts/verify-theme-settings.cjs",
     "pack": "electron-builder --win dir",
-    "dist": "electron-builder --win portable"
+    "dist": "electron-builder --win portable",
+    "pack:mac": "electron-builder --config electron-builder.mac.cjs --mac --dir --publish never",
+    "dist:mac": "electron-builder --config electron-builder.mac.cjs --mac --publish never",
+    "dist:mac:arm64": "npm run dist:mac -- --arm64",
+    "dist:mac:x64": "npm run dist:mac -- --x64",
+    "check:workers": "node --check src/agent-process.cjs && node --check src/agent-kits.cjs && node --check src/worker-events.cjs && node --check src/worker-callbacks.cjs && node --check src/orchestration.cjs && node --check renderer/orchestration.js && node --check src/orchestration-policy.cjs",
+    "test:orchestration": "node --test test/orchestration-policy.test.cjs test/agent-process.test.cjs test/orchestration.test.cjs test/worker-callbacks.test.cjs test/desktop-tool-link.test.cjs test/loom-sessions.test.cjs && node test/orchestration-ui.cjs"
   },
   "build": {
     "appId": "town.beings.desktop",
@@ -54,6 +60,7 @@
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
-    "node-pty": "1.1.0"
+    "node-pty": "1.1.0",
+    "ws": "8.21.3"
   }
 }

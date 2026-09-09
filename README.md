@@ -12,8 +12,19 @@ A Windows desktop home for your existing Being: Loom conversations, local files,
 - Grove discovery, environment checks, and supported Kit installation.
 - Town and Channel entry points, subject to the connected service's capabilities.
 - Settings for appearance, reading, Loom connections, and model configuration.
+- Orchestrator mode: Being plans and evaluates; Codex, Cursor or Grok Build CLI workers execute, report progress beneath their conversation, and return results to that conversation.
 
-Version **0.8.19**, Windows x64. Requires an existing Being and Loom connection. The desktop does not host or migrate your Being's identity and memory.
+Current source version **0.8.22**, Windows x64. Download availability follows GitHub Releases. Requires an existing Being and Loom connection. The desktop does not host or migrate your Being's identity and memory.
+
+## Orchestrator mode
+
+Choose a local workspace, install and authenticate a supported CLI, then enable **Settings → 编排模式**. Desktop detects the Agent Kit, verifies a compatible strict OpenAI Responses endpoint, and saves the mode. A failed check restores the switch; unavailable workers never fall back to direct Being execution. The companion model gateway is deployed separately and is not bundled with this Electron repository.
+
+Workers appear beneath their original conversation with execution status, tool events and logs. Completion is saved before notifying Being; notification delivery and acceptance are separate states. Being's final summary, collapsed evidence and **Open preview** button appear in the original conversation. Web previews use Desktop's embedded browser. Stable delivery identities prevent history synchronization from repeatedly appending the same worker result.
+
+The switch applies to all Desktop conversations and changes the connected Being's model endpoint. It does not revoke independent remote runtime jobs. CLI calls nested inside restricted workers may need a host execution integration; the project-specific poker workaround is not a general Desktop-managed launcher.
+
+Read the [user guide](docs/orchestration.html) for setup and recovery, or the [implementation notes](docs/orchestration.md) for the gateway contract, callback lifecycle and enforcement limits.
 
 ## Develop
 
@@ -32,7 +43,39 @@ npm run pack
 
 `npm run pack` creates `dist/win-unpacked`. Keep the complete directory together. `npm run dist` builds the portable executable. If the native terminal module reports an ABI mismatch, rebuild `node-pty` for the configured Electron version.
 
-`npm start` uses the app's default user data directory. `Start.ps1` uses `.local/profile` in the checkout. Do not commit profiles, credentials, or build artifacts.
+`npm start` uses the app's default user data directory. `Start.ps1` uses the same default user data directory. Do not commit profiles, credentials, or build artifacts.
+
+## Build a macOS preview
+
+On a Mac, install Node.js 24, npm, Python 3, and Xcode Command Line Tools
+(`xcode-select --install`). Use a fresh checkout or run `npm ci` on the Mac;
+do not copy Windows `node_modules` or build outputs.
+
+```sh
+npm ci
+npm run check
+npm run pack:mac
+npm run dist:mac
+```
+
+`pack:mac` produces an `.app`; `dist:mac` produces DMG and ZIP files in
+`dist/macos`. Both default to the architecture of the running Node.js process.
+Use `npm run dist:mac:arm64` for Apple Silicon or `npm run dist:mac:x64` for
+Intel. Build and test each architecture on a matching Mac where possible;
+these are separate packages, not a universal binary. You can also use
+`npm run pack:mac -- --arm64` or `--x64` for an explicit directory build.
+
+The macOS configuration reuses the shared package settings and rebuilds native
+dependencies for Electron. It uses local ad-hoc signing without a Developer ID
+certificate or notarization; these packages are for local preview, not a signed
+public release. Signing details follow the pinned
+[electron-builder v26 configuration](https://www.electron.build/v26/docs/mac/).
+
+This adds build configuration only. macOS packaging and launch still need to be
+verified on a Mac. The terminal and console remain Windows-only; automatic
+Portal installation, updates and process discovery, and Grove one-click
+installation are not adapted for macOS. The existing package verification
+script and release workflow target Windows packages.
 
 ## Documentation
 

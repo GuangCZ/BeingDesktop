@@ -16,6 +16,7 @@ const initialState = {
 
 let state = structuredClone(initialState);
 let currentPage = 'chat';
+let editingSession = null;
 let featureTaskView=null;
 const pageHistory = [{page: 'chat', feature: ''}];
 let pageHistoryIndex = 0;
@@ -40,6 +41,8 @@ let selectedTownFeature = '';
 const nativeTownModules = new Set(['grove','channel','portal','fireside','bonfire','scroll','beings']);
 let townBusyAction = '';
 let typographyFeedback = { status: 'idle', message: '' };
+let portalSelfTestRevision = 0;
+const portalTestIdentity = value => JSON.stringify([value.connection?.configured, value.connection?.displayUrl, value.connection?.beingName, value.portal?.pid, value.portal?.owned, value.portal?.executable, value.portal?.configPath, value.portal?.health, value.portal?.connectionCurrent]);
 let portalSetup = { status: 'idle', detail: '' };
 
 function portalSetupIdentity(value = state) {
@@ -120,6 +123,10 @@ function proxyLabel(value) {
 function acceptState(next) {
   if (!next || typeof next !== 'object' || !next.connection) return;
   if (portalSetupIdentity(next) !== portalSetupIdentity()) portalSetup = { status: 'idle', detail: '' };
+  if (portalTestIdentity(next) !== portalTestIdentity(state)) {
+    portalSelfTestRevision++;
+    $('portal-self-test-result').hidden = true;
+  }
   const previousWorkspace = state.workspace.path;
   state = {
     ...initialState,
@@ -149,6 +156,7 @@ function acceptState(next) {
     fileRequest += 1;
   }
   render();
+  window.beingOrchestration?.setState(state.orchestration);
   if (currentPage === 'workspace' && state.workspace.path && listedWorkspace !== state.workspace.path) {
     void loadFiles('');
   }
@@ -174,7 +182,9 @@ function render() {
   if ($('active-session')) $('active-session').hidden = !connection.configured || Boolean(state.chatSessions?.items?.length);
   if ($('new-chat-session')) $('new-chat-session').disabled = !connected;
   const sessionList = $('chat-session-list');
-  if (sessionList) {
+  if ($('session-route-warning')) $('session-route-warning').hidden = !connection.configured || !state.chatSessions?.routingWarning;
+  if (sessionList && (!editingSession || !connected)) {
+    editingSession = null;
     sessionList.replaceChildren();
     for (const item of connection.configured ? state.chatSessions?.items || [] : []) {
       const button = document.createElement('button');
@@ -182,11 +192,35 @@ function render() {
       button.className = 'session-shortcut';
       button.classList.toggle('active', item.id === state.chatSessions.activeId);
       if (item.id === state.chatSessions.activeId) button.setAttribute('aria-current', 'page');
-      button.textContent = `${name} · ${item.title}`;
-      button.title = `${item.title}\nSession ID: ${item.id}`;
+      const activity = state.chatSessionActivity?.[item.id];
+      const activityLabel = activity === 'talking' ? '正在和 Being 通话' : activity === 'waiting' ? '消息等待' : '未激活';
+      const dot = document.createElement('span');
+      dot.className = `session-activity-light ${activity === 'talking' ? 'talking' : activity === 'waiting' ? 'waiting' : 'inactive'}`;
+      // Keep the breathing phase continuous when state updates rebuild the list.
+      dot.style.animationDelay = `-${(document.timeline.currentTime || 0) % 2400}ms`;
+      dot.setAttribute('aria-hidden', 'true');
+      const title = document.createElement('span');
+      title.className = 'session-title';
+      title.textContent = `${name} · ${item.title}`;
+      button.append(dot, title);
+      button.setAttribute('aria-label', `${name} · ${item.title}，${activityLabel}`);
+      button.title = `${item.title} · ${activityLabel}\nSession ID: ${item.id}`;
       button.disabled = !connected;
       button.addEventListener('click', () => selectChatSession(item.id));
+      button.addEventListener('contextmenu',async event=>{
+        event.preventDefault();
+        if(!connected)return;
+        try {
+          if(await bridge.showSessionMenu(item.id)==='rename') {
+            const current=state.chatSessions?.items.find(session=>session.id===item.id);
+            const target=[...sessionList.querySelectorAll('.session-shortcut')].find(node=>node.dataset.sessionId===item.id);
+            if(current && target)renameChatSession(current,target);
+          }
+        } catch(error){showToast(error.message);}
+      });
+      button.dataset.sessionId=item.id;
       sessionList.append(button);
+      window.beingOrchestration?.appendSession(sessionList,item.id);
     }
   }
   if ($('session-empty')) $('session-empty').hidden = Boolean(connection.configured);
@@ -231,6 +265,16 @@ function render() {
   text('portal-owner-detail', portal.owned ? '此 Portal 由桌面应用启动，可以在这里停止。' : portal.status === 'external' ? '检测到其他方式启动的 Portal。请在原启动位置管理该进程。' : '应用只管理自己启动的 Portal 进程。');
   text('portal-detail', str(portal.detail));
   $('portal-detail').hidden = !portal.detail;
+  const watchdog = portal.watchdog;
+  $('portal-watchdog-detail').hidden = !watchdog;
+  text('portal-watchdog-detail', watchdog ? `${watchdog.detail}${watchdog.retryAt ? ` 下次重试：${new Date(watchdog.retryAt).toLocaleTimeString()}` : ''}` : '');
+  const autoHealth = watchdog?.health;
+  $('portal-auto-health').hidden = !autoHealth;
+  if (autoHealth) {
+    const names = {passed:'通过', failed:'未通过', unknown:'未确认', checking:'检查中'};
+    text('portal-auto-health-summary', `自动健康检查 · ${names[autoHealth.status] || '未确认'}${autoHealth.checkedAt ? ` · ${new Date(autoHealth.checkedAt).toLocaleTimeString()}` : ''}`);
+    $('portal-auto-health-result').replaceChildren(element('p', '', autoHealth.detail), ...(autoHealth.checks || []).map(check => element('p', '', `${check.label} · ${names[check.status] || '未确认'}：${check.detail}`)));
+  }
   renderPortalSetup();
   renderConfiguration();
   renderSideBySide();
@@ -432,6 +476,8 @@ function renderButtons() {
     $(id).setAttribute('aria-busy', String(pending.has('refresh')));
   });
   const portalBusy = pending.has('startPortal') || pending.has('stopPortal') || pending.has('deployPortal') || state.townApp?.portalInstall?.status === 'installing';
+  $('test-portal-connection').disabled = portalBusy || pending.has('testPortalConnection');
+  text('test-portal-connection', pending.has('testPortalConnection') ? '自测中…' : '连接自测');
   $('start-portal').disabled = portalBusy || state.portal.owned || !state.portal.executable || !state.portal.configPath || ['running', 'external'].includes(state.portal.status);
   $('stop-portal').disabled = portalBusy || !state.portal.owned || !state.portal.pid;
   text('start-portal', pending.has('startPortal') ? '启动中…' : '启动');
@@ -544,12 +590,13 @@ function renderPageContext() {
     workspace: basename(state.workspace.path) || '本机工作区',
     town: 'Town 功能',
     tasks: '功能任务',
+    workers: 'Worker 执行详情',
     'town-app': {grove:'工具市场 · Grove',channel:'消息渠道 · Channel',portal:'设备连接 · Portal',fireside:'围炉 · Fireside',bonfire:'篝火 · Bonfire',scroll:'卷轴 · Scroll',beings:'居民名录 · Beings'}[selectedTownFeature] || 'Town',
     settings: '设置',
   };
   text('page-title', titles[currentPage]);
   if ($('page-title')) $('page-title').title = titles[currentPage];
-  $('page-context-icon')?.setAttribute('href', `#i-${{chat: 'chat', workspace: 'folder', town: 'panel', tasks:'check', 'town-app': 'panel', settings: 'settings'}[currentPage]}`);
+  $('page-context-icon')?.setAttribute('href', `#i-${{chat: 'chat', workspace: 'folder', town: 'panel', tasks:'check', workers:'cpu', 'town-app': 'panel', settings: 'settings'}[currentPage]}`);
   text('page-eyebrow', '');
   text('titlebar-caption', currentPage === 'workspace' && state.workspace.path ? '本机工作区' : '');
   const session = $('active-session');
@@ -563,7 +610,7 @@ function renderPageContext() {
 }
 
 function changePage(page, {recordHistory = true} = {}) {
-  if (!['chat', 'workspace', 'town', 'town-app', 'tasks', 'settings'].includes(page)) return;
+  if (!['chat', 'workspace', 'town', 'town-app', 'tasks', 'workers', 'settings'].includes(page)) return;
   if (page === 'settings' && currentPage !== 'settings') {
     settingsReturnPage = currentPage;
     window.beingTools?.hide();
@@ -1193,6 +1240,19 @@ $('portal-setup').addEventListener('click', () => { void setupPortal(); });
 $('portal-setup-assist').addEventListener('click', () => { void askBeingAboutPortal(); });
 $('portal-setup-choose-workspace').addEventListener('click', () => { void perform('selectWorkspace'); });
 $('start-portal').addEventListener('click', () => { void perform('startPortal'); });
+$('test-portal-connection').addEventListener('click', async () => {
+  if (pending.has('testPortalConnection')) return;
+  const revision = portalSelfTestRevision;
+  const container = $('portal-self-test-result');
+  container.replaceChildren(element('p', '', '正在检查程序、进程、Being 运行时与中继握手…'));
+  container.hidden = false;
+  const result = await perform('testPortalConnection');
+  if (revision !== portalSelfTestRevision) return;
+  container.replaceChildren();
+  const report = result.value;
+  container.append(element('p', '', result.ok ? `${report.detail}（${new Date(report.checkedAt).toLocaleTimeString()}）` : `自测未完成：${result.error || '桌面连接不可用'}`));
+  for (const check of report?.checks || []) container.append(element('p', '', `${check.label} · ${{passed:'通过', failed:'未通过', unknown:'未确认'}[check.status] || '未确认'}：${check.detail}`));
+});
 $('stop-portal').addEventListener('click', () => { void perform('stopPortal'); });
 $('configure-portal').addEventListener('click', () => openTownModule('portal'));
 $('back-to-loom').addEventListener('click', () => {
@@ -1282,6 +1342,7 @@ const settingsSections = [
   {id: 'appearance', label: '外观', icon: 'eye', targets: ['appearance-settings', 'reading-settings'], keywords: '颜色 配色 主题 字号 阅读'},
   {id: 'connection', label: '连接', icon: 'link', targets: ['settings-connect-form'], keywords: 'Being Loom 地址 授权'},
   {id: 'models', label: '模型', icon: 'cpu', targets: ['model-settings'], keywords: 'API 服务 密钥 Side by Side'},
+  {id: 'orchestration', label: '编排模式', icon: 'cpu', targets: ['orchestration-settings'], keywords: 'Orchestrator Worker Agent Kit Codex Cursor Grok 执行 工具'},
   {id: 'portal', label: '本机 Portal', icon: 'terminal', targets: ['portal-settings'], keywords: '工作区 工具 权限 程序 更新'},
   {id: 'about', label: '关于', icon: 'info', targets: ['export-diagnostics', 'setup-restart'], keywords: '版本 诊断 新手引导'},
 ];
@@ -1386,6 +1447,7 @@ function initializeSettingsLayout() {
 }
 
 initializeSettingsLayout();
+window.beingOrchestration?.init({bridge,onOpen:()=>changePage('workers'),onBack:()=>changePage('chat'),onUpdate:()=>render()});
 window.beingThemeSettings?.init({bridge,onState:acceptState});
 window.beingPortalPermissions?.init({bridge,onState:acceptState});
 window.beingPortalUpdates?.init({bridge,onState:acceptState,onOpenSettings:openPortalUpdateSettings,onError:message=>showToast(message,true)});
@@ -1406,7 +1468,7 @@ if(bridge?.onFeatureTasks)bridge.onFeatureTasks(updateTaskBadge);
 if(bridge?.getFeatureTasks)void bridge.getFeatureTasks().then(updateTaskBadge).catch(()=>{});
 window.beingTownApp?.init({bridge,onNavigateChat:()=>changePage('chat'),onSelectWorkspace:()=>selectWorkspace(),onNavigateSettings:()=>changePage('settings'),onBack:()=>changePage('town'),onTasks:openFeatureTasks,onBonfireSent:result=>window.beingOnboarding?.onBonfireSent(result)});
 window.beingTools?.init({bridge,onOpen:()=>toggleInspector(false),onLayout:scheduleView,onSelectWorkspace:()=>selectWorkspace()});
-window.beingOnboarding?.init({bridge,onState:acceptState,onLayout:scheduleView,onOpen:()=>window.beingTools?.hide(),onChannel:()=>openTownModule('channel'),onGrove:()=>openTownModule('grove'),onBonfire:()=>{selectedTownFeature='bonfire';changePage('town-app');void window.beingTownApp?.startOnboardingGreeting();},onComplete:()=>showToast('问候已送达篝火，新手引导完成。欢迎来到 Town！'),onPortalSettings:()=>{changePage('settings');scrollWithinPage($('page-settings'),$('portal-settings'));},onError:message=>showToast(message,true)});
+window.beingOnboarding?.init({bridge,onState:acceptState,onLayout:scheduleView,onOpen:()=>window.beingTools?.hide(),onChat:()=>changePage('chat'),onChannel:()=>openTownModule('channel'),onGrove:()=>openTownModule('grove'),onBonfire:()=>{selectedTownFeature='bonfire';changePage('town-app');void window.beingTownApp?.startOnboardingGreeting();},onComplete:()=>showToast('问候已送达篝火，新手引导完成。欢迎来到 Town！'),onPortalSettings:()=>{changePage('settings');scrollWithinPage($('page-settings'),$('portal-settings'));},onError:message=>showToast(message,true)});
 render();
 renderNavigation();
 renderWindowState({maximized: false});
@@ -1430,3 +1492,32 @@ if (bridge?.onCommand) {
 }
 void perform('getState');
 void loadTownCatalog();
+
+function renameChatSession(item, button) {
+  if(editingSession)return;
+  const editor=document.createElement('div');editor.className='session-shortcut session-editing';
+  const input=document.createElement('input');input.className='session-name-input';input.value=item.title;input.maxLength=80;
+  input.setAttribute('aria-label','会话名称');input.title='Enter 保存，Esc 取消';
+  const dot=button.querySelector('.session-activity-light');if(dot)editor.append(dot.cloneNode(true));
+  editor.append(input);button.replaceWith(editor);editingSession=editor;
+  let saving=false,finished=false;
+  const close=()=>{if(finished)return;finished=true;if(editingSession===editor)editingSession=null;render();};
+  const save=async()=>{
+    if(saving || finished || editingSession!==editor)return;
+    const title=input.value.trim();
+    if(!title || title===item.title){close();return;}
+    saving=true;input.readOnly=true;
+    try {
+      await bridge.renameChatSession(item.id,title);
+      const current=state.chatSessions?.items.find(session=>session.id===item.id);if(current)current.title=title;
+      close();
+    } catch(error){showToast(error.message);saving=false;input.readOnly=false;input.focus();input.select();}
+  };
+  input.addEventListener('keydown',event=>{
+    if(event.isComposing)return;
+    if(event.key==='Escape'){event.preventDefault();if(!saving)close();}
+    if(event.key==='Enter'){event.preventDefault();void save();}
+  });
+  input.addEventListener('blur',()=>void save());
+  input.focus();input.select();
+}

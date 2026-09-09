@@ -5,11 +5,18 @@ const path = require('node:path');
 const os = require('node:os');
 const {pathToFileURL} = require('node:url');
 const {PortalService, safeListWorkspace, sanitizeText} = require('./services.cjs');
+const {runPortalSelfTest} = require('./portal-self-test.cjs');
+const {PortalWatchdog} = require('./portal-watchdog.cjs');
 const {parseConnection, endpoint, protocolFile, sessionPartition, allowedNavigation} = require('./security.cjs');
 const {emptyRuntime, readRuntime, updateRuntimeConfig} = require('./runtime.cjs');
 const {ModelConfig} = require('./model-config.cjs');
+const {OnboardingInspection} = require('./onboarding-inspection.cjs');
 const {applyLoomTheme,applyContentTypography,applyContentColors} = require('./loom-theme.cjs');
 const {prepareLoomSessions,changeLoomSession} = require('./loom-sessions.cjs');
+const {readSessionActivity} = require('./session-activity.cjs');
+const {DESKTOP_PORTAL_NAME,desktopMessageContext} = require('./desktop-message-context.cjs');
+const {prepareTargetRuntime} = require('./portal-target-runtime.cjs');
+const {readSessionRecovery} = require('./session-recovery.cjs');
 const {normalizeTypography,validateTypography} = require('./typography.cjs');
 const {normalizeColors,saveColors} = require('./ui-theme.cjs');
 const {restoreOnboarding,saveOnboardingStep,completeOnboardingAfterBonfire} = require('./onboarding.cjs');
@@ -26,6 +33,11 @@ const {GroveInstaller} = require('./grove-installer.cjs');
 const {GroveActions} = require('./grove-actions.cjs');
 const {inspectGrovePortal,enableGrovePortal,verifyGrovePortalLogs,grovePortalConfigText,recoverGrovePortalMetadata} = require('./grove-portal.cjs');
 const {DesktopTools} = require('./desktop-tools.cjs');
+const {Orchestration} = require('./orchestration.cjs');
+const {WorkerPresentation}=require('./worker-presentation.cjs');
+const {createCallbackSender,createContinuationSender}=require('./worker-callbacks.cjs');
+const {OrchestrationPolicy} = require('./orchestration-policy.cjs');
+const {normalizeMode} = require('./agent-kits.cjs');
 const {createBrowserLinks} = require('./browser-links.cjs');
 const {DesktopTerminal} = require('./desktop-terminal.cjs');
 const {TownSession} = require('./town-session.cjs');
@@ -43,8 +55,13 @@ const {FeatureTaskRunner} = require('./feature-task-runner.cjs');
 const {discussFeatureTask} = require('./feature-task-discussion.cjs');
 const {applyLoomComposer,updateLoomComposerData,takeLoomComposerIntents,reportLoomComposerResult,detachLoomComposer} = require('./loom-composer.cjs');
 
+function startDesktop({onReady = null, portalUpdateChecksEnabled = true} = {}) {
+// Windows GPU compositing can leave stale text tiles in embedded conversation
+// views after streaming layout changes. Use software painting for this shell.
+if (process.platform === 'win32') app.disableHardwareAcceleration();
+
 protocol.registerSchemesAsPrivileged([{scheme:'being', privileges:{standard:true, secure:true, supportFetchAPI:true, corsEnabled:true}}]);
-if (process.env.BEING_DATA_DIR) app.setPath('userData', path.resolve(process.env.BEING_DATA_DIR));
+app.setPath('userData', process.env.BEING_DATA_DIR ? path.resolve(process.env.BEING_DATA_DIR) : path.join(app.getPath('appData'),'Being Desktop'));
 app.setName('Being Desktop');
 if (process.platform === 'win32') app.setAppUserModelId('town.beings.desktop');
 const lock = app.requestSingleInstanceLock();
@@ -56,8 +73,9 @@ function boot() {
   let connection = null, generation = 0, identityRevision = 0, portalIdentityRevision = null, viewRevision = 0, viewWanted = false, viewport = {x:224,y:88,width:800,height:600};
   let portalBeingName = '';
   let portalPermissionsBusy = false;
+  let portalWatchdog;
+  let desktopConnectPromise=null;
   let portalUpdateNotification = null;
-  const portalUpdateChecksEnabled = process.env.BEING_SCENARIOS!=='1' && !process.env.BEING_SMOKE_REPORT;
   let mutationTail = Promise.resolve();
   let composerTimer=null;
   let messageQueueTimer=null;
@@ -81,6 +99,8 @@ function boot() {
   townMethods.add('getTownCachedData');
   const serialized = new Set(['connect','disconnect','reconnect','selectWorkspace','selectPortalExecutable','selectPortalConfig','startPortal','stopPortal','setCloseToTray','setTypography','setColors','saveModelConfig','setOnboardingStep','prepareTownFeature','prepareTownAssistance','prepareFiresideDraft','discussFeatureTask','deployPortal']);
   serialized.add('changeChatSession');
+  serialized.add('renameChatSession');
+  serialized.add('saveOrchestration');
   serialized.add('savePortalPermissions');
   for(const name of ['installGroveKit','installEligibleGroveKits','prepareGroveAssistance'])serialized.add(name);
   let disk = {workspace:'', portalExecutable:'', portalConfig:'', closeToTray:true, credential:''};
@@ -89,14 +109,71 @@ function boot() {
     machine:{hostname:os.hostname(),user:os.userInfo().username},
     connection:{configured:false,displayUrl:'',beingName:'',status:'disconnected',error:'',updatedAt:null},
     onboarding:restoreOnboarding(),
+    onboardingInspection:null,
     workspace:{path:'',files:[]},
     portal:{status:'not_configured',health:'unknown',executable:'',configPath:'',pid:null,owned:false,detail:''},
     runtime:emptyRuntime(),
     localProxy:{status:'unknown',baseUrl:'http://127.0.0.1:8317/v1'},
     activity:[],settings:{closeToTray:true,typography:normalizeTypography(),colors:normalizeColors()}
   };
+  const orchestration=new Orchestration({directory:path.join(app.getPath('userData'),'workers'),getWorkspace:()=>state.workspace.path,
+    getSessionIds:()=>[...new Set([...chatViews.keys(),...(state.chatSessions?.items||[]).map(item=>item.id)])],
+    onChange:snapshot=>{if(win&&!win.isDestroyed())win.webContents.send('being:workers',snapshot);}});
+  orchestration.callbacks.setTransport({send:createCallbackSender({getConnection:()=>connection,fetchImpl:(url,options)=>net.fetch(url,options)}),
+    resume:createContinuationSender({getConnection:()=>connection,getTarget:()=>desktopTools?.link.capabilities().place,fetchImpl:(url,options)=>net.fetch(url,options)}),
+    ready:()=>desktopTools?.link.capabilities().tools.includes('desktop_worker_status')===true,
+    report:async(worker,{owner,signal,presentationOnly=false})=>{
+      if(signal.aborted||!connection||sessionPartition(connection)!==owner)throw new Error('Being identity changed');
+      const contents=[...liveChatViews].map(item=>item.webContents).find(item=>!item.isDestroyed());
+      if(!contents)throw new Error('Conversation renderer unavailable');
+      const item={sessionId:worker.sessionId,requestId:worker.review.requestId,workerId:worker.id,title:worker.title,preview:Boolean(worker.presentation),
+        status:presentationOnly?'ready':worker.review.status,
+        summary:presentationOnly?'结果已生成。点击下方按钮，在 Desktop 内置浏览器中打开。':worker.review.summary,
+        evidence:presentationOnly?'页面入口已由 Desktop 接管；页面加载不等同于交互测试通过。':worker.review.evidence};
+      const delivered=await contents.executeJavaScript(`globalThis.__beingDesktopSessions?.deliverWorkerReview(${JSON.stringify(item)})`);
+      if(!delivered)throw new Error('Original conversation unavailable');
+    }});
+  async function updateOrchestrationViews() {
+    for(const owned of liveChatViews) {
+      const contents=owned.webContents;if(contents.isDestroyed())continue;
+      const sessionId=await contents.executeJavaScript('globalThis.__beingDesktopSessions?.list().activeId || ""');
+      if(sessionId)await contents.executeJavaScript(`globalThis.__beingDesktopOrchestration=${JSON.stringify(orchestration.context(sessionId))}`);
+    }
+  }
+  async function connectOrchestration() {
+    if(!connection||!desktopTools)return;
+    if(desktopTools.link.snapshot().status==='connected')return;
+    if(desktopConnectPromise)return desktopConnectPromise;
+    desktopConnectPromise=desktopTools.perform('link.connect').catch(()=>{
+      activity('warning','桌面工具连接未建立','请在桌面工具中重新连接；当前消息会如实报告工具不可用。');
+    }).finally(()=>{desktopConnectPromise=null;});
+    return desktopConnectPromise;
+  }
+  async function desktopEnvironment(sessionId) {
+    const enabled=orchestration.mode.enabled;
+    if(orchestration.configuring)throw Object.assign(new Error('编排模式正在切换，请完成后再发送消息。'),{code:'ORCHESTRATION_NOT_ENFORCED'});
+    if(enabled)await orchestrationPolicy.assertEnforced();
+    if(desktopConnectPromise)await desktopConnectPromise;
+    if(enabled!==orchestration.mode.enabled||orchestration.configuring)throw Object.assign(new Error('编排模式已变化，请重新发送。'),{code:'ORCHESTRATION_NOT_ENFORCED'});
+    const bridge=desktopTools.link.capabilities();
+    if(enabled&&!bridge.tools.includes('desktop_worker_start'))throw Object.assign(new Error('Worker 工具尚未连接，禁止发送执行任务。'),{code:'ORCHESTRATION_NOT_ENFORCED'});
+    const terminalCallable=bridge.tools.includes('desktop_terminal_create');
+    return desktopMessageContext({runtime:{
+      capturedAt:new Date().toISOString(),application:{name:'Being Desktop',version:app.getVersion()},
+      chatSessionId:sessionId,workspace:state.workspace.path || null,
+      portal:{name:DESKTOP_PORTAL_NAME,status:state.portal.status,health:state.portal.health},
+      bridge,mode:orchestration.mode.enabled?'orchestrator':'direct',
+      terminal:{present:process.platform==='win32',interactive:process.platform==='win32',shell:'PowerShell',callable:terminalCallable,
+        approval:'本会话自建终端内的已授权任务可直接执行；账户凭据和必须本人确认的授权交给用户',
+        scope:terminalCallable?desktopTools.terminalTools.scope(sessionId):null,
+        sessions:desktopTools.terminalTools.sessions(sessionId),lifetime:'跨回复和聊天切换保留；退出应用或明确关闭终端时结束'},
+      browser:{present:true,callable:bridge.tools.includes('desktop_browser_open'),approval:'现有浏览器工具逐次本地确认'},
+      console:{interactive:false,callable:bridge.tools.includes('desktop_console_run'),approval:'现有非交互命令逐次本地确认'},
+    }});
+  }
   const portal = new PortalService({onEvent(event) {
     state.portal = portal.state;
+    if (['Portal 已退出','Portal 进程错误'].includes(event.title)) portalWatchdog?.wake();
     activity(event.level, event.title, event.detail);
   }});
   const installer = new PortalInstaller({userDataDir:app.getPath('userData'),requestImpl:portalRequestAdapter(net.request.bind(net))});
@@ -151,7 +228,22 @@ function boot() {
       if(portalUpdateChecksEnabled)void portalUpdates.changed();
     },startPortal:()=>startCurrentPortal(),onChange:()=>broadcast()});
 
+  portalWatchdog = new PortalWatchdog({portal,
+    startPortal:()=>startCurrentPortal(false,true),
+    getContext:()=>({identity:identityRevision,ready:Boolean(connection),blocked:exitStarted || townSuspended || portalPermissionsBusy || Boolean(town._deploying)}),
+    checkHealth:signal=>testPortalConnection(signal),
+    serialize:fn=>{
+      const operation=mutationTail.then(fn);
+      mutationTail=operation.catch(()=>{});
+      return operation;
+    },onChange:()=>broadcast()});
+
   const modelConfig=new ModelConfig({getContext:()=>({connection,connectionId:generation,exiting:exitStarted}),fetchImpl:(url,options)=>net.fetch(url,options)});
+  const orchestrationPolicy=new OrchestrationPolicy({readConfig:()=>modelConfig.get(),saveConfig:async value=>publishModelConfig(await modelConfig.save(value)),
+    getIdentity:()=>connection?sessionPartition(connection):'',getRecord:()=>disk.orchestrationPolicy,
+    saveRecord:async record=>{const previous=disk.orchestrationPolicy;disk.orchestrationPolicy=record;try{await persist();}catch(error){disk.orchestrationPolicy=previous;throw error;}},
+    fetchImpl:(url,options)=>net.fetch(url,options),fallbackFetchImpl:(url,options)=>fetch(url,options),onChange:policy=>{orchestration.enforcement=policy;orchestration.notify();}});
+  orchestration.assertEnforced=()=>orchestrationPolicy.assertEnforced();
   function publishModelConfig(snapshot) {
     if(!connection || snapshot.connectionId!==generation)throw new Error('Being 连接已变化，请重新读取模型配置。');
     modelConfigRevision++;
@@ -192,6 +284,19 @@ function boot() {
       }});
     },
     onChange:()=>broadcast(),
+  });
+  const onboardingInspection=new OnboardingInspection({
+    getContext:()=>({connection,connectionId:generation,identityRevision,beingName:state.connection.beingName,exiting:exitStarted}),
+    fetchImpl:(url,options)=>net.fetch(url,options),
+    getChannelStatus:({signal,beingId})=>{
+      const expectedConnection=connection;
+      const inspectionSession=new TownSession({
+        getContext:()=>({configured:state.connection.configured&&connection===expectedConnection,connected:state.connection.status==='connected',exiting:exitStarted,connectionId:generation,identityRevision,beingName:beingId}),
+        fetchImpl:(url,options)=>net.fetch(url,{...options,credentials:'omit',referrerPolicy:'no-referrer'}),
+      });
+      return inspectionSession.getChannelStatus({signal});
+    },
+    onChange:summary=>{state.onboardingInspection=summary;broadcast();},
   });
   const channelBeing=new ChannelBeing({
     getContext:()=>({connection,configured:state.connection.configured,connected:state.connection.status==='connected',exiting:exitStarted,connectionId:generation,identityRevision,beingName:state.connection.beingName}),
@@ -288,7 +393,7 @@ function boot() {
   }
   function publicState() {
     const portalState=portal.state;
-    return structuredClone({...state,portal:{...portalState,connectionBeingName:portalState.owned?portalBeingName:'',connectionCurrent:portalState.owned?portalIdentityRevision===identityRevision:null},portalUpdate:portalUpdates.state(),townApp:townState()});
+    return structuredClone({...state,orchestration:orchestration.snapshot(),portal:{...portalState,watchdog:portalWatchdog?.state(),connectionBeingName:portalState.owned?portalBeingName:'',connectionCurrent:portalState.owned?portalIdentityRevision===identityRevision:null},portalUpdate:portalUpdates.state(),townApp:townState()});
   }
   function broadcast() {
     if (win && !win.isDestroyed()) win.webContents.send('being:state',publicState());
@@ -319,6 +424,20 @@ function boot() {
       onError:error=>activity('warning','网页未能打开',error.message),
     });
   }
+  function workerResultLink(contents,value) {
+    let url;try{url=new URL(value);}catch{return false;}
+    if(url.origin!=='https://being-desktop-result.invalid')return false;
+    const match=/^\/open\/([0-9a-f-]{36})$/i.exec(url.pathname);
+    if(!match||url.search||url.hash)return true;
+    const epoch=generation;
+    void (async()=>{
+      if(contents.isDestroyed()||!connection)throw new Error('会话已关闭。');
+      const sessionId=await contents.executeJavaScript('globalThis.__beingDesktopSessions?.list().activeId');
+      if(epoch!==generation||!sessionId)throw new Error('会话连接已变化。');
+      await orchestration.openResult(match[1],sessionId);
+    })().catch(error=>activity('warning','结果预览未能打开',error.message));
+    return true;
+  }
   function settingsPath() { return path.join(app.getPath('userData'),'settings.json'); }
   async function persist() {
     await fs.mkdir(app.getPath('userData'),{recursive:true});
@@ -337,11 +456,21 @@ function boot() {
       try { await persist(); }
       catch { disk.managedPortal=previousManaged;activity('warning','Grove 安装记录未能恢复','已保留现有工具和 Portal 配置，可重新点击安装修复记录。'); }
     }
+    if(app.isPackaged) {
+      const previousRuntime=structuredClone(disk);
+      try {
+        if(await prepareTargetRuntime({resourcesPath:process.resourcesPath,userData:app.getPath('userData'),settings:disk})) {
+          await fs.copyFile(settingsPath(),settingsPath()+'.before-target-binding.bak',require('node:fs').constants.COPYFILE_EXCL).catch(error=>{if(error.code!=='EEXIST')throw error;});
+          await persist();
+        }
+      } catch { disk=previousRuntime;activity('error','Portal 目标绑定更新失败','原配置已保留，请检查修复版文件完整性后重试。'); }
+    }
     disk.onboarding = restoreOnboarding(disk);
     state.onboarding = {...disk.onboarding};
     state.settings.closeToTray = disk.closeToTray !== false;
     state.settings.typography = normalizeTypography(disk.typography);
     state.settings.colors = normalizeColors(disk.colors);
+    orchestration.mode=normalizeMode(disk.orchestration);
     state.workspace.path = typeof disk.workspace === 'string' ? disk.workspace : '';
     if (state.workspace.path) {
       try { state.workspace.files = await safeListWorkspace(state.workspace.path,''); }
@@ -360,6 +489,8 @@ function boot() {
       delete process.env.BEING_LOOM_URL;
     }
     if (connection) publishConnection();
+    await orchestration.selectOwner(connection?sessionPartition(connection):'');
+    if(orchestration.mode.enabled)await orchestration.inspect();
     await loadFeatureHistory();
     disk.onboarding = restoreOnboarding(disk,{configured:Boolean(connection)});
     state.onboarding = {...disk.onboarding};
@@ -375,8 +506,9 @@ function boot() {
     const previous = disk.credential;
     disk.credential = encrypted;
     try { await persist(); } catch { disk.credential=previous; throw new Error('无法保存连接设置。'); }
-    if (!connection || sessionPartition(connection)!==sessionPartition(parsed)) {identityRevision++;desktopTools?.disconnectLink();townSession.reset();}
-    channelBeing.reset();resetTownReader();
+    if (!connection || sessionPartition(connection)!==sessionPartition(parsed)) {identityRevision++;desktopTools?.disconnectLink();desktopTools?.terminalTools.reset();townSession.reset();}
+    onboardingInspection.reset();channelBeing.reset();resetTownReader();
+    await orchestration.selectOwner(sessionPartition(parsed));
     connection=parsed; generation++; state.runtime=emptyRuntime();
     publishConnection();
     syncTownLifecycle();
@@ -420,6 +552,7 @@ function boot() {
     view.setVisible(Boolean(viewWanted && connection && w>0 && h>0));
   }
   function discardView() {
+    state.chatSessionActivity={};
     clearInterval(messageQueueTimer);messageQueueTimer=null;state.messageQueue=null;
     clearInterval(composerTimer);composerTimer=null;composerRevision++;
     for (const item of liveChatViews) {
@@ -437,12 +570,23 @@ function boot() {
     clearInterval(messageQueueTimer);
     state.messageQueue=null;
     let polling=false;
-    const current=()=>connectionEpoch===generation && view?.webContents===contents && !contents.isDestroyed() && !contents.isLoadingMainFrame() && state.connection.status==='connected' && !exitStarted;
+    const current=()=>connectionEpoch===generation && view?.webContents===contents && !exitStarted;
     const poll=async()=>{
       if (polling || !current()) return;
       polling=true;
       try {
-        const messageQueue=await contents.executeJavaScript('globalThis.__beingDesktopTaskQueue?.snapshot() || null');
+        const snapshots=await readSessionActivity(chatViews,chatViewStatus);
+        if(!current())return;
+        const selected=snapshots.find(item=>item.view.webContents===contents);
+        const messageQueue=selected?.queue || null;
+        const routingWarning=Boolean(selected?.routingWarning);
+        const activities=Object.fromEntries(snapshots.map(item=>[item.id,item.activity]));
+        if(JSON.stringify(state.chatSessionActivity)!==JSON.stringify(activities)) {
+          state.chatSessionActivity=activities;broadcast();
+        }
+        if(current() && state.chatSessions && state.chatSessions.routingWarning!==routingWarning) {
+          state.chatSessions.routingWarning=routingWarning;broadcast();
+        }
         if (current() && JSON.stringify(state.messageQueue)!==JSON.stringify(messageQueue)) {
           state.messageQueue=messageQueue;
           broadcast();
@@ -461,9 +605,13 @@ function boot() {
     if (!current()) return;
     await applyLoomComposer(contents,{kits:[],members:[]});
     if (!current()) return;
-    let polling=false;
+    let polling=false, routingPolling=false, routingTick=0;
     composerTimer=setInterval(async()=>{
       if (polling || !current()) return;
+      if (++routingTick % 5 === 0 && !routingPolling) {
+        routingPolling=true;
+        void contents.executeJavaScript('globalThis.__beingDesktopSessions?.poll()').catch(()=>{}).finally(()=>{routingPolling=false;});
+      }
       polling=true;
       try {
         const intents=await takeLoomComposerIntents(contents);
@@ -507,6 +655,7 @@ function boot() {
     loomSession.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));
     loomSession.setPermissionCheckHandler(()=>false);
     view=new WebContentsView({webPreferences:{session:loomSession,backgroundThrottling:false,nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true,allowRunningInsecureContent:false,devTools:!app.isPackaged}});
+    view.setBackgroundColor(state.settings.colors.background);
     const ownedView=view;
     liveChatViews.add(ownedView);
     chatViewStatus.set(ownedView,{status:'connecting',error:''});
@@ -523,7 +672,7 @@ function boot() {
       sendShellCommand(command,['workspace','settings','navigate-back','navigate-forward'].includes(command));
     });
     const links=browserLinks(()=>epoch===generation&&state.connection.status==='connected');
-    contents.setWindowOpenHandler(links.popup);
+    contents.setWindowOpenHandler(details=>workerResultLink(contents,details.url)?{action:'deny'}:links.popup(details));
     const guardNavigation=(event,target)=>{
       if(allowedNavigation(initial,target))return;
       event.preventDefault();
@@ -535,6 +684,7 @@ function boot() {
     };
     contents.on('will-navigate',(event,target)=>{
       const url=typeof event.url==='string'?event.url:target;
+      if(workerResultLink(contents,url)){event.preventDefault();return;}
       if(allowedNavigation(initial,url))return;
       if(epoch===generation&&state.connection.status==='connected') {
         event.preventDefault();
@@ -559,6 +709,8 @@ function boot() {
       const sessions = await contents.executeJavaScript('globalThis.__beingDesktopSessions?.list() || {activeId:"",items:[]}');
       if(epoch!==generation || finishedRevision!==loadRevision || contents.isDestroyed())return;
       if(sessions.activeId)chatViews.set(sessions.activeId,ownedView);
+      if(sessions.activeId)await contents.executeJavaScript(`globalThis.__beingDesktopOrchestration=${JSON.stringify(orchestration.context(sessions.activeId))}`);
+      void connectOrchestration();
       chatViewStatus.set(ownedView,{status:'connected',error:''});
       void applyLoomTownSync(contents,townSyncRecords).catch(()=>{});
       if(!isCurrent())return;
@@ -578,7 +730,18 @@ function boot() {
     });
     contents.on('render-process-gone',()=>{loadRevision++;chatViewStatus.set(ownedView,{status:'error',error:'对话页面进程已退出，请重新连接。'});if(!isCurrent())return;viewRevision++;state.connection.status='error';state.connection.error='对话页面进程已退出，请重新连接。';activity('error','对话页面已退出',state.connection.error);syncTownLifecycle();});
     win.contentView.addChildView(view);mountView();
-    prepareLoomSessions(contents,sessionId).then(()=>{
+    readSessionRecovery(app.getPath('userData'),initial).then(recovery=>prepareLoomSessions(contents,sessionId,recovery,{enabled:orchestration.mode.enabled},async (id,titleInput)=>{
+      if(epoch!==generation || exitStarted || contents.isDestroyed() || chatViews.get(id)!==ownedView || !allowedNavigation(initial,contents.getURL()))throw new Error('Conversation changed');
+      if(titleInput && orchestration.mode.enabled) void orchestration.generateTitle(id,titleInput).then(async title=>{
+        if(!title || epoch!==generation || exitStarted || contents.isDestroyed())return;
+        await contents.executeJavaScript(`globalThis.__beingDesktopSessions?.rename(${JSON.stringify(id)},${JSON.stringify(title)},true)`);
+        if(view && !view.webContents.isDestroyed())state.chatSessions=await view.webContents.executeJavaScript('globalThis.__beingDesktopSessions.list()');
+        broadcast();
+      }).catch(()=>{});
+      const context=await desktopEnvironment(id);
+      if(epoch!==generation || exitStarted || chatViews.get(id)!==ownedView)throw new Error('Conversation changed');
+      return context;
+    })).then(()=>{
       if(epoch===generation && !contents.isDestroyed()) return contents.loadURL(initial.url);
     }).catch(()=>{
       chatViewStatus.set(ownedView,{status:'error',error:'会话隔离初始化失败，请重新连接。'});
@@ -620,16 +783,29 @@ function boot() {
     const result=await dialog.showOpenDialog(win,{title,properties:['openFile'],filters:[{name:title,extensions}]});
     return result.canceled?'':result.filePaths[0];
   }
-  async function startCurrentPortal(permissionRestart = false) {
+  async function startCurrentPortal(permissionRestart = false, automatic = false) {
+    if(exitStarted)throw new Error('桌面端正在退出。');
+    if(!automatic)portalWatchdog?.resume();
     if(portalPermissionsBusy && !permissionRestart)throw new Error('Portal 权限正在保存，请稍后重试。');
     if(!connection)throw new Error('请先连接 Being。');
     const managed=disk.managedPortal?.configPath===disk.portalConfig && disk.managedPortal?.executable===disk.portalExecutable;
     const alreadyOwned=portal.state.owned;
     const startedIdentity=identityRevision;
     const startedBeing=state.connection.beingName;
-    const started=await portal.start({connectUrl:connection.url,portalName:'being-desktop',...(managed?{coworkToken:require('node:crypto').randomBytes(32).toString('hex')}:{})});
+    const started=await portal.start({connectUrl:connection.url,portalName:DESKTOP_PORTAL_NAME,...(managed?{coworkToken:require('node:crypto').randomBytes(32).toString('hex')}:{})});
     if(!alreadyOwned && started.owned){portalIdentityRevision=startedIdentity;portalBeingName=startedBeing;}
     return started;
+  }
+  function testPortalConnection(signal) {
+    const revision=identityRevision, current=connection;
+    return runPortalSelfTest({portal,
+      connectionCurrent:portal.state.owned?portalIdentityRevision===revision:null,
+      isCurrent:()=>!signal?.aborted && identityRevision===revision && connection===current,
+      probeRuntime:current?async()=>{
+        const response=await net.fetch(endpoint(current,'/api/status'),{redirect:'error',cache:'no-store',...(signal?{signal}:{})});
+        if(!response.ok)throw new Error('Runtime unavailable');
+        return response.json();
+      }:null});
   }
   async function inspectCurrentGrovePortal() {
     const managed=disk.managedPortal?.configPath===disk.portalConfig && disk.managedPortal?.executable===disk.portalExecutable;
@@ -707,10 +883,46 @@ function boot() {
       return desktopTerminal.snapshot();
     });
     handle('getDesktopTools',()=>desktopTools.snapshot());
+    handle('getOrchestration',()=>orchestration.snapshot());
+    handle('inspectAgents',paths=>orchestration.inspect(normalizeMode({paths}).paths));
+    handle('getWorker',id=>orchestration.get(id));
+    handle('cancelWorker',id=>orchestration.stop(id));
+    handle('retryWorkerCallback',id=>orchestration.callbacks.retry(id));
+    handle('reconnectWorkers',async()=>{desktopTools.disconnectLink();await connectOrchestration();return desktopTools.link.snapshot();});
+    handle('saveOrchestration',async value=>{
+      await orchestration.configure(value,async next=>{
+        if(!connection)throw new Error('请先连接 Being。');
+        const headers=connection.secret?{'X-Relay-Secret':connection.secret}:{};
+        const response=await net.fetch(endpoint(connection,'/api/stream/active'),{headers,credentials:'omit',redirect:'error',cache:'no-store'});
+        if(!response.ok)throw new Error('无法确认 Being 是否空闲，编排模式未切换。');
+        if(response.status!==204&&(await response.json())?.finished!==true)throw new Error('Being 仍有任务执行中，请结束当前任务后切换编排模式。');
+        await orchestrationPolicy.configure(next.enabled);
+        const previous=disk.orchestration;disk.orchestration=next;
+        try{await persist();}catch(error){disk.orchestration=previous;throw error;}
+      });
+      desktopTools.disconnectLink();
+      await updateOrchestrationViews();
+      await connectOrchestration();broadcast();return orchestration.snapshot();
+    });
     handle('copyDesktopText',value=>{if(typeof value!=='string'||value.length>1024*1024)throw new Error('复制内容无效。');clipboard.writeText(value);return true;});
     handle('desktopAction',(action,value)=>{if(exitStarted)throw new Error('桌面端正在退出。');return desktopTools.perform(action,value);});
     handle('setBrowserView',value=>desktopTools.browser.setViewport(value));
     handle('getState',()=>publicState());handle('refresh',refresh);
+    handle('showSessionMenu',id=>{
+      if(typeof id!=='string' || !state.chatSessions?.items.some(item=>item.id===id))throw new Error('会话不存在。');
+      return new Promise(resolve=>{
+        const menu=Menu.buildFromTemplate([{label:'重命名',click:()=>resolve('rename')}]);
+        menu.popup({window:win,callback:()=>resolve(null)});
+      });
+    });
+    handle('renameChatSession',async(id,title)=>{
+      if(typeof id!=='string' || !state.chatSessions?.items.some(item=>item.id===id) || !view)throw new Error('会话不存在。');
+      if(typeof title!=='string' || !title.trim() || title.trim().length>80 || /[\x00-\x1f\x7f]/.test(title))throw new Error('会话名须为 1–80 个字符，且不能包含换行。');
+      const contents=(chatViews.get(id)||view).webContents;
+      await contents.executeJavaScript(`globalThis.__beingDesktopSessions.rename(${JSON.stringify(id)},${JSON.stringify(title)})`);
+      state.chatSessions=await view.webContents.executeJavaScript('globalThis.__beingDesktopSessions.list()');
+      broadcast();return true;
+    });
     handle('changeChatSession',async(id)=>{
       if(id!==null && (typeof id!=='string' || !/^[0-9a-f-]{36}$/i.test(id)))throw new Error('会话标识无效。');
       if(!view || state.connection.status!=='connected')throw new Error('请先连接 Loom。');
@@ -727,6 +939,7 @@ function boot() {
         clearInterval(composerTimer);composerTimer=null;composerRevision++;
         Object.assign(state.connection,chatViewStatus.get(next));
         state.chatSessions=await next.webContents.executeJavaScript('globalThis.__beingDesktopSessions.list()');
+        mountMessageQueue(next.webContents,generation);
         await Promise.all([applyContentTypography(next.webContents,state.settings.typography),applyContentColors(next.webContents,state.settings.colors)]);
         mountView();
         if(state.connection.status==='connected')void mountComposer(next.webContents,generation).catch(()=>{});
@@ -871,6 +1084,8 @@ function boot() {
       if(!url || !/^https:\/\/github\.com\/d5z\/heart-portal\/releases\/tag\/v?\d+\.\d+\.\d+$/.test(url))throw new Error('请先检查 Portal 更新。');
       return browserLinks().open(url);
     });
+    handle('inspectOnboarding',()=>onboardingInspection.inspect());
+    handle('cancelOnboardingInspection',()=>{onboardingInspection.cancel();return publicState();});
     handle('connect',async(url)=>{await storeConnection(url);createLoom();activity('info','连接已保存','凭据已使用系统加密保存。');refresh();return publicState();});
     handle('disconnect',async()=>{
       const previous={credential:disk.credential,onboarding:disk.onboarding};
@@ -878,9 +1093,9 @@ function boot() {
       if(!state.onboarding.completed)disk.onboarding={step:'loom',completed:false};
       try{await persist();}catch(error){Object.assign(disk,previous);throw error;}
       state.onboarding={...disk.onboarding};
-      desktopTools?.disconnectLink();channelBeing.reset();resetTownReader();generation++;identityRevision++;connection=null;discardView();await loadFeatureHistory();state.connection={configured:false,displayUrl:'',beingName:'',status:'disconnected',error:'',updatedAt:null};state.runtime=emptyRuntime();townSession.reset();syncTownLifecycle();activity('info','已断开桌面连接','Portal 与 Being 的后台运行状态未改变。');return publicState();
+      desktopTools?.disconnectLink();await orchestration.selectOwner('');onboardingInspection.reset();channelBeing.reset();resetTownReader();generation++;identityRevision++;connection=null;discardView();await loadFeatureHistory();state.connection={configured:false,displayUrl:'',beingName:'',status:'disconnected',error:'',updatedAt:null};state.runtime=emptyRuntime();townSession.reset();syncTownLifecycle();activity('info','已断开桌面连接','Portal 与 Being 的后台运行状态未改变。');return publicState();
     });
-    handle('reconnect',()=>{if(!connection)throw new Error('请先配置 Loom 连接。');channelBeing.reset();resetTownReader();generation++;state.connection.status='connecting';state.connection.error='';syncTownLifecycle();createLoom();broadcast();refresh();return publicState();});
+    handle('reconnect',()=>{if(!connection)throw new Error('请先配置 Loom 连接。');onboardingInspection.reset();channelBeing.reset();resetTownReader();generation++;state.connection.status='connecting';state.connection.error='';syncTownLifecycle();createLoom();broadcast();refresh();return publicState();});
     handle('selectWorkspace',async()=>{
       const result=await dialog.showOpenDialog(win,{title:'选择本地工作区',properties:['openDirectory']});
       if(result.canceled)return publicState();
@@ -891,10 +1106,11 @@ function boot() {
     });
     handle('listWorkspace',async(relative='')=>{if(!state.workspace.path)return [];return safeListWorkspace(state.workspace.path,relative);});
     handle('openWorkspace',async()=>{if(!state.workspace.path)throw new Error('请先选择工作区。');const error=await shell.openPath(state.workspace.path);if(error)throw new Error('工作区无法打开。');return publicState();});
-    handle('selectPortalExecutable',async()=>{if(portalPermissionsBusy)throw new Error('Portal 权限正在保存，请稍后重试。');const selected=await chooseFile('选择 heart-portal 可执行文件',process.platform==='win32'?['exe']:['*']);if(selected){portal.configure({executable:selected});disk.portalExecutable=selected;await persist();if(portalUpdateChecksEnabled)void portalUpdates.changed();activity('info','Portal 程序已选择','尚未启动或扩大工作区权限。');}return publicState();});
-    handle('selectPortalConfig',async()=>{if(portalPermissionsBusy)throw new Error('Portal 权限正在保存，请稍后重试。');const selected=await chooseFile('选择已有 portal.toml 配置',['toml']);if(selected){portal.configure({configPath:selected});disk.portalConfig=selected;await persist();activity('info','Portal 配置已选择','启动时将使用该配置所定义的工作区和权限。');}return publicState();});
+    handle('selectPortalExecutable',async()=>{if(portalPermissionsBusy)throw new Error('Portal 权限正在保存，请稍后重试。');const selected=await chooseFile('选择 heart-portal 可执行文件',process.platform==='win32'?['exe']:['*']);if(selected){portal.configure({executable:selected});disk.portalExecutable=selected;await persist();if(portalUpdateChecksEnabled)void portalUpdates.changed();activity('info','Portal 程序已选择','自动守护将使用已保存的连接与配置检查并启动 Portal。');}return publicState();});
+    handle('selectPortalConfig',async()=>{if(portalPermissionsBusy)throw new Error('Portal 权限正在保存，请稍后重试。');const selected=await chooseFile('选择已有 portal.toml 配置',['toml']);if(selected){portal.configure({configPath:selected});disk.portalConfig=selected;await persist();activity('info','Portal 配置已选择','自动守护将使用此配置定义的工作区和权限启动 Portal。');}return publicState();});
     handle('startPortal',async()=>{await startCurrentPortal();if(portalUpdateChecksEnabled)void portalUpdates.check({force:true});broadcast();return publicState();});
-    handle('stopPortal',async()=>{if(portalPermissionsBusy)throw new Error('Portal 权限正在保存，请稍后重试。');await portal.stop();broadcast();return publicState();});
+    handle('testPortalConnection',()=>testPortalConnection());
+    handle('stopPortal',async()=>{if(portalPermissionsBusy)throw new Error('Portal 权限正在保存，请稍后重试。');portalWatchdog.pause();await portal.stop();broadcast();return publicState();});
     handle('setView',({visible,bounds}={})=>{viewWanted=visible===true;if(bounds && ['x','y','width','height'].every(key=>Number.isFinite(bounds[key])))viewport={...bounds};mountView();});
     handle('minimize',()=>win.minimize());handle('maximize',()=>{if(win.isMaximized())win.unmaximize();else win.maximize();});handle('close',()=>win.close());
     handle('setCloseToTray',async(value)=>{if(typeof value!=='boolean')throw new Error('无效设置');disk.closeToTray=value;state.settings.closeToTray=value;await persist();broadcast();return publicState();});
@@ -920,6 +1136,7 @@ function boot() {
       state.settings.colors=colors;
       if(win && !win.isDestroyed()) win.setBackgroundColor(colors.background);
       if(view && !view.webContents.isDestroyed() && !view.webContents.isLoadingMainFrame()) {
+        view.setBackgroundColor(colors.background);
         try { await applyContentColors(view.webContents,colors); }
         catch { activity('warning','配色已保存','对话页面暂未应用配色，重新连接后会恢复。'); }
       }
@@ -947,13 +1164,15 @@ function boot() {
   }
   async function shutdown() {
     if(exitStarted)return;exitStarted=true;
-    channelBeing.reset();resetTownReader();
+    portalWatchdog?.stop();
+    onboardingInspection.reset();channelBeing.reset();resetTownReader();
     townBackground.stop();
     clearInterval(refreshTimer);
     portalUpdates.stop();
     await mutationTail;
     try { await portal.dispose(); } catch {
       exitStarted=false;
+      portalWatchdog.start();
       syncTownLifecycle();
       activity('error','Portal 尚未停止','桌面端保持打开，请检查 Portal 状态后重试停止。');
       showDesktopWindow();
@@ -963,10 +1182,16 @@ function boot() {
     }
     try {
       desktopTools?.disconnectLink();
+      await orchestration.dispose();
       const commandJobs=desktopTools?.console.snapshot().jobs || [];
       await Promise.all(commandJobs.filter(job=>['starting','running','stopping'].includes(job.status)).map(job=>desktopTools.console.stop(job.id)));
       await desktopTerminal?.dispose();await desktopTools?.dispose();
-    } catch {exitStarted=false;syncTownLifecycle();activity('error','命令尚未停止','请在控制台停止运行中的命令后重试退出。');showDesktopWindow();if(portalUpdateChecksEnabled)portalUpdates.start();refreshTimer=setInterval(refresh,15000);refreshTimer.unref();return;}
+    } catch {exitStarted=false;portalWatchdog.start();syncTownLifecycle();activity('error','命令尚未停止','请在控制台停止运行中的命令后重试退出。');showDesktopWindow();if(portalUpdateChecksEnabled)portalUpdates.start();refreshTimer=setInterval(refresh,15000);refreshTimer.unref();return;}
+    await Promise.all([...liveChatViews].map(async item=>{
+      if(item.webContents.isDestroyed())return;
+      await item.webContents.executeJavaScript('globalThis.__beingDesktopSessions?.flush()').catch(()=>{});
+      item.webContents.session.flushStorageData();
+    }));
     generation++;discardView();
     await Promise.all([bonfireCache.flush(),townDataCache.flush(),...[...openFeatureHistories].map(history=>history.flush())]);
     portalUpdateNotification?.close();
@@ -993,8 +1218,20 @@ function boot() {
     await restore();
     win=new BrowserWindow({width:1440,height:940,minWidth:1000,minHeight:700,frame:false,backgroundColor:state.settings.colors.background,show:false,title:'Being Desktop',icon:path.join(__dirname,'../renderer/assets/being/being-icon.ico'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true}});
     win.removeMenu();
-    desktopTools=new DesktopTools({WebContentsView,session,getWindow:()=>win,getConnection:()=>connection,getWorkspace:()=>state.workspace.path,
-      onChange:toolsState=>{if(win && !win.isDestroyed())win.webContents.send('being:tools-state',toolsState);}});
+    desktopTools=new DesktopTools({WebContentsView,session,getWindow:()=>win,getConnection:()=>connection,getWorkspace:()=>state.workspace.path,orchestration,
+      getTerminal:()=>desktopTerminal,showTerminal:async id=>{
+        if(exitStarted || !win || win.isDestroyed())throw new Error('桌面窗口已关闭。');
+        desktopTerminal.activate(id);
+        win.webContents.send('being:terminal-state',desktopTerminal.snapshot());
+        const shown=await win.webContents.executeJavaScript(`(async()=>{window.beingTools?.show('console');return window.beingTerminal?.reveal(${JSON.stringify(id)});})()`);
+        if(!shown)throw new Error('终端已创建，但面板尚未展示，请用终端列表和显示工具恢复。');
+      },
+      onChange:toolsState=>{if(win && !win.isDestroyed())win.webContents.send('being:tools-state',toolsState);if(orchestration.workers.some(worker=>worker.presentation))orchestration.notify();}});
+    orchestration.presentation=new WorkerPresentation({browser:desktopTools.browser,showBrowser:async()=>{
+      if(exitStarted||!win||win.isDestroyed())throw new Error('桌面窗口已关闭。');
+      win.webContents.send('being:tools-state',desktopTools.snapshot());
+      await win.webContents.executeJavaScript('window.beingTools.show("browser")');
+    }});
     desktopTerminal=new DesktopTerminal({getWorkspace:()=>state.workspace.path,
       onChange:terminalState=>{if(win&&!win.isDestroyed())win.webContents.send('being:terminal-state',terminalState);},
       onData:chunk=>{if(win&&!win.isDestroyed())win.webContents.send('being:terminal-data',chunk);}});
@@ -1013,108 +1250,19 @@ function boot() {
     await win.loadURL('being://app/index.html');
     await applyContentTypography(win.webContents,state.settings.typography);
     if(connection)createLoom();
+    portalWatchdog.start();
     win.show();refresh();refreshTimer=setInterval(refresh,15000);refreshTimer.unref();
     if(portalUpdateChecksEnabled)portalUpdates.start();
-    powerMonitor.on('suspend',()=>{townSuspended=true;syncTownLifecycle();portalUpdates.stop();});
-    powerMonitor.on('resume',()=>{townSuspended=false;syncTownLifecycle();if(portalUpdateChecksEnabled)portalUpdates.start();activity('info','电脑已唤醒','正在核对连接状态，不自动重发消息。');refresh();});
-    if(!app.isPackaged && process.env.BEING_SCENARIOS==='1') {
-      clearInterval(refreshTimer);
-      const reportPath=path.join(app.getPath('userData'),'scenarios-report.json');
-      let report;
-      try {
-        const {runDesktopScenarios}=require('../test/electron-scenarios.cjs');
-        report=await runDesktopScenarios({app,win,getView:()=>view,getState:publicState,refresh});
-      } catch(error) {
-        report=error.scenarioReport || {passed:false,error:sanitizeText(error.message)};
-      }
-      await fs.mkdir(path.dirname(reportPath),{recursive:true});
-      await fs.writeFile(reportPath+'.tmp',JSON.stringify(report,null,2));
-      await fs.rename(reportPath+'.tmp',reportPath);
-      await shutdown();
-      return;
-    }
-    if(process.env.BEING_SMOKE_REPORT) await runSmoke();
+    powerMonitor.on('suspend',()=>{townSuspended=true;portalWatchdog.stop();syncTownLifecycle();portalUpdates.stop();});
+    powerMonitor.on('resume',()=>{townSuspended=false;portalWatchdog.start();syncTownLifecycle();if(portalUpdateChecksEnabled)portalUpdates.start();activity('info','电脑已唤醒','正在核对连接状态，不自动重发消息。');refresh();});
+    await onReady?.({app,win,getView:()=>view,getState:publicState,refresh,shutdown,
+      stopRefresh:()=>clearInterval(refreshTimer),
+      credentialsEncrypted:()=>connection?Boolean(disk.credential && safeStorage.decryptString(Buffer.from(disk.credential,'base64'))===connection.url && !disk.credential.includes(connection.url)):disk.credential===''});
   }).catch(error=>{
     const message=sanitizeText(error?.message || '启动失败');
     dialog.showErrorBox('Being Desktop 无法启动',message);shutdown();
   });
-  async function runSmoke() {
-    const reportPath=path.resolve(process.env.BEING_SMOKE_REPORT);
-    // Keep diagnostic captures rendering when another application occludes them.
-    // Normal application windows retain Electron's default background throttling.
-    win.webContents.setBackgroundThrottling(false);
-    if (view && !view.webContents.isDestroyed()) view.webContents.setBackgroundThrottling(false);
-    if (win.isMinimized()) win.restore();
-    win.showInactive();
-    await fs.mkdir(path.dirname(reportPath),{recursive:true});
-    await fs.writeFile(reportPath.replace(/\.json$/,'.checkpoint.json'),JSON.stringify({stage:'waiting-for-page'}));
-    if(view && view.webContents.isLoading()) {
-      await new Promise(resolve=>{
-        const contents=view.webContents;
-        const finish=()=>{clearTimeout(timer);contents.removeListener('did-stop-loading',finish);resolve();};
-        const timer=setTimeout(finish,25000);
-        contents.once('did-stop-loading',finish);
-      });
-    }
-    const protectedCredential=connection?Boolean(disk.credential && safeStorage.decryptString(Buffer.from(disk.credential,'base64'))===connection.url && !disk.credential.includes(connection.url)):disk.credential==='';
-    const report={runId:process.env.BEING_SMOKE_ID || crypto.randomUUID(),generatedAt:new Date().toISOString(),appVersion:app.getVersion(),shellLoaded:win.webContents.getURL()==='being://app/index.html',credentialsEncrypted:protectedCredential,isolatedLoom:view?{nodeIntegration:view.webContents.getLastWebPreferences().nodeIntegration,contextIsolation:view.webContents.getLastWebPreferences().contextIsolation,sandbox:view.webContents.getLastWebPreferences().sandbox,preload:view.webContents.getLastWebPreferences().preload || null}:null};
-    await refresh();
-    report.connection=state.connection;report.runtime=state.runtime;report.portal=portal.state;report.localProxy=state.localProxy;report.settingsTypography={...state.settings.typography};
-    const rendererState=await win.webContents.executeJavaScript('window.beingDesktop.getState()');
-    report.ipcStateMatches=rendererState.connection.displayUrl===state.connection.displayUrl && rendererState.runtime.model===state.runtime.model;
-    report.desktopTools=await win.webContents.executeJavaScript(`(async()=>{
-      const bridge=window.beingDesktop,tools=await bridge.getDesktopTools();
-      return {bridgeAvailable:['desktopAction','setBrowserView','copyDesktopText'].every(name=>typeof bridge[name]==='function'),
-        linkStatus:tools.link.status,tabCount:tools.browser.tabs.length,jobCount:tools.console.jobs.length,pendingCount:tools.requests.length};
-    })()`);
-    report.terminal=await win.webContents.executeJavaScript(`(async()=>{
-      const bridge=window.beingDesktop,terminal=await bridge.getTerminalState();
-      return {bridgeAvailable:['terminalAction','readTerminal','onTerminalData'].every(name=>typeof bridge[name]==='function'),sessionCount:terminal.sessions.length};
-    })()`);
-    report.shellTypography=await win.webContents.executeJavaScript(`(() => {
-      const selectors=['body','.nav-button','.sidebar-brand-name','.town-feature-title','.town-feature-description','.sidebar-section-heading','button','input','code'];
-      return selectors.map(selector=>{const el=document.querySelector(selector);if(!el)return {selector,present:false};const c=getComputedStyle(el);return {selector,present:true,fontFamily:c.fontFamily,fontSize:c.fontSize,lineHeight:c.lineHeight,fontWeight:c.fontWeight,letterSpacing:c.letterSpacing};});
-    })()`);
-    if (view && !view.webContents.isDestroyed()) {
-      report.loomPresentation=await view.webContents.executeJavaScript(`(() => {
-        const selectors=['#app','#messages','#input-area','#input-row','#input','#send-btn','#desktop-attach','.message.user .content','.message.being .content','.message .meta','.message .content table','.message .content th','.message .content td','.message .content pre','.message .content code','.field-input','.btn-sm','.toggle-group button'];
-        return {theme:document.documentElement.dataset.beingDesktopTheme || '',forcedColors:matchMedia('(forced-colors: active)').matches,
-          controls:selectors.map(selector=>{const el=document.querySelector(selector);if(!el)return {selector,present:false};const c=getComputedStyle(el);const r=el.getBoundingClientRect();return {selector,present:true,width:r.width,height:r.height,background:c.backgroundColor,color:c.color,border:c.border,outline:c.outline,borderRadius:c.borderRadius,display:c.display,fontFamily:c.fontFamily,fontSize:c.fontSize,lineHeight:c.lineHeight,fontWeight:c.fontWeight,letterSpacing:c.letterSpacing};}),
-          messageCount:document.querySelectorAll('.message').length,documentOverflow:Math.max(0,document.documentElement.scrollWidth-innerWidth)};
-      })()`);
-    }
-    await win.webContents.executeJavaScript('new Promise(resolve => { const timer=setTimeout(resolve,400); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(timer); resolve(); })); })');
-    report.viewBounds=view?.getBounds() || null;
-    report.viewVisible=view?.getVisible() || false;
-    report.captureConditions={backgroundThrottlingDisabled:true,scope:'Diagnostic rendering only; not a background lifecycle guarantee.'};
-    await fs.mkdir(path.dirname(reportPath),{recursive:true});
-    await fs.writeFile(reportPath.replace(/\.json$/,'.checkpoint.json'),JSON.stringify({runId:report.runId,stage:'before-capture',windowVisible:win.isVisible(),viewVisible:report.viewVisible,viewBounds:report.viewBounds}));
-    const capture = async (target, outputPath) => {
-      let timer;
-      try {
-        const screenshot = await Promise.race([
-          target.capturePage(undefined,{stayHidden:true,stayAwake:true}),
-          new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Capture did not complete')),5000);})
-        ]);
-        if (screenshot.isEmpty()) return false;
-        await fs.writeFile(outputPath,screenshot.toPNG());
-        return true;
-      } catch { return false; }
-      finally { clearTimeout(timer); }
-    };
-    report.shellCaptured=await capture(win,reportPath.replace(/\.json$/,'.png'));
-    report.loomCaptured=false;
-    if(view && !view.webContents.isDestroyed() && view.getVisible()) {
-      report.loomCaptured=await capture(view.webContents,reportPath.replace(/\.json$/,'.loom.png'));
-    }
-    if (!app.isPackaged && process.env.BEING_UI_AUDIT === '1') {
-      const {runUiAudit} = require('../test/ui-audit.cjs');
-      report.uiAudit = await runUiAudit({win,getView:()=>view,reportDir:path.join(path.dirname(reportPath),'ui-audit')});
-    }
-    await fs.writeFile(reportPath+'.tmp',JSON.stringify(report,null,2));
-    await fs.rename(reportPath+'.tmp',reportPath);
-    if (!win.webContents.isDestroyed()) win.webContents.setBackgroundThrottling(true);
-    if (view && !view.webContents.isDestroyed()) view.webContents.setBackgroundThrottling(true);
-    if(process.env.BEING_SMOKE_EXIT==='1')await shutdown();
-  }
 }
+}
+
+module.exports = {startDesktop};

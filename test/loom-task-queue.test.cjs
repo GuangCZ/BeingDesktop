@@ -51,12 +51,18 @@ test('unknown queue and rejected HTTP responses do not appear as active work', a
 test('202 acceptance survives reload and stays separate from actual response events', async () => {
   const storage = new Map();
   const sessionStorage = {getItem:key => storage.get(key), setItem:(key, value) => storage.set(key, value)};
-  const context = fixture(async () => new Response('{"accepted":true}', {status:202}), {sessionStorage});
+  const context = fixture(async () => new Response('{"accepted":true,"spliced":true}', {status:202,headers:{'x-being-desktop-request-id':'request-202'}}), {sessionStorage});
   const response = await send(context, 'follow up');
-  assert.equal(await response.text(), '{"accepted":true}');
+  assert.equal(await response.text(), '{"accepted":true,"spliced":true}');
   assert.equal(context.__beingDesktopTaskQueue.snapshot().pending[0].status, 'accepted');
   const restored = fixture(async () => new Response(), {sessionStorage});
   assert.equal(restored.__beingDesktopTaskQueue.snapshot().pending[0].text, 'follow up');
+  assert.equal(restored.__beingDesktopTaskQueue.snapshot().pending[0].spliced, true);
+  restored.__beingDesktopTaskQueue.reconcileReply('request-202','active-202');
+  restored.__beingDesktopTaskQueue.reconcileHistory(['request-202'],{id:'active-202',finished:false});
+  assert.equal(restored.__beingDesktopTaskQueue.snapshot().pending.length,1);
+  restored.__beingDesktopTaskQueue.reconcileHistory(['request-202'],{id:null,finished:true});
+  assert.equal(restored.__beingDesktopTaskQueue.snapshot().pending.length,0);
   restored.__beingDesktopSessions = {list:() => ({activeId:'other'})};
   assert.equal(restored.__beingDesktopTaskQueue.snapshot().pending.length, 0);
 });
@@ -83,5 +89,12 @@ test('split SSE frames correlate the stream and expose phase without private eve
   controller.error(new Error('lost connection'));
   await assert.rejects(reader.read(), /lost connection/);
   assert.equal(context.__beingDesktopTaskQueue.snapshot().pending[0].status, 'interrupted');
+  context.__beingDesktopTaskQueue.reconcileStream('another-stream',{finished:true});
+  assert.equal(context.__beingDesktopTaskQueue.snapshot().pending.length,1);
+  context.__beingDesktopTaskQueue.reconcileStream('stream-1',{event:'content_block_delta',data:{delta:{text:'recovered private text'}}});
+  assert.equal(context.__beingDesktopTaskQueue.snapshot().pending[0].status,'responding');
+  assert.doesNotMatch(JSON.stringify(context.__beingDesktopTaskQueue.snapshot()),/recovered private/);
+  context.__beingDesktopTaskQueue.reconcileStream('stream-1',{finished:true});
+  assert.equal(context.__beingDesktopTaskQueue.snapshot().pending.length,0);
 });
 

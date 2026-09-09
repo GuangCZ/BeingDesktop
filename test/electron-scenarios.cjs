@@ -677,8 +677,8 @@ async function runDesktopScenarios({app, win, getView, getState, refresh}) {
           await app.open('portal');const missingWorkspaceDisabled=document.getElementById('portal-app-deploy').disabled;
           state.workspace.path='C:/Local-fixture/workspace';publish();document.getElementById('portal-app-deploy').click();
           await flush();const confirmation=calls.deploy===1&&!document.getElementById('portal-app-confirm');
-          const permissions=['files','exec','web','extensions'].map(id=>({id,present:Boolean(document.getElementById('portal-permission-'+id)),interactive:document.getElementById('portal-permission-'+id).matches('input,button,select')}));
-          const portalPlan=document.querySelector('.ta-portal').textContent.includes('计划配置')&&document.querySelector('.ta-portal').textContent.includes('当前实例：尚未验证实际能力');
+          const permissions=Boolean(document.getElementById('portal-app-permissions'));
+          const portalPlan=document.querySelector('.ta-portal').textContent.includes('工具权限')&&!document.querySelector('.ta-portal').textContent.includes('计划关闭');
           await app.open('fireside');const privateRoomReads=calls.reads,lockedSend=document.getElementById('fireside-send').disabled;
           const localDraft=document.getElementById('fireside-draft');localDraft.value='Local draft for Loom';localDraft.dispatchEvent(new Event('input',{bubbles:true}));
           const localHandoffEnabled=!document.getElementById('fireside-send').disabled&&document.getElementById('fireside-send').textContent.includes('带草稿到 Loom');
@@ -718,7 +718,7 @@ async function runDesktopScenarios({app, win, getView, getState, refresh}) {
         for(const key of ['empty','data','filtered','error','missingWorkspaceDisabled','confirmation','portalPlan','lockedSend','localHandoffEnabled','localEnterPreserved','authorizedOpenIdle','explicitListOnly','selectionCacheOnly','pageSwitchIdle','reconnectIdle','enabled','compositionPreserved','draftPreserved','disconnectedDraftPreserved','reconnectingDraftPreserved','reconnectedDraftPreserved','roomDraftMapPreserved','identityChangeCleared','identityChangeClearedMap'])assert.equal(result[key],true,key);
         assert.equal(result.privateRoomReads,0,'Opening Fireside must not drive Being');
         assert.deepEqual(result.channels,[{id:'feishu',steps:3,inputs:0,qr:0},{id:'wechat',steps:3,inputs:0,qr:0}]);
-        assert.deepEqual(result.permissions,[{id:'files',present:true,interactive:false},{id:'exec',present:true,interactive:false},{id:'web',present:true,interactive:false},{id:'extensions',present:true,interactive:false}]);
+        assert.equal(result.permissions,true);
         assert.equal(result.calls.catalog,3);assert.equal(result.calls.send,0);assert.equal(result.calls.deploy,1);assert.equal(result.calls.channel,2);assert.equal(result.calls.assist,0);assert.equal(result.calls.handoff,2);assert.deepEqual(result.calls.handoffRevisions,[4,5]);assert.equal(requests,0);
       } finally {if(!fixtureWindow.isDestroyed())fixtureWindow.destroy();}
     });

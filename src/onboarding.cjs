@@ -1,6 +1,6 @@
 'use strict';
 
-const steps = new Set(['loom', 'portal', 'channel', 'grove', 'town', 'bonfire', 'complete']);
+const steps = new Set(['loom', 'review', 'portal', 'channel', 'grove', 'town', 'bonfire', 'complete']);
 
 function onboardingState(step) {
   return {step, completed: step === 'complete'};

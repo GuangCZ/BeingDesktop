@@ -151,7 +151,8 @@ function installLoomActivity() {
         placeholder = null;
       }
       const current = rows.slice(user ? rows.indexOf(user) + 1 : 0);
-      const target = current.findLast(node => node.matches('.being, .assistant'));
+      const target = current.findLast(node => node.matches('.being, .assistant') && !node.classList.contains('thinking-indicator'))
+        || current.findLast(node => node.matches('.being, .assistant'));
       const thinking = rows.findLast(node => node.classList.contains('thinking-indicator'));
       if (!target && thinking) metaText = thinking.querySelector('.meta')?.textContent || metaText;
       if (target) {

@@ -9,6 +9,7 @@ const DEPENDENCIES = Object.freeze({
   'node-addon-api': '7.1.1',
   '@xterm/xterm': '6.0.0',
   '@xterm/addon-fit': '0.11.0',
+  'ws': '8.21.3',
 });
 // electron-builder removes only these observed metadata fields from dependencies.
 const STRIPPED_MANIFEST_FIELDS = Object.freeze({
@@ -16,6 +17,7 @@ const STRIPPED_MANIFEST_FIELDS = Object.freeze({
   'node-addon-api': ['bugs', 'contributors', 'keywords', 'scripts'],
   '@xterm/xterm': ['keywords', 'scripts'],
   '@xterm/addon-fit': ['keywords', 'scripts'],
+  'ws': ['keywords', 'bugs', 'scripts'],
 });
 const NATIVE_FILES = Object.freeze([
   'prebuilds/win32-x64/conpty.node',

@@ -32,6 +32,7 @@ if (!process.versions.electron) {
     machine: {hostname: 'Preview PC', user: 'Preview'},
     connection: {configured: false, beingName: '', displayUrl: '', status: 'disconnected'},
     onboarding: {step: 'loom', completed: false},
+    onboardingInspection: null,
     workspace: {path: '', files: []},
     portal: {status: 'not_configured', health: 'unknown', executable: '', configPath: '', pid: null, owned: false, detail: ''},
     townApp: {
@@ -46,6 +47,16 @@ if (!process.versions.electron) {
   let failStep = '';
   let expectedGreeting = null;
   let greetingDelivery;
+  let deferInspection = true;
+  const inspections = [];
+  const existingInspection = {
+    status: 'partial', beingId: 'preview_being', connectionRevision: 1, checkedAt: '2026-09-08T04:00:00Z',
+    identity: {status: 'ready', name: 'Preview Being', createdAt: '2025-01-01T00:00:00Z', lifecycle: 'existing'},
+    model: {status: 'configured', name: 'Fixture Model', provider: 'Fixture Provider'},
+    channels: {status: 'ready', items: [{channel: 'feishu', status: 'connected', configured: true}, {channel: 'wechat', status: 'disconnected', configured: null}], detail: ''},
+    portal: {status: 'unknown', items: [], detail: '当前 Being 的远端 Portal 状态尚未确认；本机 Portal 可在下一步单独配置。'},
+  };
+  let nextInspection = structuredClone(existingInspection);
   const bonfireMessages = [];
   app.setPath('userData', path.join(runRoot, 'profile'));
   app.disableHardwareAcceleration();
@@ -79,13 +90,24 @@ if (!process.versions.electron) {
   const waitStep = step => domWait(stepVisible(step), `${step} card`);
   const latestView = () => calls('setView').at(-1)?.args[0];
 
+  async function finishInspection(request, result = nextInspection) {
+    const identity = fixtureState.townApp.identity;
+    if (result.beingId === identity.beingId && result.connectionRevision === identity.connectionRevision) {
+      fixtureState.onboardingInspection = structuredClone(result);
+      await publish();
+    }
+    request.resolve(structuredClone(result));
+    await settle();
+  }
+
   async function click(selector, {disabled = false} = {}) {
     await execute(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'center',inline:'nearest'})`);
     await settle();
     const point = await execute(`(() => {
       const el=document.querySelector(${JSON.stringify(selector)}),r=el.getBoundingClientRect();
       const x=r.x+r.width/2,y=r.y+r.height/2;
-      if(!el.contains(document.elementFromPoint(x,y)))throw new Error('Fixture click target is obscured.');
+      const hit=document.elementFromPoint(x,y);
+      if(!el.contains(hit))throw new Error('Fixture click target '+${JSON.stringify(selector)}+' is obscured by '+(hit?.id||hit?.tagName||'viewport')+' at '+x+','+y+'.');
       if(el.disabled&&!${disabled})throw new Error('Fixture click target is disabled.');
       return {x:Math.round(x),y:Math.round(y)};
     })()`);
@@ -98,6 +120,11 @@ if (!process.versions.electron) {
   async function editLoom(value) {
     await execute(`(() => {const el=document.getElementById('setup-loom-url');el.value=${JSON.stringify(value)};el.dispatchEvent(new Event('input',{bubbles:true}));})()`);
     await settle();
+  }
+
+  async function restartOnboarding() {
+    await click('[data-settings-section="about"]');
+    await click('#setup-restart');
   }
 
   async function editGreeting(value) {
@@ -229,7 +256,7 @@ if (!process.versions.electron) {
     handle('setView', () => ({}));
     handle('setBrowserView', () => ({}));
     handle('setOnboardingStep', step => {
-      assert(['loom', 'portal', 'channel', 'grove', 'town', 'bonfire', 'complete'].includes(step), 'Expected a known onboarding step');
+      assert(['loom', 'review', 'portal', 'channel', 'grove', 'town', 'bonfire', 'complete'].includes(step), 'Expected a known onboarding step');
       if (failStep === step) {failStep = ''; throw new Error('进度未能保存，请重试。');}
       fixtureState.onboarding = {step, completed: step === 'complete'};
       return structuredClone(fixtureState);
@@ -239,6 +266,16 @@ if (!process.versions.electron) {
       assert(value === loomUrl, 'Expected the fixture Loom URL');
       fixtureState.connection = {configured: true, beingName: 'preview_being', displayUrl: 'https://fixture.invalid/loom/preview_being', status: 'connecting'};
       return structuredClone(fixtureState);
+    });
+    handle('inspectOnboarding', () => {
+      assert.equal(fixtureState.connection.status, 'connected', 'Inspect only after Loom connects');
+      if (deferInspection) return new Promise((resolve, reject) => {inspections.push({resolve, reject});});
+      fixtureState.onboardingInspection = structuredClone(nextInspection);
+      return structuredClone(nextInspection);
+    });
+    handle('cancelOnboardingInspection', () => {
+      for (const request of inspections.splice(0)) request.reject(new Error('配置读取已取消。'));
+      return {};
     });
     handle('deployPortal', value => {
       assert.deepEqual(value, {confirmed: true, permissions: {files: true, exec: false, web: false}});
@@ -274,7 +311,7 @@ if (!process.versions.electron) {
     await waitStep('loom');
     check('first-launch-opens-a-native-modal', await execute("document.getElementById('setup-wizard').tagName==='DIALOG'&&document.getElementById('setup-wizard').matches(':modal')"));
     check('loom-input-initially-focused', await execute("document.activeElement.id==='setup-loom-url'"));
-    check('no-setup-side-effects-on-first-launch', calls('connect').length === 0 && calls('deployPortal').length === 0 && calls('setOnboardingStep').length === 0);
+    check('no-setup-side-effects-on-first-launch', calls('connect').length === 0 && calls('inspectOnboarding').length === 0 && calls('deployPortal').length === 0 && calls('setOnboardingStep').length === 0);
     await capture('01-loom-1440', 'loom');
 
     await editLoom('not-a-url');
@@ -287,11 +324,35 @@ if (!process.versions.electron) {
     await waitFor(() => calls('connect').length === 2, 'connection IPC');
     await domWait("document.getElementById('setup-loom-connect').disabled", 'connecting controls');
     check('connecting-does-not-advance', await execute(stepVisible('loom')) && calls('setOnboardingStep').length === 0);
+    check('connecting-does-not-inspect-unready-connection', calls('inspectOnboarding').length === 0);
     check('native-loom-hidden-while-connecting', latestView()?.visible === false);
     fixtureState.connection.status = 'connected';
     await publish();
+    await waitFor(() => inspections.length === 1, 'configuration inspection IPC');
+    check('configuration-loading-keeps-loom-card', await execute(stepVisible('loom')) && calls('setOnboardingStep').length === 0);
+    check('configuration-loading-has-progress-feedback', await execute("document.getElementById('setup-wizard').getAttribute('aria-busy')==='true'&&Boolean(document.getElementById('setup-feedback-loom').textContent.trim())"));
+    check('inspection-is-read-only', calls('deployPortal').length === 0 && calls('startPortal').length === 0 && calls('sendBonfireMessage').length === 0 && calls('beginChannelConnection').length === 0);
+    check('native-loom-hidden-during-inspection', latestView()?.visible === false);
+    await publish();
+    check('repeated-connected-state-does-not-duplicate-inspection', calls('inspectOnboarding').length === 1);
+    await finishInspection(inspections.shift());
+    deferInspection = false;
+    await waitStep('review');
+    check('connected-inspection-advances-once-and-persists-review', fixtureState.onboarding.step === 'review' && calls('setOnboardingStep').filter(call => call.args[0] === 'review').length === 1);
+    check('existing-being-is-recognized-on-first-desktop-use', await execute("(()=>{const copy=document.getElementById('setup-review-identity').textContent;return copy.includes('Preview Being')&&/已有|既有|使用中|已创建|创建于/.test(copy)&&!copy.includes('刚创建')})()"));
+    check('review-shows-existing-model', await execute("document.getElementById('setup-review-model').textContent.includes('Fixture Model')"));
+    check('review-shows-existing-channel-state', await execute("(()=>{const copy=document.getElementById('setup-review-channels').textContent;return copy.includes('飞书')&&/已连接|已配置/.test(copy)&&copy.includes('微信')&&copy.includes('已断开')&&!copy.includes('未配置')})()"));
+    check('review-distinguishes-local-portal-from-unknown-remote-state', await execute("/未提供|未知|未确认|无法确认/.test(document.getElementById('setup-review-portals').textContent)&&/这台电脑|本机/.test(document.getElementById('setup-review-local-portal').textContent)"));
+    check('review-waits-for-an-explicit-choice', calls('deployPortal').length === 0 && calls('sendBonfireMessage').length === 0 && fixtureState.onboarding.step === 'review');
+    await capture('02-review-existing-1440', 'review');
+    win.setContentSize(680, 820);
+    await domWait('innerWidth===680&&innerHeight===820');
+    await capture('02-review-existing-680', 'review');
+    win.setContentSize(1440, 980);
+    await domWait('innerWidth===1440&&innerHeight===980');
+    await click('#setup-review-continue');
     await waitStep('portal');
-    check('connected-advances-once-and-persists', fixtureState.onboarding.step === 'portal' && calls('setOnboardingStep').filter(call => call.args[0] === 'portal').length === 1);
+    check('explicit-setup-choice-persists-portal', fixtureState.onboarding.step === 'portal' && calls('setOnboardingStep').filter(call => call.args[0] === 'portal').length === 1);
     check('native-loom-hidden-behind-connected-modal', latestView()?.visible === false);
     check('connection-does-not-deploy-portal', calls('deployPortal').length === 0);
     check('secret-input-cleared-after-connection', await execute("document.getElementById('setup-loom-url').value===''"));
@@ -332,14 +393,20 @@ if (!process.versions.electron) {
     await click('#setup-portal-next');
     await waitStep('channel');
     check('portal-continue-persists-channel-step', fixtureState.onboarding.step === 'channel');
+    check('channel-card-retains-discovered-configuration', await execute("/已连接|已配置/.test(document.getElementById('setup-channel-status-feishu').textContent)&&document.getElementById('setup-channel-status-wechat').textContent.includes('已断开')&&document.getElementById('setup-channel-configure').textContent.includes('管理 Channel')"));
     await capture('04-channel-1000', 'channel');
 
     await click('#setup-channel-back');
     await waitStep('portal');
     await click('#setup-portal-back');
+    await waitStep('review');
+    await click('#setup-review-back');
     await waitStep('loom');
     check('back-navigation-keeps-existing-connection', fixtureState.connection.status === 'connected' && calls('connect').length === 2);
     await click('#setup-loom-existing');
+    await waitStep('review');
+    check('continue-existing-requests-fresh-inspection', calls('inspectOnboarding').length === 2);
+    await click('#setup-review-continue');
     await waitStep('portal');
     check('continue-existing-does-not-reconnect', calls('connect').length === 2);
     await click('#setup-portal-next');
@@ -448,10 +515,12 @@ if (!process.versions.electron) {
     fixtureState.townApp.portalInstall = {status: 'idle', phase: '', detail: ''};
     await publish();
     await click('#header-settings');
-    await click('#setup-restart');
+    await restartOnboarding();
     await waitStep('loom');
     check('settings-restarts-onboarding', fixtureState.onboarding.step === 'loom' && fixtureState.onboarding.completed === false);
     await click('#setup-loom-existing');
+    await waitStep('review');
+    await click('#setup-review-continue');
     await waitStep('portal');
     await click('#setup-portal-skip');
     await waitStep('channel');
@@ -491,7 +560,7 @@ if (!process.versions.electron) {
     await publish();
     check('identity-reset-clears-stale-grove-resume', await execute("document.getElementById('setup-resume').hidden") && fixtureState.onboarding.step === 'loom');
     await click('#header-settings');
-    await click('#setup-restart');
+    await restartOnboarding();
     await waitStep('loom');
     check('settings-resumes-loom-after-identity-reset', fixtureState.onboarding.step === 'loom' && !fixtureState.onboarding.completed);
     fixtureState.connection = savedConnection;
@@ -524,7 +593,7 @@ if (!process.versions.electron) {
       await domWait("!document.getElementById('setup-wizard').open&&document.body.dataset.page==='settings'", `${label} opens settings`);
       check(`${label}-keeps-pending-portal-progress`, fixtureState.onboarding.step === 'portal' && fixtureState.onboarding.completed === false);
       check(`${label}-does-not-deploy-or-start`, calls('deployPortal').length === originalDeployments && calls('startPortal').length === 1);
-      await click('#setup-restart');
+      await restartOnboarding();
       await waitStep('portal');
       check(`${label}-settings-resumes-same-card`, fixtureState.onboarding.step === 'portal');
     }
@@ -541,7 +610,7 @@ if (!process.versions.electron) {
     await domWait("!document.getElementById('setup-wizard').open&&document.body.dataset.page==='settings'", 'owned Portal error settings');
     check('owned-error-does-not-start-another-process', calls('deployPortal').length === originalDeployments && calls('startPortal').length === 1);
     check('owned-error-keeps-pending-progress', fixtureState.onboarding.step === 'portal' && fixtureState.onboarding.completed === false);
-    await click('#setup-restart');
+    await restartOnboarding();
     await waitStep('portal');
 
     await loadPortalFixture({status: 'error', owned: false, detail: '上次启动失败，请重试。'});
@@ -549,6 +618,130 @@ if (!process.versions.electron) {
     await click('#setup-portal-deploy');
     await domWait("!document.getElementById('setup-portal-next').hidden&&!document.getElementById('setup-portal-next').disabled", 'retry existing Portal start');
     check('unowned-error-retries-existing-config-without-deploying', calls('startPortal').length === 2 && calls('deployPortal').length === originalDeployments);
+
+    const setupCallsBeforeReview = {deployments: calls('deployPortal').length, starts: calls('startPortal').length, greetings: calls('sendBonfireMessage').length};
+    const loadInspectionFixture = async ({step = 'loom', result = existingInspection, deferred = false} = {}) => {
+      assert.equal(inspections.length, 0, 'Previous inspection fixture must be settled');
+      nextInspection = structuredClone(result);
+      deferInspection = deferred;
+      fixtureState.connection = structuredClone(savedConnection);
+      fixtureState.townApp.identity = structuredClone(savedIdentity);
+      fixtureState.onboardingInspection = null;
+      fixtureState.onboarding = {step, completed: false};
+      await load();
+      await waitStep(step);
+    };
+
+    await loadInspectionFixture();
+    fixtureState.connection.status = 'disconnected';
+    await publish();
+    await editLoom(loomUrl);
+    await click('#setup-loom-connect');
+    await domWait("document.getElementById('setup-loom-connect').disabled", 'connection pending before dismissal');
+    const inspectionsBeforeConnectionDismissal = calls('inspectOnboarding').length;
+    await click('#setup-close');
+    fixtureState.connection.status = 'connected';
+    await publish();
+    check('dismissing-while-connecting-does-not-inspect-or-reopen-after-connection', calls('inspectOnboarding').length === inspectionsBeforeConnectionDismissal && fixtureState.onboarding.step === 'loom' && !await execute("document.getElementById('setup-wizard').open"));
+
+    await loadInspectionFixture({deferred: true});
+    await click('#setup-loom-existing');
+    await waitFor(() => inspections.length === 1, 'cancellable inspection request');
+    const progressBeforeInspectionDismissal = calls('setOnboardingStep').length;
+    await click('#setup-close');
+    await domWait("!document.getElementById('setup-wizard').open", 'dismissed inspection');
+    await waitFor(() => calls('cancelOnboardingInspection').length === 1, 'cancel inspection IPC');
+    check('dismissing-loading-cancels-inspection-without-advancing', inspections.length === 0 && fixtureState.onboarding.step === 'loom' && calls('setOnboardingStep').length === progressBeforeInspectionDismissal);
+    await publish();
+    check('cancelled-inspection-does-not-reopen-wizard', !await execute("document.getElementById('setup-wizard').open"));
+
+    await loadInspectionFixture({deferred: true});
+    await click('#setup-loom-existing');
+    await waitFor(() => inspections.length === 1, 'failed inspection request');
+    const progressBeforeInspectionFailure = calls('setOnboardingStep').length;
+    inspections.shift().reject(new Error('配置状态暂时读取失败，请重试。'));
+    await domWait("!document.getElementById('setup-loom-existing').disabled", 'inspection failure retry');
+    check('inspection-request-failure-does-not-advance', fixtureState.onboarding.step === 'loom' && calls('setOnboardingStep').length === progressBeforeInspectionFailure && await execute(stepVisible('loom')));
+    check('inspection-request-failure-has-actionable-feedback', await execute("document.getElementById('setup-feedback-loom').textContent.includes('重试')&&!document.getElementById('setup-feedback-loom').textContent.includes('Error invoking remote method')"));
+    const failedInspectionCalls = calls('inspectOnboarding').length;
+    await publish();
+    check('failed-inspection-is-not-repeated-by-background-state', calls('inspectOnboarding').length === failedInspectionCalls);
+
+    const partialInspection = {
+      ...structuredClone(existingInspection), status: 'partial',
+      identity: {status: 'unknown', name: '', createdAt: null, lifecycle: 'unknown'},
+      model: {status: 'unknown', name: '', provider: ''},
+      channels: {status: 'unknown', items: [{channel: 'feishu', status: 'unknown', configured: null}, {channel: 'wechat', status: 'unknown', configured: null}], detail: '暂时无法确认 Channel 状态。'},
+      portal: {status: 'unknown', items: [], detail: '暂时无法确认 Portal 状态。'},
+    };
+    nextInspection = partialInspection;
+    await click('#setup-loom-existing');
+    await waitFor(() => inspections.length === 1, 'partial inspection retry');
+    await finishInspection(inspections.shift());
+    await waitStep('review');
+    check('partial-inspection-stops-at-review', fixtureState.onboarding.step === 'review' && !fixtureState.onboarding.completed);
+    check('partial-results-show-unknown-instead-of-new-or-unconfigured', await execute("['identity','model','channels'].every(key=>{const copy=document.getElementById('setup-review-'+key).textContent;return /未知|未确认|无法确认|暂未|未能|未提供|读取失败|无法读取/.test(copy)&&!/24 小时内创建|已有 Being|未配置|尚未选择模型/.test(copy)})"));
+    check('partial-review-offers-retry-and-continue', await execute("['setup-review-retry','setup-review-continue'].every(id=>{const el=document.getElementById(id);return !el.hidden&&!el.disabled})"));
+    check('native-loom-remains-hidden-behind-partial-review', latestView()?.visible === false);
+    await capture('14-review-partial-1000', 'review');
+    await click('#setup-review-retry');
+    await waitFor(() => inspections.length === 1, 'review retry inspection');
+    inspections.shift().reject(new Error('读取失败，请稍后重试。'));
+    await domWait("!document.getElementById('setup-review-retry').disabled", 'review retry failure');
+    check('review-retry-failure-retains-review', fixtureState.onboarding.step === 'review' && await execute(stepVisible('review')));
+    nextInspection = structuredClone(existingInspection);
+    await click('#setup-review-retry');
+    await waitFor(() => inspections.length === 1, 'successful review retry');
+    await finishInspection(inspections.shift());
+    check('review-retry-replaces-unknown-with-current-configuration', await execute("document.getElementById('setup-review-model').textContent.includes('Fixture Model')&&/已连接|已配置/.test(document.getElementById('setup-review-channels').textContent)"));
+    await click('#setup-review-continue');
+    await waitStep('portal');
+    check('review-continue-requires-explicit-portal-action', calls('deployPortal').length === setupCallsBeforeReview.deployments && calls('startPortal').length === setupCallsBeforeReview.starts);
+
+    await loadInspectionFixture({result: {...structuredClone(existingInspection), identity: {...existingInspection.identity, lifecycle: 'unknown'}}});
+    await click('#setup-loom-existing');
+    await waitStep('review');
+    check('known-creation-date-without-age-classification-remains-visible', await execute("(()=>{const copy=document.getElementById('setup-review-identity').textContent;return copy.includes('2025')&&!copy.includes('时间未提供')&&!/24 小时内创建|已有 Being/.test(copy)})()"));
+
+    const recentInspection = {
+      ...structuredClone(existingInspection),
+      identity: {status: 'ready', name: 'Recently Created Being', createdAt: '2026-09-08T03:00:00Z', lifecycle: 'recent'},
+      model: {status: 'unconfigured', name: '', provider: ''},
+      channels: {status: 'unknown', items: [{channel: 'feishu', status: 'unknown', configured: null}, {channel: 'wechat', status: 'unknown', configured: null}], detail: '暂时无法确认 Channel 状态。'},
+    };
+    await loadInspectionFixture({step: 'review', result: recentInspection, deferred: true});
+    await waitFor(() => inspections.length === 1, 'reinspect resumed review without a cached report');
+    check('resumed-review-keeps-native-view-hidden-during-refresh', latestView()?.visible === false);
+    await finishInspection(inspections.shift());
+    check('recent-being-is-identified-from-server-creation-metadata', await execute("(()=>{const copy=document.getElementById('setup-review-identity').textContent;return copy.includes('Recently Created Being')&&/刚创建|刚刚创建|新创建|最近创建|24 小时|24小时/.test(copy)})()"));
+    check('confirmed-missing-model-is-distinct-from-unknown-channel-state', await execute("/未配置|尚未选择模型/.test(document.getElementById('setup-review-model').textContent)&&/未知|暂未确认/.test(document.getElementById('setup-review-channels').textContent)&&!document.getElementById('setup-review-channels').textContent.includes('未配置')"));
+    await capture('15-review-recent-1000', 'review');
+
+    await loadInspectionFixture({deferred: true});
+    await click('#setup-loom-existing');
+    await waitFor(() => inspections.length === 1, 'Being A inspection');
+    const staleInspection = inspections.shift();
+    const progressBeforeIdentityChange = calls('setOnboardingStep').length;
+    fixtureState.connection = {configured: true, beingName: 'another_being', displayUrl: 'https://fixture.invalid/loom/another_being', status: 'connected'};
+    fixtureState.townApp.identity = {beingId: 'another_being', displayName: 'Another Being', identityRevision: 2, connectionRevision: 2};
+    fixtureState.onboarding = {step: 'loom', completed: false};
+    fixtureState.onboardingInspection = null;
+    await publish();
+    await finishInspection(staleInspection, existingInspection);
+    await domWait("!document.getElementById('setup-loom-existing').disabled", 'new identity ready to inspect');
+    check('old-being-inspection-cannot-advance-new-being', fixtureState.onboarding.step === 'loom' && calls('setOnboardingStep').length === progressBeforeIdentityChange && await execute(stepVisible('loom')));
+    check('old-being-inspection-is-not-retained-for-new-being', fixtureState.onboardingInspection === null);
+    nextInspection = {...structuredClone(existingInspection), beingId: 'another_being', connectionRevision: 2, identity: {...existingInspection.identity, name: 'Another Being'}};
+    await click('#setup-loom-existing');
+    await waitFor(() => inspections.length === 1, 'Being B inspection');
+    await finishInspection(inspections.shift());
+    await waitStep('review');
+    check('new-being-review-uses-current-identity-only', await execute("document.getElementById('setup-review-identity').textContent.includes('Another Being')&&!document.getElementById('setup-review-identity').textContent.includes('Preview Being')"));
+    await click('#setup-review-finish');
+    await domWait("!document.getElementById('setup-wizard').open", 'experienced user direct completion');
+    check('experienced-user-can-finish-without-repeating-setup-or-greeting', fixtureState.onboarding.completed && fixtureState.onboarding.step === 'complete' && calls('deployPortal').length === setupCallsBeforeReview.deployments && calls('startPortal').length === setupCallsBeforeReview.starts && calls('sendBonfireMessage').length === setupCallsBeforeReview.greetings);
+    await load();
+    check('review-direct-completion-persists-after-reload', !await execute("document.getElementById('setup-wizard').open") && latestView()?.visible === true);
 
     const forbidden = ['sendFiresideMessage', 'beginChannelConnection', 'prepareTownAssistance', 'prepareTownFeature', 'checkChannelStatus', 'prepareGroveInstallation', 'requestTownRead'];
     check('wizard-never-installs-or-prepares-being-messages-automatically', forbidden.every(method => calls(method).length === 0));

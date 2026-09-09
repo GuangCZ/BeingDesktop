@@ -173,6 +173,7 @@ if (!process.versions.electron) {
     handle('selectPortalConfig', () => fixtureState);
     handle('startPortal', () => fixtureState);
     handle('stopPortal', () => fixtureState);
+    handle('testPortalConnection', () => ({status:'unknown',checkedAt:new Date().toISOString(),detail:'自测完成，连接仍有未确认项。',checks:[{label:'中继握手',status:'unknown',detail:'尚无当前 Being 的握手成功记录。'}]}));
     let permissions={...require('../src/portal-config.cjs').DEFAULT_PERMISSIONS};
     handle('getPortalPermissions',()=>({permissions,revision:'fixture-revision',configPath:fixtureState.portal.configPath}));
     handle('savePortalPermissions',request=>{
@@ -260,7 +261,16 @@ if (!process.versions.electron) {
     check('success-shows-process-and-confirmed-health', await execute("document.getElementById('portal-process-detail').textContent.includes('运行中')&&document.getElementById('portal-health-detail').textContent.includes('已确认')"));
     check('healthy-state-confirms-connection-in-setup-feedback', await execute("document.getElementById('portal-setup-status').textContent.includes('配置已完成，Portal 已连接')"));
     check('only-owned-process-can-be-stopped', await execute("!document.getElementById('stop-portal').disabled"));
+    await click('#test-portal-connection');
+    await domWait("document.getElementById('portal-self-test-result').textContent.includes('握手成功记录')");
+    check('self-test-uses-preload-and-shows-unknown', calls('testPortalConnection').length === 1 && await execute("document.getElementById('portal-self-test-result').textContent.includes('未确认')"));
+    fixtureState.portal.watchdog = {status:'monitoring',detail:'自动守护中：每 5 秒检查进程，退出后自动拉起。',health:{status:'unknown',checkedAt:new Date().toISOString(),detail:'自测完成，连接仍有未确认项。',checks:[{label:'中继握手',status:'unknown',detail:'尚无当前 Being 的握手成功记录。'}]}};
+    await publish();
+    check('watchdog-status-and-automatic-health-are-visible', await execute("!document.getElementById('portal-watchdog-detail').hidden&&document.getElementById('portal-watchdog-detail').textContent.includes('自动拉起')&&!document.getElementById('portal-auto-health').hidden&&document.getElementById('portal-auto-health-summary').textContent.includes('未确认')"));
     await capture('04-configured-900');
+    await execute("document.getElementById('portal-self-test-result').scrollIntoView({block:'center'})");
+    await settle();
+    await fs.writeFile(path.join(runRoot,'self-test-result.png'),(await win.webContents.capturePage()).toPNG());
 
     fixtureState.portal.connectionBeingName = 'previous_being';
     fixtureState.portal.connectionCurrent = false;

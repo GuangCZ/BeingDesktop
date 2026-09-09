@@ -10,7 +10,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function fixture() {
+function fixture(options={}) {
   let workspace = 'E:\\fixture-workspace';
   class Browser {
     constructor({ onChange }) { this.onChange = onChange; this.tabs = [{ id: 'browser-fixture', revision: 3, url: 'https://public.example.test/a', title: 'Fixture' }]; this.actions = []; this.preparations = []; this.nextPreparation = null; this.destroyed = false; }
@@ -48,13 +48,29 @@ function fixture() {
     }
   }
   const changes = [];
-  const tools = new DesktopTools({ Browser, Console, ToolLink, getWorkspace: () => workspace, getConnection: () => ({ url: 'https://unused.example.test', token: 'never-used' }), onChange: state => changes.push(state) });
+  const tools = new DesktopTools({ Browser, Console, ToolLink, getWorkspace: () => workspace, getConnection: () => ({ url: 'https://unused.example.test', token: 'never-used' }), onChange: state => changes.push(state),...options });
   return { tools, changes, setWorkspace: value => { workspace = value; } };
 }
 
 function requestId(tools) { return tools.snapshot().requests.at(-1).id; }
 function body(result) { return JSON.parse(result.content[0].text); }
 function nextTurn() { return new Promise(resolve => setImmediate(resolve)); }
+
+test('scoped terminal commands run without a second approval and survive tool reconnects',async t=>{
+  const sessions=[],writes=[],shown=[];
+  const id=require('node:crypto').randomUUID();
+  const terminal={snapshot:()=>({sessions}),async create(){sessions.push({id,status:'running'});return {sessionId:id};},
+    readSince:()=>({id,sequence:0,data:''}),write:value=>{writes.push(value);return {written:true};}};
+  const {tools}=fixture({getTerminal:()=>terminal,showTerminal:id=>shown.push(id)});t.after(()=>tools.dispose());
+  const scope=tools.terminalTools.scope(require('node:crypto').randomUUID());
+  const created=await tools.link.call('desktop_terminal_create',{...scope,requestId:require('node:crypto').randomUUID()}).promise;
+  assert.equal(body(created).terminalId,id);assert.deepEqual(shown,[id]);assert.equal(tools.snapshot().requests.length,0);
+  tools.disconnectLink();
+  const written=await tools.link.call('desktop_terminal_write',{...scope,terminalId:id,requestId:require('node:crypto').randomUUID(),data:'test\r'}).promise;
+  assert.equal(body(written).written,true);assert.equal(writes.length,1);assert.equal(sessions.length,1);
+  const rejected=await tools.link.call('desktop_terminal_read',{...scope,sessionToken:require('node:crypto').randomUUID(),terminalId:id}).promise;
+  assert.equal(rejected.isError,true);assert.match(rejected.content[0].text,/会话绑定/);
+});
 
 test('remote command stays pending until an explicit approval and freezes its reviewed cwd', async (t) => {
   const { tools, setWorkspace } = fixture();

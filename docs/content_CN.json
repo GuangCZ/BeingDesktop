@@ -1,73 +1,342 @@
 [
-  {"id":"index","group":"开始使用","title":"Being Desktop","description":"让你的 Being，来到桌面。","sections":[
-    {"title":"一个桌面，连接现有 Being","html":"<p>Being Desktop 是面向 Windows 的 Being 客户端。连接已有 Loom，把对话、项目文件、浏览器、终端和本机 Portal 放在同一个工作区。</p><p>Being 的身份、记忆与自主行动仍由原来的运行时管理。首次使用需要已有的 Being 和 Loom 连接地址。</p><div class=\"actions\"><a class=\"primary\" href=\"quickstart.html\">开始使用 <span>↗</span></a><a class=\"secondary\" href=\"download.html\">下载与安装</a></div>"},
-    {"title":"从这里开始","html":"<div class=\"cards\"><a href=\"chat.html\"><b>与 Being 对话 ↗</b><span>多会话、图片、工具选择与消息定位。</span></a><a href=\"portal.html\"><b>连接这台电脑 ↗</b><span>配置本机 Portal，管理工具权限。</span></a><a href=\"grove.html\"><b>扩展工具 ↗</b><span>浏览 Grove，检查环境并安装 Kit。</span></a><a href=\"settings.html\"><b>调整桌面 ↗</b><span>外观、模型、连接和阅读设置。</span></a></div>"},
-    {"title":"当前版本","html":"<p><strong>0.8.19 · Windows x64</strong>。本版包含图片请求兼容修复，以及采用分栏导航、分组设置行和简洁操作按钮的设置页面。</p><p>文档按本仓库当前实现编写；Town、模型和工具的可用性取决于所连接服务及其授权。</p>"}
-  ]},
-  {"id":"quickstart","group":"开始使用","title":"快速开始","description":"安装桌面，连接 Loom，发送第一条消息。","sections":[
-    {"title":"1. 安装并打开","html":"<p>从<a href=\"download.html\">下载与安装</a>获取 Windows 版本。目录包请完整解压，再打开 <code>Being Desktop.exe</code>；便携 EXE 可直接运行。</p>"},
-    {"title":"2. 连接 Loom","html":"<p>在欢迎页填写已有 Being 的完整 Loom 地址及所需凭据。地址由你的 Being 服务提供。连接成功后，桌面加载对应的 Loom 对话。</p><p>远端地址使用 HTTPS；本机回环地址可使用 HTTP。模型 API 地址应在模型设置中填写。</p>"},
-    {"title":"3. 配置本机能力","html":"<p>跟随引导配置 Portal、Channel 和 Grove，也可以稍后在设置或 Town 中继续。只聊天时，可以先完成 Loom 连接。</p><p>需要 Being 使用本机文件或命令时，打开 <strong>设置 → 本机 Portal</strong>，选定工作区并连接这台电脑。</p>"},
-    {"title":"4. 开始对话","html":"<p>输入你要完成的事情。可粘贴图片，输入 <code>/</code> 选择工具，或创建新会话。使用 <code>@</code> 提及时，留意发送前的篝火通知提示。</p><p>重新进入引导：<strong>设置 → 关于 → 继续新手引导</strong>。</p>"}
-  ]},
-  {"id":"download","group":"开始使用","title":"下载与安装","description":"Windows x64 · 0.8.19","sections":[
-    {"title":"获取桌面程序","html":"<p>在 GitHub Releases 中选择最新版本的 Windows 发布附件。若尚无发布附件，可按下方步骤从源码运行。</p><div class=\"actions\"><a class=\"primary\" href=\"https://github.com/GuangCZ/BeingDesktop/releases\">打开 Releases ↗</a></div><p>目录包运行时不需要另装 Node.js。解压后保留整个文件夹；单独移动 EXE 会缺少运行依赖。</p>"},
-    {"title":"从源码运行","html":"<p>准备 Windows x64、Node.js 24 和 npm，在仓库根目录执行：</p><pre><code>npm ci\nnpm start</code></pre><p>依赖包含原生终端模块；安装后若报告 ABI 不匹配，需为当前 Electron 重建 <code>node-pty</code>。</p>"},
-    {"title":"构建 Windows 包","html":"<pre><code>npm run check\nnpm test\nnpm run pack</code></pre><p>目录包位于 <code>dist/win-unpacked</code>。运行 <code>npm run dist</code> 生成便携 EXE。构建需要下载 Electron 和打包工具。</p>"},
-    {"title":"更新与配置","html":"<p>更新前从托盘菜单退出旧版，再打开新版。默认配置保存在当前用户的应用数据目录。通过项目 <code>Start.ps1</code> 启动时使用项目内的 <code>.local/profile</code>，与直接启动的默认配置分开。</p><p>Portal 更新是独立功能；其更新提示不会自动更新 Being Desktop。</p>"}
-  ]},
-  {"id":"chat","group":"功能","title":"对话与会话","description":"保留上下文，组织不同任务。","sections":[
-    {"title":"会话与队列","html":"<p>在侧栏会话列表切换对话；点击新增会话可沿用当前语境创建会话。桌面为会话维护独立标识和消息记录。</p><p>状态面板展示当前会话的消息任务队列。已发送不等于运行时已经开始执行，其他渠道的队列不在此列表内。</p>"},
-    {"title":"图片输入","html":"<p>通过附件按钮、粘贴或拖放添加图片，确认预览后发送。0.8.19 已适配 Heart 的多模态请求格式。</p><p>实际识图需要当前模型与服务支持图片。其他类型附件的内容解析能力由上游服务决定。</p>"},
-    {"title":"选择工具与成员","html":"<p>输入 <code>/</code> 搜索网络搜索、网页读取及 Grove Kit。选择候选会更新草稿；发送后才由 Being 处理。</p><p>输入 <code>@</code> 查找 Being 成员。带提及的消息发送时也会向公开篝火发布提及通知，请在发送前检查内容。</p>"},
-    {"title":"定位长对话","html":"<p>对话左侧的消息刻度支持悬停预览、点击跳转、拖动和滚轮逐条定位，也支持键盘操作。</p><p>功能任务可以查看进度、结果或错误，并把结果带回聊天草稿。停止本地追踪不代表服务端任务已取消。</p>"}
-  ]},
-  {"id":"workspace","group":"功能","title":"文件、浏览器与终端","description":"在对话旁检查资料和运行结果。","sections":[
-    {"title":"项目文件","html":"<p>点击侧栏项目旁的加号选择本机文件夹，在文件页浏览当前工作区。远端 Loom 的连接不会把远端文件或记忆迁移到这个文件夹。</p>"},
-    {"title":"内置浏览器","html":"<p>打开浏览器面板并输入网址，可在对话旁查看网页和本地预览。工具面板支持调整宽度。</p>"},
-    {"title":"交互式 PowerShell","html":"<p>从控制台打开终端。每个标签是独立的持续会话，保留当前目录、变量与命令历史。新终端从选定工作区启动，没有工作区时从用户目录启动。</p><table><thead><tr><th>操作</th><th>快捷键</th></tr></thead><tbody><tr><td>执行命令</td><td>Enter</td></tr><tr><td>历史 / 补全</td><td>↑ ↓ / Tab</td></tr><tr><td>复制选区；无选区时中断</td><td>Ctrl+C</td></tr><tr><td>粘贴</td><td>Ctrl+V / Shift+Insert</td></tr></tbody></table><p>切换标签或收起面板保留会话；关闭标签结束相应终端。当前目录以 PowerShell 提示符为准。</p>"},
-    {"title":"让 Being 使用桌面工具","html":"<p>标题栏的工具连接入口默认关闭。开启后，Being 发起的桌面工具调用仍逐次确认。获准命令在独立输出标签中展示。</p><p>桌面工具连接与 Portal 的工具权限分别管理。详见<a href=\"permissions.html\">权限与数据</a>。</p>"}
-  ]},
-  {"id":"portal","group":"功能","title":"本机 Portal","description":"让现有 Being 连接这台电脑。","sections":[
-    {"title":"一键连接","html":"<ol><li>先连接 Loom。</li><li>打开 <strong>设置 → 本机 Portal</strong>。</li><li>选择工作区，点击 <strong>连接</strong>。</li><li>等待下载校验和配置完成，检查进程状态与连接健康。</li></ol><p>未指定工作区时会创建默认目录。桌面下载指定的官方 Portal 发布文件并校验摘要，然后生成配置；已有程序和配置会按实际状态复用。</p>"},
-    {"title":"启动与状态","html":"<p>点击 <strong>启动</strong> 或 <strong>停止</strong> 管理桌面启动的 Portal。进程运行中仅代表程序已启动；连接健康需要等待与当前 Being 的连接确认。</p><p>桌面只管理自己启动的 Portal 进程。切换 Being 后，若提示身份不匹配，请按界面提示重新配置。</p>"},
-    {"title":"工具权限","html":"<p>展开 <strong>工具权限</strong>，调整文件读写、命令执行、截图、搜索工具和自定义工具开关，再保存。Portal 运行中保存会重启并重新注册工具。</p><p>命令权限与搜索开关的实际范围见<a href=\"permissions.html\">权限与数据</a>。</p>"},
-    {"title":"已有程序与更新","html":"<p>使用自己的 Portal 时，展开 <strong>手动配置</strong> 选择程序和配置文件。配置失败可重试，或点击 <strong>请求协助</strong> 生成问题草稿。</p><p>桌面启动及运行期间每 6 小时检查 Portal 稳定版本，也可手动检查。发现新版后打开官方发布页，由你选择更新；不会自动替换程序。</p>"}
-  ]},
-  {"id":"grove","group":"功能","title":"Grove 工具市场","description":"查找 Kit，确认环境，再安装。","sections":[
-    {"title":"浏览与检查","html":"<p>从 Town 打开工具市场，搜索 Kit 并查看详情。同名 Kit 通过发布者与 ID 区分。点击 <strong>检查安装环境</strong> 查看本机依赖、平台与账号状态。</p>"},
-    {"title":"安装与加载","html":"<p>符合已验证安装方案的 Kit 支持一键安装，也可批量安装可用项。安装会校验包、文件与协议；失败项显示具体原因。</p><p>安装成功但未加载时，使用 <strong>加载到 Portal</strong> 重试。文件安装、Portal 注册与实际业务调用是不同状态。</p>"},
-    {"title":"需要额外配置时","html":"<p>缺少包、平台不兼容或需要账号授权时，使用 <strong>请 Being 协助安装</strong>。桌面准备包含 Kit 信息和阻塞原因的草稿，由你检查并发送。</p><p>公开目录中的项目并非全部支持 Windows 一键安装。第三方服务账号与调用费用由各工具提供方决定。</p>"}
-  ]},
-  {"id":"town","group":"功能","title":"Town 与 Channel","description":"访问 Being 社区与外部消息连接。","sections":[
-    {"title":"Town 入口","html":"<p>Town 汇集篝火 Bonfire、围炉 Fireside、Scroll、Beings、Channel、Grove 与 Portal 等入口。使用搜索查找功能并打开对应页面。</p><p>可读取的内容与可执行的操作取决于所连接 Town 服务及其授权；Loom 连接凭据并不自动提供所有 Town 权限。</p>"},
-    {"title":"篝火与围炉","html":"<p>篝火提供独立会话页与成员筛选。桌面后台刷新篝火和选中的围炉；读取刷新不会向主对话发送消息。授权不足时会暂停并显示原因。</p><p>篝火内容属于公开交流。对话中的 <code>@</code> 提及也会按发送提示发布篝火通知。</p>"},
-    {"title":"Channel","html":"<p>通过新手引导或 Town 中的 Channel 入口配置消息连接。填写该连接要求的参数，按页面结果检查是否准备完成。</p><p>需要外部服务账号、密钥或回调配置时，按对应服务的要求完成。连接状态以实际验证结果为准。</p>"}
-  ]},
-  {"id":"settings","group":"配置","title":"设置","description":"六个分类，集中管理桌面偏好。","sections":[
-    {"title":"导航与搜索","html":"<p>从侧栏底部打开设置。左侧分类支持搜索与键盘导航；按 Esc 或点击 <strong>返回应用</strong> 回到之前的页面。</p><table><thead><tr><th>分类</th><th>内容</th></tr></thead><tbody><tr><td>常规</td><td>托盘行为</td></tr><tr><td>外观</td><td>主题预设、自定义颜色与阅读字号</td></tr><tr><td>连接</td><td>Loom 地址与连接状态</td></tr><tr><td>模型</td><td>模型、提供方、服务与凭据</td></tr><tr><td>本机 Portal</td><td>设备、工作区、权限与更新</td></tr><tr><td>关于</td><td>版本、诊断导出与新手引导</td></tr></tbody></table>"},
-    {"title":"外观与阅读","html":"<p>外观页可预览主题、调整颜色并保存。对话字号与代码字号在外观页调整，选择后立即保存。</p><p>启用关闭后保留在托盘时，关闭窗口不会退出应用；请从托盘菜单退出。</p>"},
-    {"title":"模型配置","html":"<p>连接 Being 后刷新模型列表，选择模型或填写完整自定义模型 ID。展开 <strong>服务与凭据</strong> 配置提供方、API 地址和密钥。</p><p>API 地址必须能被 Being 服务端访问。API Key 留空会保留已有密钥。保存结果由当前服务确认，模型可用性以服务端实际支持为准。</p>"},
-    {"title":"Side by Side","html":"<p>模型页分别显示已保存与运行中的 Side by Side 状态。通过 <strong>打开 Loom</strong> 进入原生设置调整，等待运行时确认。</p>"}
-  ]},
-  {"id":"permissions","group":"配置","title":"权限与数据","description":"了解桌面、本机 Portal 和远端服务的边界。","sections":[
-    {"title":"连接与存储","html":"<p>桌面保存连接偏好、会话相关数据与本机工具配置。Loom 凭据由主进程管理；Being 的身份与记忆仍在原来的运行时。</p><p>对话及附件会发送到你连接的 Being 服务，模型配置可能将请求转交所配置的提供方。</p>"},
-    {"title":"Portal 权限的实际范围","html":"<p>Portal 命令以当前系统用户身份运行，可以访问工作区外的文件与程序。选择工作区不等于建立系统沙箱。</p><p>Portal 0.8.0 的搜索与网页工具开关只控制工具是否出现在列表，关闭后仍可能直接调用。OAuth 没有独立开关，Grove 工具在工具市场管理。</p>"},
-    {"title":"桌面工具与公开消息","html":"<p>桌面浏览器和命令工具连接默认关闭，启用后逐次确认调用。这与 Portal 配置是两个独立入口。</p><p>篝火为公开交流区。发送带 <code>@</code> 提及的聊天消息前，检查篝火通知提示和要发布的内容。</p>"},
-    {"title":"诊断与反馈","html":"<p>设置中的诊断导出包含连接状态与近期桌面活动，并对敏感字段进行脱敏。提交问题前仍应检查附件，移除不希望公开的地址、路径与内容。</p>"}
-  ]},
-  {"id":"troubleshooting","group":"参考","title":"故障排查","description":"先确认连接，再检查具体功能。","sections":[
-    {"title":"Loom 无法连接","html":"<p>检查完整地址、服务是否在线及凭据是否有效。远端使用 HTTPS。更改配置后重连，查看状态面板中的连接错误。</p>"},
-    {"title":"Portal 运行中，但健康待确认","html":"<p>进程已启动不代表中继握手成功。检查配置是否对应当前 Being、网络是否可达，以及 Portal 的实际日志。若身份不匹配，使用连接入口重新配置。</p>"},
-    {"title":"模型列表为空或保存失败","html":"<p>先确认 Being 已连接，再刷新列表。自定义 ID 必须被服务端支持；服务地址应从 Being 所在环境可访问。保留界面错误信息用于排查。</p>"},
-    {"title":"图片有预览，但 Being 看不到","html":"<p>确认使用 0.8.19 或更新版本，且模型支持图片。预览正常只说明桌面收到文件；识图还需要 Heart 与模型服务完整传递图片请求。</p>"},
-    {"title":"Grove 不能一键安装","html":"<p>运行环境检查，查看平台、依赖或账号条件。目录可见不表示存在可用的 Windows 安装方案。可生成协助草稿继续处理。</p>"},
-    {"title":"提交问题","html":"<p>记录版本、操作步骤、预期行为和实际错误。必要时附上检查过的诊断文件。</p><p><a href=\"https://github.com/GuangCZ/BeingDesktop/issues\">在 GitHub 提交问题 ↗</a></p>"}
-  ]},
-  {"id":"development","group":"参考","title":"开发与文档维护","description":"源码、构建和静态文档。","sections":[
-    {"title":"项目结构","html":"<table><thead><tr><th>目录</th><th>用途</th></tr></thead><tbody><tr><td>src/</td><td>Electron 主进程、预加载和服务桥接</td></tr><tr><td>renderer/</td><td>桌面界面与本地资源</td></tr><tr><td>test/</td><td>单元和界面验证</td></tr><tr><td>scripts/</td><td>构建与验收脚本</td></tr><tr><td>docs/</td><td>GitHub Pages 静态文档</td></tr></tbody></table>"},
-    {"title":"修改与验证","html":"<pre><code>npm ci\nnpm run check\nnpm test\nnode scripts/build-docs.cjs\nnode scripts/check-docs.cjs</code></pre><p>修改设置 UI 后可运行 <code>npm run test:theme</code>，其他界面检查位于 <code>test/</code> 和 <code>scripts/</code>。</p>"},
-    {"title":"文档部署","html":"<p>中文内容维护在 <code>docs/content_CN.json</code>。生成器输出独立 HTML 页面、搜索索引和站点地图；无需前端框架或外部字体。</p><p>文档在 <code>main:/docs</code> 维护，GitHub Pages 从 <code>gh-pages</code> 分支根目录部署。生成并提交后，在独立仓库运行 <code>node scripts/publish-docs.cjs</code> 发布更新。相对链接兼容本地预览与项目路径。</p>"},
-    {"title":"设计参考与许可","html":"<p>文档的信息组织参考 <a href=\"https://developers.openai.com/codex/app/\">Codex 官方桌面文档</a>的快速开始、功能指南和配置分区。页面内容与实现为 Being Desktop 独立编写，与 OpenAI 无隶属关系。</p><p>项目源码使用 MIT 许可，第三方组件及资源遵循各自许可。相关浏览器扩展见 <a href=\"https://github.com/GuangCZ/BeingAnywhere\">BeingAnywhere</a>。</p>"}
-  ]}
+  {
+    "id": "index",
+    "group": "开始使用",
+    "title": "Being Desktop",
+    "description": "让你的 Being，来到桌面。",
+    "sections": [
+      {
+        "title": "一个桌面，连接现有 Being",
+        "html": "<p>Being Desktop 是面向 Windows 的 Being 客户端。连接已有 Loom，把对话、项目文件、浏览器、终端和本机 Portal 放在同一个工作区。</p><p>Being 的身份、记忆与自主行动仍由原来的运行时管理。首次使用需要已有的 Being 和 Loom 连接地址。</p><div class=\"actions\"><a class=\"primary\" href=\"quickstart.html\">开始使用 <span>↗</span></a><a class=\"secondary\" href=\"download.html\">下载与安装</a></div>"
+      },
+      {
+        "title": "从这里开始",
+        "html": "<div class=\"cards\"><a href=\"chat.html\"><b>与 Being 对话 ↗</b><span>多会话、图片、工具选择与消息定位。</span></a><a href=\"portal.html\"><b>连接这台电脑 ↗</b><span>配置本机 Portal，管理工具权限。</span></a><a href=\"grove.html\"><b>扩展工具 ↗</b><span>浏览 Grove，检查环境并安装 Kit。</span></a><a href=\"settings.html\"><b>调整桌面 ↗</b><span>外观、模型、连接和阅读设置。</span></a><a href=\"orchestration.html\"><b>编排模式 ↗</b><span>Being 拆分与验收，CLI Worker 执行，结果回到原会话。</span></a></div>"
+      },
+      {
+        "title": "当前版本",
+        "html": "<p><strong>当前源码 0.8.22 · Windows x64</strong>。本轮重点加入严格编排模式、会话下的 Worker 执行状态、完成回调与验收、原会话结果卡和内置浏览器预览，并修复结果重复追加与模型错误展示。</p><p>从<a href=\"orchestration.html\">编排模式指南</a>了解开启条件与使用边界。发布附件以 Releases 为准；服务可用性取决于所连接运行时及其授权。</p>"
+      }
+    ]
+  },
+  {
+    "id": "quickstart",
+    "group": "开始使用",
+    "title": "快速开始",
+    "description": "安装桌面，连接 Loom，发送第一条消息。",
+    "sections": [
+      {
+        "title": "1. 安装并打开",
+        "html": "<p>从<a href=\"download.html\">下载与安装</a>获取 Windows 版本。目录包请完整解压，再打开 <code>Being Desktop.exe</code>；便携 EXE 可直接运行。</p>"
+      },
+      {
+        "title": "2. 连接 Loom",
+        "html": "<p>在欢迎页填写已有 Being 的完整 Loom 地址及所需凭据。地址由你的 Being 服务提供。连接成功后，桌面加载对应的 Loom 对话。</p><p>远端地址使用 HTTPS；本机回环地址可使用 HTTP。模型 API 地址应在模型设置中填写。</p>"
+      },
+      {
+        "title": "3. 配置本机能力",
+        "html": "<p>跟随引导配置 Portal、Channel 和 Grove，也可以稍后在设置或 Town 中继续。只聊天时，可以先完成 Loom 连接。</p><p>需要 Being 使用本机文件或命令时，打开 <strong>设置 → 本机 Portal</strong>，选定工作区并连接这台电脑。</p>"
+      },
+      {
+        "title": "4. 开始对话",
+        "html": "<p>输入你要完成的事情。可粘贴图片，输入 <code>/</code> 选择工具，或创建新会话。使用 <code>@</code> 提及时，留意发送前的篝火通知提示。</p><p>重新进入引导：<strong>设置 → 关于 → 继续新手引导</strong>。</p>"
+      }
+    ]
+  },
+  {
+    "id": "download",
+    "group": "开始使用",
+    "title": "下载与安装",
+    "description": "Windows x64 · 当前源码 0.8.22",
+    "sections": [
+      {
+        "title": "获取桌面程序",
+        "html": "<p>在 GitHub Releases 中选择最新版本的 Windows 发布附件。若尚无发布附件，可按下方步骤从源码运行。</p><div class=\"actions\"><a class=\"primary\" href=\"https://github.com/GuangCZ/BeingDesktop/releases\">打开 Releases ↗</a></div><p>目录包运行时不需要另装 Node.js。解压后保留整个文件夹；单独移动 EXE 会缺少运行依赖。</p>"
+      },
+      {
+        "title": "从源码运行",
+        "html": "<p>准备 Windows x64、Node.js 24 和 npm，在仓库根目录执行：</p><pre><code>npm ci\nnpm start</code></pre><p>依赖包含原生终端模块；安装后若报告 ABI 不匹配，需为当前 Electron 重建 <code>node-pty</code>。</p>"
+      },
+      {
+        "title": "构建 Windows 包",
+        "html": "<pre><code>npm run check\nnpm test\nnpm run pack</code></pre><p>目录包位于 <code>dist/win-unpacked</code>。运行 <code>npm run dist</code> 生成便携 EXE。构建需要下载 Electron 和打包工具。</p>"
+      },
+      {
+        "title": "更新与配置",
+        "html": "<p>更新前从托盘菜单退出旧版，再打开新版。默认配置保存在当前用户的应用数据目录。通过项目 <code>Start.ps1</code> 启动时使用相同的默认用户数据目录。</p><p>Portal 更新是独立功能；其更新提示不会自动更新 Being Desktop。</p>"
+      }
+    ]
+  },
+  {
+    "id": "chat",
+    "group": "功能",
+    "title": "对话与会话",
+    "description": "保留上下文，组织不同任务。",
+    "sections": [
+      {
+        "title": "会话与队列",
+        "html": "<p>在侧栏会话列表切换对话；点击新增会话可沿用当前语境创建会话。桌面为会话维护独立标识和消息记录。</p><p>状态面板展示当前会话的消息任务队列。已发送不等于运行时已经开始执行，其他渠道的队列不在此列表内。</p>"
+      },
+      {
+        "title": "图片输入",
+        "html": "<p>通过附件按钮、粘贴或拖放添加图片，确认预览后发送。0.8.19 已适配 Heart 的多模态请求格式。</p><p>实际识图需要当前模型与服务支持图片。其他类型附件的内容解析能力由上游服务决定。</p>"
+      },
+      {
+        "title": "选择工具与成员",
+        "html": "<p>输入 <code>/</code> 搜索网络搜索、网页读取及 Grove Kit。选择候选会更新草稿；发送后才由 Being 处理。</p><p>输入 <code>@</code> 查找 Being 成员。带提及的消息发送时也会向公开篝火发布提及通知，请在发送前检查内容。</p>"
+      },
+      {
+        "title": "定位长对话",
+        "html": "<p>对话左侧的消息刻度支持悬停预览、点击跳转、拖动和滚轮逐条定位，也支持键盘操作。</p><p>功能任务可以查看进度、结果或错误，并把结果带回聊天草稿。停止本地追踪不代表服务端任务已取消。</p>"
+      },
+      {
+        "title": "Worker 任务与结果",
+        "html": "<p>启用<a href=\"orchestration.html\">编排模式</a>后，执行任务显示在所属会话下。CLI 完成、通知送达与 Being 验收是不同状态；最终摘要和预览入口呈现在原会话。</p>"
+      }
+    ]
+  },
+  {
+    "id": "orchestration",
+    "group": "功能",
+    "title": "编排模式",
+    "description": "Being 细化需求、分派任务和验收，外部 CLI Worker 执行代码。",
+    "sections": [
+      {
+        "title": "Being 与 Worker 分别做什么",
+        "html": "<p>开启编排模式后，Being 负责理解目标、拆分任务、选择 Worker、判断结果和决定是否补验。代码修改、命令执行与测试交给外部 Agent CLI。该开关应用于 Desktop 中的所有会话，默认关闭。</p><p>例如提出“制作一个网页，并在桌面展示”，Being 会把实现与测试交给 Worker；Worker 完成后回传结果，Being 验收，再在原会话给出结论和预览入口。</p><p>这是调度方式的切换：没有可用 Worker 时任务会阻塞，不会自动改由 Being 执行代码。</p>"
+      },
+      {
+        "title": "开启前准备",
+        "html": "<ol><li>连接已有 Being，并选择本机工作区。</li><li>安装至少一种受支持的 Agent CLI，并完成它自身要求的登录及权限配置。Desktop 不会自动安装 Agent。</li><li>为 Being 配置支持严格编排协议的模型入口，使用 OpenAI Responses 提供方。仅更新 Desktop 不足以启用严格模式；普通代理没有该能力时，开启会失败。</li></ol><p>严格入口需同时能被 Desktop 与远端 Being 访问。它是独立部署的配套服务，不包含在本仓库的 Electron 安装包里。部署接口和边界见<a href=\"orchestration.md\">开发者说明</a>。</p>"
+      },
+      {
+        "title": "开启、配置与关闭",
+        "html": "<ol><li>进入 <strong>设置 → 编排模式</strong>。</li><li>开启 <strong>让 Being 专职编排</strong>。Desktop 自动检测 Agent、核验严格入口、保存设置并确认 Being 的模型地址。</li><li>确认显示“严格编排模式已开启”。如需调整，修改默认 Worker 或 CLI 绝对路径，点击“检测 Agent Kit”，再“保存模式”。</li><li>调度连接失效时，使用“重连调度工具”，并查看具体错误。</li></ol><p>模式关闭时，下方 Worker、路径与检测等设置灰显。点击开启后又恢复灰显，表示校验或保存失败：请看设置页的错误说明，不要仅根据 CLI 显示“可执行”判断模式已经生效。</p><p>Being 或 Worker 正在执行时不能切换模式。关闭时，Desktop 仅在模型地址仍匹配原严格入口的情况下恢复先前地址；不会覆盖用户后来另行修改的配置。</p>"
+      },
+      {
+        "title": "支持的 Agent Kit",
+        "html": "<table><thead><tr><th>Agent</th><th>接入方式</th><th>检测与限制</th></tr></thead><tbody><tr><td>Codex CLI</td><td>JSON 事件输出，提示经标准输入发送</td><td>检测执行接口及登录状态；Worker 使用 workspace-write 沙箱，普通目录也可作为工作区。</td></tr><tr><td>Cursor CLI</td><td>stream-json；检测 cursor-agent 或 agent</td><td>目前接入 CLI，未接入 Cursor SDK；接口可用不等于登录已验证。</td></tr><tr><td>Grok Build CLI</td><td>streaming-json；临时提示文件</td><td>执行后清理提示文件；登录状态在实际执行时确认。</td></tr></tbody></table><p>优先使用设置中指定的路径，否则从 PATH 等位置检测。开启时默认 Agent 不可用但发现其他可用 Agent，会选择可用项；一个也没有则拒绝开启。实际调用仍可能因登录过期、权限、网络或提供方接口变化失败。</p>"
+      },
+      {
+        "title": "在会话下查看执行过程",
+        "html": "<p>Worker 显示在所属会话下，包含总数、执行中数量和每个任务的状态。列表可折叠。打开 Worker 可查看结果、带时间的工具调用、日志与错误；执行中可以停止。</p><p>同一工作区的 Worker 按顺序执行，避免同时修改共享文件。每次分派启动一次新的 Agent 运行，后续任务需要显式携带必要的前序结果。</p><table><thead><tr><th>状态</th><th>含义</th></tr></thead><tbody><tr><td>执行中</td><td>CLI 仍在处理任务。</td></tr><tr><td>已完成</td><td>CLI 正常退出并报告完成；不等于需求已经验收通过。</td></tr><tr><td>Heart 已接收</td><td>完成通知已送达；不等于 Being 已读完结果。</td></tr><tr><td>验收通过 / 未通过 / 待补充验证</td><td>Being 对交付及证据作出的判断。</td></tr></tbody></table><p>日志有保留上限，截断会明确标注。退出码为 0 但没有提供方成功事件，仍按失败处理。</p>"
+      },
+      {
+        "title": "完成回调与原会话结果",
+        "html": "<p>Worker 结束后，Desktop 先保存结果，再通过 Heart 的回调接口通知 Being。Being 恢复原任务绑定、读取结果并验收。通知失败时重试通知，不重新执行 CLI；通知送达与验收完成分别记录。</p><p>最终结论呈现在<strong>原会话</strong>中，包含 Being 的摘要、可折叠的验收依据，以及网页产物的“打开预览”。Worker 详情用于查看执行过程。切换到另一会话不会改变结果归属。</p><p>本次修复了本地结果插入与 Loom 历史同步造成的重复追加：同一结果按稳定标识更新；可明确识别的旧重复结果在加载时合并，保留用户消息及不同任务的结果。</p><p>当 Being 空闲且验收尚未接续，Desktop 可发送明确标注的自动任务接续消息，不修改 Side by Side。提交状态不确定时不会盲目重复发送。详情页可在相应状态下“重试通知”“重新接续”或“停止接续”。</p>"
+      },
+      {
+        "title": "在 Desktop 内置浏览器展示",
+        "html": "<p>网页完成后，Being 通过展示操作提交工作区 HTML 入口或现有网页 URL，再记录验收。原会话的“打开预览”使用 Desktop 自带浏览器，无需 Worker 寻找 CLI 浏览器、iab 或外部浏览器。</p><p>静态 HTML 由 Desktop 托管；重启后可根据保留的产物重新打开，不需要重跑 Worker。动态网站仍需要可访问的后台服务，Worker 结束不保证它启动的开发服务器继续存活。</p>"
+      },
+      {
+        "title": "严格编排的实际边界",
+        "html": "<p>Desktop 只向 Being 暴露 Worker 的启动、列表、状态、等待和取消工具。配套严格模型入口还会过滤直接执行工具，并检查模型返回，确认没有越过 Worker 调度范围后才交给远端运行时。</p><p>开启模式会修改<strong>所连接 Being 的模型地址</strong>，因此也可能影响该 Being 在其他入口的会话。每次 Desktop 发送消息或分派任务前会再次核验；模型入口变化或调度连接不可用时阻止执行。</p><p>这不是远端运行时的全局权限管理：不会撤销独立后台任务、停止其他入口已启动的任务，也不能阻止管理员更改模型配置。严格入口可能在整段响应检查完毕后才显示 Being 文本；Worker 事件仍持续更新。</p><p>CLI 使用自身的权限配置。选择工作区不代表所有外部 CLI 都被相同的系统沙箱隔离；具体能力取决于对应适配器和 CLI。</p>"
+      },
+      {
+        "title": "常见问题与尚未支持的能力",
+        "html": "<ul><li><strong>开启后又关闭：</strong>依次检查工作区、CLI 检测与登录、OpenAI Responses 配置、严格入口能力及其可达性。</li><li><strong>Worker 完成但 Being 没回复：</strong>分别看执行、通知和验收状态；已有 Worker 结果保留，优先恢复通知或接续。</li><li><strong>模型接口报 HTTP 500 等错误：</strong>Being 当前回复可能中断，已启动 Worker 不因此自动重跑；需另查代理及模型服务。</li><li><strong>Worker 内再启动 Codex 失败：</strong>外层 Worker 的沙箱、代理、登录与证书环境可能与宿主不同。本次牌局验证通过宿主运行解决了调用问题，但宿主接续尚未成为 Desktop 通用自动托管功能。不要以关闭 TLS 校验或删除沙箱标记代替正确接入。</li><li><strong>退出与重启：</strong>切换 Desktop 会话或关闭到托盘保留执行；退出、断开连接或切换 Being 会停止 Worker。重启后原执行中记录标为中断，不自动重放。</li></ul><p>Cursor SDK、任意 Agent SDK、跨任务通用宿主子进程接续均不属于当前承诺的能力。此轮更新的是源码与文档，下载附件以 Releases 实际发布内容为准。</p>"
+      }
+    ]
+  },
+  {
+    "id": "workspace",
+    "group": "功能",
+    "title": "文件、浏览器与终端",
+    "description": "在对话旁检查资料和运行结果。",
+    "sections": [
+      {
+        "title": "项目文件",
+        "html": "<p>点击侧栏项目旁的加号选择本机文件夹，在文件页浏览当前工作区。远端 Loom 的连接不会把远端文件或记忆迁移到这个文件夹。</p>"
+      },
+      {
+        "title": "内置浏览器",
+        "html": "<p>打开浏览器面板并输入网址，可在对话旁查看网页和本地预览。工具面板支持调整宽度。</p><p>编排任务的网页交付通过原会话“打开预览”进入此浏览器。静态产物由 Desktop 托管，动态项目仍需后台服务持续运行。</p>"
+      },
+      {
+        "title": "交互式 PowerShell",
+        "html": "<p>从控制台打开终端。每个标签是独立的持续会话，保留当前目录、变量与命令历史。新终端从选定工作区启动，没有工作区时从用户目录启动。</p><table><thead><tr><th>操作</th><th>快捷键</th></tr></thead><tbody><tr><td>执行命令</td><td>Enter</td></tr><tr><td>历史 / 补全</td><td>↑ ↓ / Tab</td></tr><tr><td>复制选区；无选区时中断</td><td>Ctrl+C</td></tr><tr><td>粘贴</td><td>Ctrl+V / Shift+Insert</td></tr></tbody></table><p>切换标签或收起面板保留会话；关闭标签结束相应终端。当前目录以 PowerShell 提示符为准。</p>"
+      },
+      {
+        "title": "让 Being 使用桌面工具",
+        "html": "<p>标题栏的工具连接入口默认关闭。开启后，Being 发起的桌面工具调用仍逐次确认。获准命令在独立输出标签中展示。</p><p>桌面工具连接与 Portal 的工具权限分别管理。详见<a href=\"permissions.html\">权限与数据</a>。</p>"
+      }
+    ]
+  },
+  {
+    "id": "portal",
+    "group": "功能",
+    "title": "本机 Portal",
+    "description": "让现有 Being 连接这台电脑。",
+    "sections": [
+      {
+        "title": "一键连接",
+        "html": "<ol><li>先连接 Loom。</li><li>打开 <strong>设置 → 本机 Portal</strong>。</li><li>选择工作区，点击 <strong>连接</strong>。</li><li>等待下载校验和配置完成，检查进程状态与连接健康。</li></ol><p>未指定工作区时会创建默认目录。桌面下载指定的官方 Portal 发布文件并校验摘要，然后生成配置；已有程序和配置会按实际状态复用。</p>"
+      },
+      {
+        "title": "启动与状态",
+        "html": "<p>点击 <strong>启动</strong> 或 <strong>停止</strong> 管理桌面启动的 Portal。进程运行中仅代表程序已启动；连接健康需要等待与当前 Being 的连接确认。</p><p>桌面只管理自己启动的 Portal 进程。切换 Being 后，若提示身份不匹配，请按界面提示重新配置。</p>"
+      },
+      {
+        "title": "工具权限",
+        "html": "<p>展开 <strong>工具权限</strong>，调整文件读写、命令执行、截图、搜索工具和自定义工具开关，再保存。Portal 运行中保存会重启并重新注册工具。</p><p>命令权限与搜索开关的实际范围见<a href=\"permissions.html\">权限与数据</a>。</p>"
+      },
+      {
+        "title": "已有程序与更新",
+        "html": "<p>使用自己的 Portal 时，展开 <strong>手动配置</strong> 选择程序和配置文件。配置失败可重试，或点击 <strong>请求协助</strong> 生成问题草稿。</p><p>桌面启动及运行期间每 6 小时检查 Portal 稳定版本，也可手动检查。发现新版后打开官方发布页，由你选择更新；不会自动替换程序。</p>"
+      }
+    ]
+  },
+  {
+    "id": "grove",
+    "group": "功能",
+    "title": "Grove 工具市场",
+    "description": "查找 Kit，确认环境，再安装。",
+    "sections": [
+      {
+        "title": "浏览与检查",
+        "html": "<p>从 Town 打开工具市场，搜索 Kit 并查看详情。同名 Kit 通过发布者与 ID 区分。点击 <strong>检查安装环境</strong> 查看本机依赖、平台与账号状态。</p>"
+      },
+      {
+        "title": "安装与加载",
+        "html": "<p>符合已验证安装方案的 Kit 支持一键安装，也可批量安装可用项。安装会校验包、文件与协议；失败项显示具体原因。</p><p>安装成功但未加载时，使用 <strong>加载到 Portal</strong> 重试。文件安装、Portal 注册与实际业务调用是不同状态。</p>"
+      },
+      {
+        "title": "需要额外配置时",
+        "html": "<p>缺少包、平台不兼容或需要账号授权时，使用 <strong>请 Being 协助安装</strong>。桌面准备包含 Kit 信息和阻塞原因的草稿，由你检查并发送。</p><p>公开目录中的项目并非全部支持 Windows 一键安装。第三方服务账号与调用费用由各工具提供方决定。</p>"
+      }
+    ]
+  },
+  {
+    "id": "town",
+    "group": "功能",
+    "title": "Town 与 Channel",
+    "description": "访问 Being 社区与外部消息连接。",
+    "sections": [
+      {
+        "title": "Town 入口",
+        "html": "<p>Town 汇集篝火 Bonfire、围炉 Fireside、Scroll、Beings、Channel、Grove 与 Portal 等入口。使用搜索查找功能并打开对应页面。</p><p>可读取的内容与可执行的操作取决于所连接 Town 服务及其授权；Loom 连接凭据并不自动提供所有 Town 权限。</p>"
+      },
+      {
+        "title": "篝火与围炉",
+        "html": "<p>篝火提供独立会话页与成员筛选。桌面后台刷新篝火和选中的围炉；读取刷新不会向主对话发送消息。授权不足时会暂停并显示原因。</p><p>篝火内容属于公开交流。对话中的 <code>@</code> 提及也会按发送提示发布篝火通知。</p>"
+      },
+      {
+        "title": "Channel",
+        "html": "<p>通过新手引导或 Town 中的 Channel 入口配置消息连接。填写该连接要求的参数，按页面结果检查是否准备完成。</p><p>需要外部服务账号、密钥或回调配置时，按对应服务的要求完成。连接状态以实际验证结果为准。</p>"
+      }
+    ]
+  },
+  {
+    "id": "settings",
+    "group": "配置",
+    "title": "设置",
+    "description": "七个分类，集中管理桌面偏好。",
+    "sections": [
+      {
+        "title": "导航与搜索",
+        "html": "<p>从侧栏底部打开设置。左侧分类支持搜索与键盘导航；按 Esc 或点击 <strong>返回应用</strong> 回到之前的页面。</p><table><thead><tr><th>分类</th><th>内容</th></tr></thead><tbody><tr><td>常规</td><td>托盘行为</td></tr><tr><td>外观</td><td>主题预设、自定义颜色与阅读字号</td></tr><tr><td>连接</td><td>Loom 地址与连接状态</td></tr><tr><td>模型</td><td>模型、提供方、服务与凭据</td></tr><tr><td><a href=\"orchestration.html\">编排模式</a></td><td>开关、默认 Worker、Agent Kit 检测与调度连接</td></tr><tr><td>本机 Portal</td><td>设备、工作区、权限与更新</td></tr><tr><td>关于</td><td>版本、诊断导出与新手引导</td></tr></tbody></table>"
+      },
+      {
+        "title": "外观与阅读",
+        "html": "<p>外观页可预览主题、调整颜色并保存。对话字号与代码字号在外观页调整，选择后立即保存。</p><p>启用关闭后保留在托盘时，关闭窗口不会退出应用；请从托盘菜单退出。</p>"
+      },
+      {
+        "title": "模型配置",
+        "html": "<p>连接 Being 后刷新模型列表，选择模型或填写完整自定义模型 ID。展开 <strong>服务与凭据</strong> 配置提供方、API 地址和密钥。</p><p>API 地址必须能被 Being 服务端访问。API Key 留空会保留已有密钥。保存结果由当前服务确认，模型可用性以服务端实际支持为准。</p>"
+      },
+      {
+        "title": "Side by Side",
+        "html": "<p>模型页分别显示已保存与运行中的 Side by Side 状态。通过 <strong>打开 Loom</strong> 进入原生设置调整，等待运行时确认。</p>"
+      }
+    ]
+  },
+  {
+    "id": "permissions",
+    "group": "配置",
+    "title": "权限与数据",
+    "description": "了解桌面、本机 Portal 和远端服务的边界。",
+    "sections": [
+      {
+        "title": "连接与存储",
+        "html": "<p>桌面保存连接偏好、会话相关数据与本机工具配置。Loom 凭据由主进程管理；Being 的身份与记忆仍在原来的运行时。</p><p>对话及附件会发送到你连接的 Being 服务，模型配置可能将请求转交所配置的提供方。</p>"
+      },
+      {
+        "title": "Portal 权限的实际范围",
+        "html": "<p>Portal 命令以当前系统用户身份运行，可以访问工作区外的文件与程序。选择工作区不等于建立系统沙箱。</p><p>Portal 0.8.0 的搜索与网页工具开关只控制工具是否出现在列表，关闭后仍可能直接调用。OAuth 没有独立开关，Grove 工具在工具市场管理。</p>"
+      },
+      {
+        "title": "桌面工具与公开消息",
+        "html": "<p>桌面浏览器和命令工具连接默认关闭，启用后逐次确认调用。这与 Portal 配置是两个独立入口。</p><p>篝火为公开交流区。发送带 <code>@</code> 提及的聊天消息前，检查篝火通知提示和要发布的内容。</p>"
+      },
+      {
+        "title": "诊断与反馈",
+        "html": "<p>设置中的诊断导出包含连接状态与近期桌面活动，并对敏感字段进行脱敏。提交问题前仍应检查附件，移除不希望公开的地址、路径与内容。</p>"
+      },
+      {
+        "title": "编排模式的权限边界",
+        "html": "<p><a href=\"orchestration.html\">编排模式</a>通过 Worker 调度工具与配套严格模型入口共同限制直接执行；它会修改所连接 Being 的模型地址，但不接管远端独立后台任务。外部 CLI 仍受自己的登录与执行权限约束。</p>"
+      }
+    ]
+  },
+  {
+    "id": "troubleshooting",
+    "group": "参考",
+    "title": "故障排查",
+    "description": "先确认连接，再检查具体功能。",
+    "sections": [
+      {
+        "title": "Loom 无法连接",
+        "html": "<p>检查完整地址、服务是否在线及凭据是否有效。远端使用 HTTPS。更改配置后重连，查看状态面板中的连接错误。</p>"
+      },
+      {
+        "title": "Portal 运行中，但健康待确认",
+        "html": "<p>进程已启动不代表中继握手成功。检查配置是否对应当前 Being、网络是否可达，以及 Portal 的实际日志。若身份不匹配，使用连接入口重新配置。</p>"
+      },
+      {
+        "title": "模型列表为空或保存失败",
+        "html": "<p>先确认 Being 已连接，再刷新列表。自定义 ID 必须被服务端支持；服务地址应从 Being 所在环境可访问。保留界面错误信息用于排查。</p>"
+      },
+      {
+        "title": "图片有预览，但 Being 看不到",
+        "html": "<p>确认使用 0.8.19 或更新版本，且模型支持图片。预览正常只说明桌面收到文件；识图还需要 Heart 与模型服务完整传递图片请求。</p>"
+      },
+      {
+        "title": "Grove 不能一键安装",
+        "html": "<p>运行环境检查，查看平台、依赖或账号条件。目录可见不表示存在可用的 Windows 安装方案。可生成协助草稿继续处理。</p>"
+      },
+      {
+        "title": "编排开关、回调与 CLI 调用",
+        "html": "<p>开关恢复关闭、结果待验收、模型接口错误与 Worker 内嵌 CLI 失败是不同故障。先查看相应状态，按<a href=\"orchestration.html#section-8\">编排模式排查指南</a>定位，不要反复重跑已完成的任务。</p>"
+      },
+      {
+        "title": "提交问题",
+        "html": "<p>记录版本、操作步骤、预期行为和实际错误。必要时附上检查过的诊断文件。</p><p><a href=\"https://github.com/GuangCZ/BeingDesktop/issues\">在 GitHub 提交问题 ↗</a></p>"
+      }
+    ]
+  },
+  {
+    "id": "development",
+    "group": "参考",
+    "title": "开发与文档维护",
+    "description": "源码、构建和静态文档。",
+    "sections": [
+      {
+        "title": "项目结构",
+        "html": "<table><thead><tr><th>目录</th><th>用途</th></tr></thead><tbody><tr><td>src/</td><td>Electron 主进程、预加载和服务桥接</td></tr><tr><td>renderer/</td><td>桌面界面与本地资源</td></tr><tr><td>test/</td><td>单元和界面验证</td></tr><tr><td>scripts/</td><td>构建与验收脚本</td></tr><tr><td>docs/</td><td>GitHub Pages 静态文档</td></tr></tbody></table>"
+      },
+      {
+        "title": "修改与验证",
+        "html": "<pre><code>npm ci\nnpm run check\nnpm test\nnode scripts/build-docs.cjs\nnode scripts/check-docs.cjs</code></pre><p>修改设置 UI 后可运行 <code>npm run test:theme</code>，其他界面检查位于 <code>test/</code> 和 <code>scripts/</code>。</p>"
+      },
+      {
+        "title": "文档部署",
+        "html": "<p>中文内容维护在 <code>docs/content_CN.json</code>。生成器输出独立 HTML 页面、搜索索引和站点地图；无需前端框架或外部字体。</p><p>文档在 <code>main:/docs</code> 维护，GitHub Pages 从 <code>gh-pages</code> 分支根目录部署。生成并提交后，在独立仓库运行 <code>node scripts/publish-docs.cjs</code> 发布更新。相对链接兼容本地预览与项目路径。</p>"
+      },
+      {
+        "title": "设计参考与许可",
+        "html": "<p>文档的信息组织参考 <a href=\"https://developers.openai.com/codex/app/\">Codex 官方桌面文档</a>的快速开始、功能指南和配置分区。页面内容与实现为 Being Desktop 独立编写，与 OpenAI 无隶属关系。</p><p>项目源码使用 MIT 许可，第三方组件及资源遵循各自许可。相关浏览器扩展见 <a href=\"https://github.com/GuangCZ/BeingAnywhere\">BeingAnywhere</a>。</p>"
+      }
+    ]
+  }
 ]

@@ -167,6 +167,19 @@ class DesktopTerminal {
     return { id: item.id, sequence: item.sequence, data: item.chunks.join(''), truncated: item.truncated };
   }
 
+  readSince(id, afterSequence = 0) {
+    const item = this.requireSession(id);
+    if (!Number.isSafeInteger(afterSequence) || afterSequence < 0 || afterSequence > item.sequence) throw new Error('终端输出游标无效。');
+    const first = item.sequence - item.chunks.length + 1;
+    let data = '', bytes = 0, sequence = afterSequence;
+    for (let index = Math.max(0, afterSequence - first + 1); index < item.chunks.length; index++) {
+      const chunk = item.chunks[index], size = Buffer.byteLength(chunk, 'utf8');
+      if (bytes + size > 128 * 1024) break;
+      data += chunk; bytes += size; sequence = first + index;
+    }
+    return {id, data, sequence, latestSequence:item.sequence, hasMore:sequence < item.sequence, truncated:afterSequence < first - 1};
+  }
+
   write({ id, data } = {}) {
     const item = this.requireSession(id, true);
     if (typeof data !== 'string' || Buffer.byteLength(data, 'utf8') > MAX_INPUT_BYTES) throw new Error('终端输入不能超过 64 KiB。');

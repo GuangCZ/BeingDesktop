@@ -53,13 +53,6 @@
   letter-spacing: -1px;
 }
 
-.setup-brand img {
-  display: block;
-  width: 32px;
-  height: 32px;
-  object-fit: contain;
-}
-
 .setup-wizard .icon-button {
   width: 40px;
   height: 40px;
@@ -135,8 +128,45 @@
   color: var(--surface-text);
 }
 
-.setup-card:not([hidden]) {
-  animation: setup-card-appear 180ms ease-out;
+/* Capture the complete panel, including its header, progress and footer. */
+.setup-wizard[open] {
+  view-transition-name: setup-page;
+}
+
+html[data-setup-direction]::view-transition-group(root),
+html[data-setup-direction]::view-transition-old(root),
+html[data-setup-direction]::view-transition-new(root) {
+  animation: none;
+}
+
+html[data-setup-direction]::view-transition-group(setup-page) {
+  animation-duration: 420ms;
+  animation-timing-function: cubic-bezier(.22, 1, .36, 1);
+}
+
+html[data-setup-direction]::view-transition-old(setup-page),
+html[data-setup-direction]::view-transition-new(setup-page) {
+  mix-blend-mode: normal;
+  transform-origin: center 60%;
+  animation: 420ms cubic-bezier(.22, 1, .36, 1) both;
+}
+
+html[data-setup-direction="forward"]::view-transition-old(setup-page) { animation-name: setup-page-out-left; }
+html[data-setup-direction="forward"]::view-transition-new(setup-page) { animation-name: setup-page-in-right; }
+html[data-setup-direction="backward"]::view-transition-old(setup-page) { animation-name: setup-page-out-right; }
+html[data-setup-direction="backward"]::view-transition-new(setup-page) { animation-name: setup-page-in-left; }
+
+@keyframes setup-page-out-left {
+  to { opacity: 0; transform: translateX(-100px) rotate(-4deg) scale(.94); }
+}
+@keyframes setup-page-in-right {
+  from { opacity: 0; transform: translateX(100px) rotate(4deg) scale(.94); }
+}
+@keyframes setup-page-out-right {
+  to { opacity: 0; transform: translateX(100px) rotate(4deg) scale(.94); }
+}
+@keyframes setup-page-in-left {
+  from { opacity: 0; transform: translateX(-100px) rotate(-4deg) scale(.94); }
 }
 
 .setup-card-icon {
@@ -389,6 +419,51 @@
   color: var(--danger);
 }
 
+.setup-review-list {
+  margin: 20px 0 0;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.setup-wizard.is-review { width: min(640px, calc(100vw - 40px)); }
+.setup-wizard.is-review .setup-steps { margin: 18px 0 22px; padding-bottom: 20px; }
+[data-card="review"] > .setup-card-icon { display: none; }
+[data-card="review"] .setup-description { margin-bottom: 16px; }
+[data-card="review"] .setup-actions { margin-top: 16px; padding-top: 16px; }
+
+.setup-review-list > div {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 14px;
+  padding: 13px 0;
+}
+
+.setup-review-list > div + div { border-top: 1px solid var(--line); }
+.setup-review-list dt { color: var(--surface-muted); font-size: 12px; }
+.setup-review-list dd {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.setup-review-check {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+.setup-review-check p { flex: 1; }
+.setup-review-check button { flex-shrink: 0; }
+
+@media (max-width: 480px) {
+  .setup-review-list > div { grid-template-columns: 1fr; gap: 3px; }
+  [data-card="review"] .setup-actions { flex-wrap: wrap; }
+}
+
 .setup-actions {
   justify-content: space-between;
   gap: 12px;
@@ -573,11 +648,6 @@
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-@keyframes setup-card-appear {
-  from { opacity: 0; transform: translateY(5px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
 @media (max-width: 640px) {
   .setup-wizard {
     width: calc(100vw - 24px);
@@ -608,6 +678,11 @@
   .setup-card-icon { width: 42px; height: 42px; margin-bottom: 14px; border-radius: 12px; }
   .setup-description { margin-bottom: 18px; }
   .setup-actions { margin-top: 20px; padding-top: 17px; }
+  .setup-wizard.is-review .setup-steps { margin: 12px 0 14px; padding-bottom: 14px; }
+  .setup-wizard.is-review .setup-review-list { margin-top: 12px; }
+  .setup-wizard.is-review .setup-review-list > div { padding: 8px 0; }
+  .setup-wizard.is-review .setup-description { margin-bottom: 10px; }
+  .setup-wizard.is-review .setup-footnote { margin-top: 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

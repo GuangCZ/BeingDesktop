@@ -317,4 +317,4 @@ class DesktopConsole {
   }
 }
 
-module.exports = { DesktopConsole, consoleEnvironment };
+module.exports = { DesktopConsole, consoleEnvironment, WINDOWS_RUNNER };

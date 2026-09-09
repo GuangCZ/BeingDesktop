@@ -9,13 +9,14 @@ function installTaskQueue() {
   const storageKey = 'being-desktop-message-tasks-v1:' + location.pathname;
   function save() {
     try { sessionStorage.setItem(storageKey, JSON.stringify([...pending.values()])); } catch { /* Storage failure cannot affect message delivery. */ }
+    globalThis.__beingDesktopAcceptedProgress?.refresh();
   }
   try {
     const restored = JSON.parse(sessionStorage.getItem(storageKey));
     if (Array.isArray(restored)) for (const value of restored) {
       if (!value || typeof value.id !== 'string' || typeof value.text !== 'string') continue;
       pending.set(value.id, {id:preview(value.id), text:preview(value.text), startedAt:preview(value.startedAt), sessionId:preview(value.sessionId),
-        status:value.status === 'accepted' ? 'accepted' : 'interrupted', phase:'awaiting_first', streamId:preview(value.streamId), tool:''});
+        status:value.status === 'accepted' ? 'accepted' : 'interrupted', accepted:value.accepted === true || value.status === 'accepted', spliced:value.spliced === true, phase:'awaiting_first', streamId:preview(value.streamId), requestId:preview(value.requestId), tool:''});
     }
   } catch { /* A missing or obsolete page ledger starts empty. */ }
   function observe(item, event, data) {
@@ -28,6 +29,25 @@ function installTaskQueue() {
     // Do not retain reasoning, tool arguments, results or response text.
   }
   globalThis.__beingDesktopTaskQueue = {
+    reconcileReply(requestId,streamId) {
+      for(const item of pending.values())if(item.requestId===requestId) {item.streamId=streamId;item.status='responding';}
+      save();
+    },
+    reconcileHistory(requestIds,active) {
+      if(!active)return;
+      for(const [id,item] of pending) {
+        if(requestIds.includes(item.requestId) && (active.finished || item.streamId && item.streamId!==active.id))pending.delete(id);
+      }
+      save();
+    },
+    reconcileStream(streamId,{event,data={},finished=false}={}) {
+      for(const [id,item] of pending) {
+        if(item.streamId!==streamId)continue;
+        if(finished)pending.delete(id);
+        else if(event)observe(item,event,data);
+      }
+      save();
+    },
     snapshot() {
       const queueKnown = typeof sendQueue !== 'undefined' && Array.isArray(sendQueue);
       const ownSession = globalThis.__beingDesktopSessions?.list().activeId;
@@ -54,8 +74,11 @@ function installTaskQueue() {
     const finish = () => { pending.delete(id); save(); };
     try {
       const response = await originalFetch(input, options);
+      item.requestId=preview(response.headers.get('x-being-desktop-request-id'));
       if (response.status === 202) {
         item.status = 'accepted';
+        item.accepted = true;
+        try { item.spliced = (await response.clone().json()).spliced === true; } catch { item.spliced = false; }
         save();
         return response;
       }

@@ -1,14 +1,23 @@
 'use strict';
 
 window.beingOnboarding = (() => {
-  const steps = ['loom', 'portal', 'channel', 'grove', 'town', 'bonfire'];
+  const steps = ['loom', 'review', 'portal', 'channel', 'grove', 'town', 'bonfire'];
   const $ = id => document.getElementById(id);
   let options, dialog, state = {}, dismissed = false, action = '', displayedStep = '';
   let awaitingConnection = false;
+  let inspectionRequest = 0, inspectionAttempt = '';
   let handoff = '', greetingSent = false;
-  const errors = { loom: '', portal: '', channel: '', grove: '', town: '', bonfire: '' };
+  let pageTransition = null, transitionPending = false;
+  const errors = { loom: '', review: '', portal: '', channel: '', grove: '', town: '', bonfire: '' };
   const step = () => steps.includes(state.onboarding?.step) ? state.onboarding.step : 'loom';
   const connected = () => state.connection?.status === 'connected';
+  const connectionKey = () => JSON.stringify([state.connection?.beingName, state.townApp?.identity?.connectionRevision]);
+  const inspection = () => {
+    const value = state.onboardingInspection;
+    return value?.beingId === state.connection?.beingName && value?.connectionRevision === state.townApp?.identity?.connectionRevision ? value : null;
+  };
+  const channelNames = {feishu: '飞书', wechat: '微信'};
+  const channelStatuses = {connected: '已连接', registered: '已登记', pending: '等待确认', disconnected: '已断开', disabled: '已停用', waiting: '等待扫码', expired: '授权已过期', error: '状态异常', unknown: '暂未确认'};
   const message = error => String(error?.message || '操作未完成，请重试。').replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '').slice(0, 400);
   const svg = name => {
     const paths = {
@@ -26,18 +35,33 @@ window.beingOnboarding = (() => {
     dialog.className = 'setup-wizard';
     dialog.setAttribute('aria-modal', 'true');
     dialog.innerHTML = `<div class="setup-shell">
-      <header class="setup-header"><div class="setup-brand"><img src="assets/being/being-icon-small.svg" width="32" height="32" alt=""><span>Being</span></div><button type="button" class="icon-button" id="setup-close" aria-label="稍后继续新手引导" title="稍后继续">${svg('close')}</button></header>
+      <header class="setup-header"><div class="setup-brand"><span>Being</span></div><button type="button" class="icon-button" id="setup-close" aria-label="稍后继续新手引导" title="稍后继续">${svg('close')}</button></header>
       <ol class="setup-steps" aria-label="新手引导进度">${[['loom','Loom'],['portal','Portal'],['channel','Channel'],['grove','Grove kit'],['town','Town'],['bonfire','篝火']].map(([id,label],i)=>`<li data-step="${id}"><span class="setup-step-number">${i+1}</span><span>${label}</span></li>`).join('')}</ol>
+      <div class="setup-card-deck">
       <section class="setup-card" data-card="loom" aria-labelledby="setup-title-loom">
         <div class="setup-card-icon">${svg('link')}</div><p class="setup-eyebrow">第一步 · 连接你的 Being</p>
         <h2 id="setup-title-loom" tabindex="-1">从一个 Loom 链接开始</h2><p class="setup-description">粘贴已有的 Loom 链接，让原来的身份、记忆与会话在这里继续。</p>
         <form id="setup-loom-form" class="setup-form">
           <label for="setup-loom-url">Loom 链接</label><div class="setup-input-wrap"><input id="setup-loom-url" type="password" autocomplete="off" spellcheck="false" required placeholder="粘贴完整的 Loom 连接链接" aria-describedby="setup-loom-hint setup-feedback-loom"><button type="button" class="icon-button" id="setup-loom-reveal" aria-label="显示 Loom 链接">${svg('eye')}</button></div>
           <p class="setup-hint" id="setup-loom-hint">请保留链接中的连接令牌，凭据会在本机加密保存。</p>
-          <div class="setup-summary" id="setup-loom-current" hidden>${svg('check')}<div><strong id="setup-loom-being"></strong><p>已连接，可以继续下一步。</p></div></div>
+          <div class="setup-summary" id="setup-loom-current" hidden>${svg('check')}<div><strong id="setup-loom-being"></strong><p>先读取 Being 已有的配置，再继续桌面设置。</p></div></div>
           <p class="setup-feedback" id="setup-feedback-loom" role="status" aria-live="polite" hidden></p>
-          <footer class="setup-actions"><span class="setup-hint">接下来：连接这台电脑</span><button type="submit" class="button primary setup-primary" id="setup-loom-connect">连接并继续 ${svg('arrow')}</button><button type="button" class="button primary setup-primary" id="setup-loom-existing" hidden>继续使用此连接 ${svg('arrow')}</button></footer>
+          <footer class="setup-actions"><span class="setup-hint">接下来：检查 Being 当前配置</span><button type="submit" class="button primary setup-primary" id="setup-loom-connect">连接并检查 ${svg('arrow')}</button><button type="button" class="button primary setup-primary" id="setup-loom-existing" hidden>读取当前配置 ${svg('arrow')}</button></footer>
         </form>
+      </section>
+      <section class="setup-card" data-card="review" aria-labelledby="setup-title-review" hidden>
+        <div class="setup-card-icon">${svg('check')}</div><p class="setup-eyebrow">连接检查 · 认识当前的 Being</p>
+        <h2 id="setup-title-review" tabindex="-1">先看看 Being 的当前状态</h2><p class="setup-description">第一次使用 Desktop，也可以继续使用 Being 已有的配置。你可以补充桌面设置，或直接开始使用。</p>
+        <dl class="setup-review-list">
+          <div><dt>Being</dt><dd id="setup-review-identity">正在读取…</dd></div>
+          <div><dt>模型配置</dt><dd id="setup-review-model">正在读取…</dd></div>
+          <div><dt>Channel</dt><dd id="setup-review-channels">正在读取…</dd></div>
+          <div><dt>Being 的 Portal</dt><dd id="setup-review-portals">正在读取…</dd></div>
+          <div><dt>这台电脑的 Portal</dt><dd id="setup-review-local-portal">正在读取…</dd></div>
+        </dl>
+        <div class="setup-review-check"><p class="setup-hint" id="setup-review-status" role="status" aria-live="polite"></p><button type="button" class="button quiet setup-quiet" id="setup-review-retry">重新读取</button></div>
+        <p class="setup-feedback" id="setup-feedback-review" role="status" aria-live="polite" hidden></p>
+        <footer class="setup-actions"><button type="button" class="button quiet setup-quiet" id="setup-review-back">更换 Loom</button><button type="button" class="button quiet setup-quiet" id="setup-review-finish">直接开始使用</button><button type="button" class="button primary setup-primary" id="setup-review-continue">继续设置 ${svg('arrow')}</button></footer>
       </section>
       <section class="setup-card" data-card="portal" aria-labelledby="setup-title-portal" hidden>
         <div class="setup-card-icon">${svg('terminal')}</div><p class="setup-eyebrow">第二步 · 连接这台电脑</p>
@@ -50,8 +74,8 @@ window.beingOnboarding = (() => {
       </section>
       <section class="setup-card" data-card="channel" aria-labelledby="setup-title-channel" hidden>
         <div class="setup-card-icon">${svg('chat')}</div><p class="setup-eyebrow">第三步 · 随时与 Being 聊天</p>
-        <h2 id="setup-title-channel" tabindex="-1">要配置 Channel 吗？</h2><p class="setup-description">把 Being 接到你常用的聊天工具里。选择配置后，继续查看接入步骤和实际连接状态。</p>
-        <div class="setup-channel-options"><div class="setup-channel-option"><img src="assets/brands/feishu.svg" width="32" height="32" alt=""><div><strong>飞书</strong><p>接入飞书机器人</p></div></div><div class="setup-channel-option"><img src="assets/brands/wechat.jpg" width="32" height="32" alt=""><div><strong>微信</strong><p>检查可用的接入方式</p></div></div></div>
+        <h2 id="setup-title-channel" tabindex="-1">要配置 Channel 吗？</h2><p class="setup-description" id="setup-channel-description">把 Being 接到你常用的聊天工具里。选择配置后，继续查看接入步骤和实际连接状态。</p>
+        <div class="setup-channel-options"><div class="setup-channel-option"><img src="assets/brands/feishu.svg" width="32" height="32" alt=""><div><strong>飞书</strong><p id="setup-channel-status-feishu">暂未确认</p></div></div><div class="setup-channel-option"><img src="assets/brands/wechat.jpg" width="32" height="32" alt=""><div><strong>微信</strong><p id="setup-channel-status-wechat">暂未确认</p></div></div></div>
         <p class="setup-hint">配置后可继续引导，接下来为 Being 添加 Grove kit。也可以稍后从侧栏的 Channel 入口配置。</p>
         <p class="setup-feedback" id="setup-feedback-channel" role="status" aria-live="polite" hidden></p>
         <footer class="setup-actions"><button type="button" class="button quiet setup-quiet" id="setup-channel-back">上一步</button><button type="button" class="button quiet setup-quiet" id="setup-channel-skip">暂时跳过</button><button type="button" class="button primary setup-primary" id="setup-channel-configure">配置 Channel ${svg('arrow')}</button></footer>
@@ -79,6 +103,7 @@ window.beingOnboarding = (() => {
         <p class="setup-feedback" id="setup-feedback-bonfire" role="status" aria-live="polite" hidden></p>
         <footer class="setup-actions"><button type="button" class="button quiet setup-quiet" id="setup-bonfire-back">上一步</button><button type="button" class="button primary setup-primary" id="setup-bonfire-open">进入篝火，写下问候 ${svg('arrow')}</button></footer>
       </section>
+      </div>
       <p class="setup-footnote">按自己的节奏开始，随时可以在设置中继续引导。</p>
     </div>`;
     document.body.append(dialog);
@@ -101,8 +126,12 @@ window.beingOnboarding = (() => {
       $('setup-loom-reveal').setAttribute('aria-label', `${input.type === 'password' ? '显示' : '隐藏'} Loom 链接`);
     };
     $('setup-loom-url').oninput = () => { errors.loom = ''; render(); };
-    $('setup-loom-existing').onclick = () => void advance('portal');
-    $('setup-portal-back').onclick = () => void advance('loom');
+    $('setup-loom-existing').onclick = () => void inspectConnection();
+    $('setup-review-retry').onclick = () => void inspectConnection();
+    $('setup-review-back').onclick = () => void advance('loom');
+    $('setup-review-continue').onclick = () => void advance('portal');
+    $('setup-review-finish').onclick = async () => { if (await advance('complete')) options.onChat?.(); };
+    $('setup-portal-back').onclick = () => void advance('review');
     $('setup-portal-skip').onclick = $('setup-portal-next').onclick = () => void advance('channel');
     $('setup-portal-deploy').onclick = () => void deployPortal();
     $('setup-workspace-select').onclick = () => void run('selectWorkspace', () => options.bridge.selectWorkspace());
@@ -127,6 +156,31 @@ window.beingOnboarding = (() => {
   }
 
   function render() {
+    if (transitionPending) return;
+    const changingStep = dialog?.open && displayedStep && displayedStep !== step();
+    const active = state.onboarding && !state.onboarding.completed && state.onboarding.step !== 'complete' && !dismissed;
+    if (!changingStep || !active || !document.startViewTransition || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      if (!active) pageTransition?.skipTransition();
+      renderContent();
+      return;
+    }
+    pageTransition?.skipTransition();
+    document.documentElement.dataset.setupDirection = steps.indexOf(step()) > steps.indexOf(displayedStep) ? 'forward' : 'backward';
+    transitionPending = true;
+    const transition = document.startViewTransition(() => {
+      transitionPending = false;
+      renderContent();
+    });
+    pageTransition = transition;
+    transition.finished.catch(() => {}).finally(() => {
+      if (pageTransition === transition) {
+        pageTransition = null;
+        delete document.documentElement.dataset.setupDirection;
+      }
+    });
+  }
+
+  function renderContent() {
     if (!dialog) return;
     const current = step();
     const active = Boolean(state.onboarding && !state.onboarding.completed && state.onboarding.step !== 'complete' && !dismissed);
@@ -153,11 +207,12 @@ window.beingOnboarding = (() => {
     if ($('setup-restart')) $('setup-restart').textContent = state.onboarding?.completed ? '重新查看新手引导' : '继续新手引导';
     if (!active) return;
     dialog.setAttribute('aria-labelledby', `setup-title-${current}`);
-    dialog.querySelectorAll('[data-card]').forEach(card => { card.hidden = card.dataset.card !== current; });
+    dialog.classList.toggle('is-review', current === 'review');
     dialog.querySelectorAll('[data-step]').forEach(item => {
-      item.classList.toggle('is-current', item.dataset.step === current);
-      item.classList.toggle('is-done', steps.indexOf(item.dataset.step) < steps.indexOf(current));
-      if (item.dataset.step === current) item.setAttribute('aria-current', 'step');
+      const progressStep = current === 'review' ? 'loom' : current;
+      item.classList.toggle('is-current', item.dataset.step === progressStep);
+      item.classList.toggle('is-done', steps.indexOf(item.dataset.step) < steps.indexOf(progressStep));
+      if (item.dataset.step === progressStep) item.setAttribute('aria-current', 'step');
       else item.removeAttribute('aria-current');
     });
     const installation = state.townApp?.portalInstall || {};
@@ -175,11 +230,14 @@ window.beingOnboarding = (() => {
     $('setup-loom-existing').hidden = !useExisting;
     $('setup-loom-existing').disabled = busy;
     $('setup-loom-connect').hidden = useExisting;
-    $('setup-loom-connect').textContent = connecting ? '正在连接…' : '连接并继续 →';
+    const checking = action === 'inspectOnboarding';
+    $('setup-loom-connect').textContent = checking ? '正在读取配置…' : connecting ? '正在连接…' : '连接并检查 →';
+    $('setup-loom-existing').textContent = checking ? '正在读取配置…' : '读取当前配置 →';
     $('setup-loom-current').hidden = !connected();
     $('setup-loom-being').textContent = state.connection?.beingName || 'Being';
     const connectionError = state.connection?.status === 'error' ? state.connection.error || '连接失败，请检查 Loom 链接后重试。' : '';
-    feedback('loom', errors.loom || connectionError || (connecting ? '正在打开 Loom，会话加载成功后进入下一步…' : ''), Boolean(errors.loom || connectionError));
+    feedback('loom', errors.loom || connectionError || (checking ? '正在读取 Being 身份、模型和 Channel 配置…' : connecting ? '正在打开 Loom，随后检查 Being 当前配置…' : ''), Boolean(errors.loom || connectionError));
+    renderInspection(checking);
     const running = ['running', 'external'].includes(portal.status);
     const existing = Boolean(portal.executable && portal.configPath);
     const hasConfiguration = Boolean(portal.executable || portal.configPath);
@@ -199,6 +257,16 @@ window.beingOnboarding = (() => {
     $('setup-portal-next').hidden = !running;
     $('setup-portal-skip').hidden = running;
     $('setup-channel-configure').disabled = busy || !connected();
+    const channels = inspection()?.channels?.items || [];
+    const hasChannel = channels.some(item => item.configured === true);
+    $('setup-title-channel').textContent = hasChannel ? '继续使用已有的 Channel' : '要配置 Channel 吗？';
+    $('setup-channel-description').textContent = hasChannel ? '已读取到 Being 的渠道配置。首次使用 Desktop 可以沿用，也可以进入渠道页面检查和管理。' : '把 Being 接到你常用的聊天工具里。未确认的状态可以在渠道页面继续检查。';
+    $('setup-channel-configure').textContent = hasChannel ? '管理 Channel →' : '配置 Channel →';
+    $('setup-channel-skip').textContent = hasChannel ? '沿用并继续' : '暂时跳过';
+    for (const channel of ['feishu', 'wechat']) {
+      const item = channels.find(item => item.channel === channel);
+      $(`setup-channel-status-${channel}`).textContent = channelStatuses[item?.status] || '暂未确认';
+    }
     $('setup-bonfire-open').disabled = busy || !connected();
     $('setup-bonfire-open').textContent = greetingSent ? '保存进度，完成引导' : '进入篝火，写下问候 →';
     const phases = { checking: '正在检查安装包…', download: '正在下载官方程序…', hash: '正在校验文件…', install: '正在安装程序…', starting: '正在连接 Being…' };
@@ -222,6 +290,10 @@ window.beingOnboarding = (() => {
     feedback('town', errors.town, Boolean(errors.town));
     feedback('bonfire', errors.bonfire || (!connected() ? '请先恢复 Loom 连接，再进入篝火发送问候。' : ''), Boolean(errors.bonfire));
     if (displayedStep !== current) {
+      dialog.querySelectorAll('[data-card]').forEach(card => {
+        card.hidden = card.dataset.card !== current;
+        card.inert = card.hidden;
+      });
       displayedStep = current;
       dialog.scrollTop = 0;
       (current === 'loom' && !connected() ? $('setup-loom-url') : $(`setup-title-${current}`)).focus({ preventScroll: true });
@@ -229,6 +301,7 @@ window.beingOnboarding = (() => {
   }
 
   function setState(next) {
+    const previousKey = connectionKey();
     if (state.townApp?.identity?.connectionRevision !== next.townApp?.identity?.connectionRevision || state.connection?.beingName !== next.connection?.beingName) {
       greetingSent = false;
       errors.bonfire = '';
@@ -236,9 +309,16 @@ window.beingOnboarding = (() => {
     }
     if (handoff && next.onboarding?.step !== handoff && !next.onboarding?.completed) handoff = '';
     state = next;
+    if (previousKey !== connectionKey()) {
+      inspectionRequest++;
+      inspectionAttempt = '';
+      errors.review = '';
+      if (action === 'inspectOnboarding') { action = ''; errors.loom = ''; }
+    }
     if (awaitingConnection && ['error', 'disconnected'].includes(state.connection?.status) && action !== 'connect') awaitingConnection = false;
     render();
     maybeContinue();
+    if (step() === 'review' && !dismissed && connected() && !inspection() && inspectionAttempt !== connectionKey() && !action) void inspectConnection();
   }
 
   async function run(name, operation) {
@@ -274,7 +354,48 @@ window.beingOnboarding = (() => {
   function maybeContinue() {
     if (!awaitingConnection || action || !connected() || step() !== 'loom') return;
     awaitingConnection = false;
-    void advance('portal');
+    void inspectConnection();
+  }
+
+  function renderInspection(checking) {
+    const result = inspection();
+    const identity = result?.identity;
+    const birth = identity?.createdAt ? new Date(identity.createdAt).toLocaleDateString('zh-CN') : '';
+    const lifecycle = identity?.lifecycle === 'recent' ? '24 小时内创建' : identity?.lifecycle === 'existing' ? '已有 Being' : birth ? '创建日期已提供，是否近期创建暂未确认' : '创建时间未提供，无法判断是否刚创建';
+    $('setup-review-identity').textContent = `${identity?.name || identity?.id || state.connection?.beingName || 'Being'}\n${birth ? `${birth} 创建 · ` : ''}${lifecycle}`;
+    const model = result?.model;
+    $('setup-review-model').textContent = model?.status === 'configured' ? `${model.name}${model.provider ? ` · ${model.provider}` : ''}` : model?.status === 'unconfigured' ? '尚未选择模型' : '暂未确认模型配置';
+    const channels = result?.channels?.items || [];
+    $('setup-review-channels').textContent = ['feishu', 'wechat'].map(channel => `${channelNames[channel]} · ${channelStatuses[channels.find(item => item.channel === channel)?.status] || '暂未确认'}`).join('\n') + (result?.channels?.status === 'unknown' ? `\n${result.channels.detail || '读取未完成，已有配置仍保留。'}` : '');
+    $('setup-review-portals').textContent = result?.portal?.status === 'ready' ? result.portal.items.map(item => item.name).filter(Boolean).join('、') || '未报告已配置的 Portal' : '服务暂未提供完整状态，可在 Being 中核对。';
+    const localPortal = state.portal || {};
+    $('setup-review-local-portal').textContent = localPortal.status === 'running' ? localPortal.connectionCurrent === false ? '本机 Portal 仍连接之前的 Being' : '本机 Portal 已启动' : localPortal.status === 'external' ? '本机已有外部管理的 Portal' : localPortal.status === 'error' ? '本机 Portal 状态异常，请在设置中检查' : localPortal.executable || localPortal.configPath ? '本机已保存配置，尚未启动' : '这台电脑尚未配置；不代表 Being 没有其他 Portal';
+    $('setup-title-review').textContent = identity?.lifecycle === 'existing' || model?.status === 'configured' || channels.some(item => item.configured === true) ? '欢迎把 Being 带到 Desktop' : '先看看 Being 的当前状态';
+    $('setup-review-status').textContent = checking ? '正在读取当前 Being 的配置…' : result?.status === 'ready' ? '已读取当前配置，继续时会保留已有设置。' : result ? '部分状态暂未确认；未知不代表未配置。可重试，或按已有配置继续。' : '还未读取配置，可重新读取后继续。';
+    $('setup-review-retry').textContent = checking ? '读取中…' : '重新读取';
+    feedback('review', errors.review, Boolean(errors.review));
+  }
+
+  async function inspectConnection() {
+    if (action || !connected()) return;
+    const key = connectionKey(), current = step(), request = ++inspectionRequest;
+    inspectionAttempt = key;
+    action = 'inspectOnboarding';
+    errors[current] = '';
+    render();
+    let completed = false;
+    try {
+      const result = await options.bridge.inspectOnboarding();
+      if (request !== inspectionRequest || key !== connectionKey()) return;
+      if (!result || !['ready', 'partial', 'error'].includes(result.status) || result.beingId !== state.connection?.beingName || result.connectionRevision !== state.townApp?.identity?.connectionRevision) throw new Error('配置状态无法对应当前 Being，请重新读取。');
+      options.onState({...state, onboardingInspection: result});
+      completed = true;
+    } catch (error) {
+      if (request === inspectionRequest && key === connectionKey()) errors[current] = message(error);
+    } finally {
+      if (request === inspectionRequest) { action = ''; render(); }
+    }
+    if (completed && key === connectionKey() && request === inspectionRequest && !dismissed && current === 'loom' && step() === 'loom') await advance('review');
   }
 
   async function connectLoom() {
@@ -351,6 +472,12 @@ window.beingOnboarding = (() => {
   }
 
   function dismiss(destination) {
+    awaitingConnection = false;
+    if (action === 'inspectOnboarding') {
+      inspectionRequest++;
+      action = '';
+      void options.bridge.cancelOnboardingInspection?.().catch(() => {});
+    }
     handoff = greetingSent ? 'bonfire' : typeof destination === 'string' ? destination : '';
     dismissed = true;
     $('setup-loom-url').value = '';

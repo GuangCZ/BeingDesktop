@@ -40,7 +40,8 @@ test('channel clicks send fixed background requests only to authenticated Loom',
   assert.equal(call.options.referrerPolicy, 'no-referrer');
   assert.deepEqual(Object.keys(call.body), ['message']);
   assert.match(call.body.message, /"channel":"wechat"/);
-  assert.match(call.body.message, /不要要求用户向 Heart 申请 IP Trust 授权/);
+  assert.match(call.body.message, /仅适用于本次请求/);
+  assert.doesNotMatch(call.body.message, /不要部署 Portal|不要要求用户向 Heart 申请 IP Trust/);
   assert.match(call.body.message, /专用安全配置入口/);
   assert.equal(result.status, 'pending');
   assert.equal(channel.state().channel, 'wechat');
