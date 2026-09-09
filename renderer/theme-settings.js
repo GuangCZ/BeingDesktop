@@ -30,6 +30,7 @@ window.beingThemeSettings = (() => {
     const variables = model.themeVariables(draft);
     for (const [key, value] of Object.entries(variables)) document.documentElement.style.setProperty(key, value);
     document.documentElement.style.colorScheme = variables['--color-scheme'] || 'dark';
+    document.documentElement.dataset.colorScheme = variables['--color-scheme'] || 'dark';
     applied = identity;
     window.dispatchEvent(new CustomEvent('being-theme-change', {detail: {...draft}}));
   }

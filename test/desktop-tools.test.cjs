@@ -36,7 +36,7 @@ function fixture(options={}) {
     async dispose() { this.disposed = true; }
   }
   class ToolLink {
-    constructor({ onChange, invokeTool }) { this.onChange = onChange; this.invokeTool = invokeTool; this.status = 'disconnected'; this.controllers = []; }
+    constructor({ onChange, invokeTool, portalName, toolAllowed }) { this.portalName=portalName; this.toolAllowed=toolAllowed; this.onChange = onChange; this.invokeTool = invokeTool; this.status = 'disconnected'; this.controllers = []; }
     snapshot() { return { status: this.status }; }
     async connect() { this.status = 'connected'; this.onChange(); }
     disconnect() { this.status = 'disconnected'; for (const controller of this.controllers) controller.abort(); this.controllers = []; this.onChange(); }
@@ -285,4 +285,21 @@ test('an empty output range cannot expand to commands started while approval wai
   await later.promise;
   await tools.perform('request.allow', statusId);
   assert.deepEqual(body(await status.promise).jobs, []);
+});
+
+
+test('stable Desktop tool targets and advertised modes remain independent',async t=>{
+  const {randomUUID}=require('node:crypto');
+  const id=randomUUID(),otherId=randomUUID(),mode={enabled:true};
+  const direct=fixture({desktopId:id}),orchestrator=fixture({desktopId:otherId,orchestration:{mode}});
+  t.after(()=>direct.tools.dispose());t.after(()=>orchestrator.tools.dispose());
+  assert.equal(direct.tools.link.portalName,'being-desktop-tools-'+id);
+  assert.equal(orchestrator.tools.link.portalName,'being-desktop-tools-'+otherId);
+  assert.equal(direct.tools.link.toolAllowed('desktop_worker_start'),false);
+  assert.equal(direct.tools.link.toolAllowed('desktop_browser_open'),true);
+  assert.equal(orchestrator.tools.link.toolAllowed('desktop_worker_start'),true);
+  assert.equal(orchestrator.tools.link.toolAllowed('desktop_browser_open'),false);
+  mode.enabled=false;
+  assert.equal(orchestrator.tools.link.toolAllowed('desktop_worker_start'),false);
+  assert.equal(direct.tools.link.toolAllowed('desktop_browser_open'),true);
 });

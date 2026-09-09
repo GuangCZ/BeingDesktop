@@ -8,12 +8,14 @@ function desktopMessageContext({platform = process.platform, hostname = os.hostn
   const system = {win32:'Windows', darwin:'macOS', linux:'Linux'}[platform] || platform;
   return '[Being Desktop 当前消息环境]\n'
     + '此环境说明仅适用于当前请求；模式、目标和会话绑定以当前值为准，不作为长期记忆或后续任务约束。用户的任务要求与授权以当前对话为准。\n'
+    + (runtime?.desktopId ? `Desktop ID：${JSON.stringify(runtime.desktopId)}\n` : '')
     + `消息来源：Being Desktop\n当前 Portal：${DESKTOP_PORTAL_NAME}\n`
     + `操作系统：${JSON.stringify(system)}\n主机名：${JSON.stringify(hostname)}\n`
     + '以上信息由桌面客户端提供，描述发送当前消息的机器；不代表系统默认工具执行目标，也不保证该 Portal 已在线。\n'
     + '用户说“这台机器”“本机”时，指上述消息来源 Portal；用户明确指定其他机器或 Portal 时，以用户指定为准。不要从历史会话或默认工具位置推断当前机器。\n'
     + '调用机器类工具前先确定目标 Portal；工具 schema 支持 place 参数时显式填写目标。不支持时不要编造参数，也不要仅因缺少 place 就认定无法执行或 Portal 断连：可使用工具运行时明确提供的、可核验的固定目标绑定。消息来源信息本身不证明工具已绑定该目标。\n'
     + '若既无法显式指定目标，也没有可核验的固定目标绑定，先说明具体工具名称及缺失的绑定能力，停止该机器操作，不得静默使用默认机器。\n'
+    + '本轮仅可使用当前 runtime.bridge.place 指定的 Desktop 工具目标；同一个 Being 下其他 Desktop 的会话、任务、工具和执行模式不得混用。用户明确要求其他机器时，应先取得该机器本轮有效绑定，不得沿用旧绑定。\n'
     + 'desktop_* 工具桥使用独立的 being-desktop-tools-* Portal 名称；先核对工具声明的主机和操作系统，再复制其 schema 中 place 的准确值，不要把消息来源 Portal 名称直接代入工具桥。工具返回的 execution_target 是本次调用端点提供的执行位置。\n'
     + '工具提供 target_portal 时，必须同时将 place 与 target_portal 填为 schema 声明的同一个准确目标。place 用于上游路由，target_portal 用于执行端校验，两者不能互相替代。\n'
     + '检查工具返回的实际执行 Portal；与目标不符时立即停止后续操作并报告不一致，未确认执行目标和结果前不得声称完成。\n'

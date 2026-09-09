@@ -7,7 +7,7 @@ const {installSessions,prepareLoomSessions,changeLoomSession} = require('../src/
 const {desktopMessageContext} = require('../src/desktop-message-context.cjs');
 const {createSessionRouter} = require('../src/loom-session-routing.cjs');
 
-function fixture(storage = new Map()) {
+function fixture(storage = new Map(), desktopId) {
   const calls = [];
   let reply = {messages:[]};
   const context = vm.createContext({
@@ -18,7 +18,7 @@ function fixture(storage = new Map()) {
     fetch:async(url,options)=>{calls.push({url:String(url),options});return reply instanceof Response ? reply : Response.json(reply);}
   });
   vm.runInContext('window=globalThis;window.top=window;', context);
-  vm.runInContext(`(${installSessions.toString()})(null,${createSessionRouter.toString()},${JSON.stringify(desktopMessageContext({platform:'win32',hostname:'CZ'}))})`, context);
+  vm.runInContext(`(${installSessions.toString()})(null,${createSessionRouter.toString()},${JSON.stringify(desktopMessageContext({platform:'win32',hostname:'CZ'}))},${JSON.stringify({enabled:false,desktopId})})`, context);
   return {context, storage, calls, api:context.__beingDesktopSessions, respond:value=>{reply=value;}};
 }
 
@@ -373,4 +373,62 @@ test('automatic title input is sent once in orchestration and preserves the raw 
   f.context.__beingDesktopOrchestration={enabled:true,sessionId:f.api.list().activeId,sessionToken:webcrypto.randomUUID()};
   await send('整理登录流程');assert.equal(inputs.at(-1),'整理登录流程');
   await send('补充说明');assert.equal(inputs.at(-1),'');
+});
+
+test('two Desktop profiles sharing a Being never import each other conversations or diagnostic text',async()=>{
+  const a=fixture(),b=fixture();
+  const aid=a.api.list().activeId,bid=b.api.list().activeId;
+  assert.notEqual(aid,bid);
+  const body=(id,text)=>`会话id：${id}\n请求id：${webcrypto.randomUUID()}\n${text}`;
+  const foreign=body(bid,'OTHER_DESKTOP_PRIVATE_REPLY');
+  a.respond({messages:[{role:'being',content:foreign},{role:'being',content:body(aid,'LOCAL_REPLY')}]});
+  const history=await (await a.context.fetch('/api/history')).json();
+  assert.ok(history.messages.some(m=>m.content==='LOCAL_REPLY'));
+  assert.doesNotMatch(JSON.stringify([...a.storage]),/OTHER_DESKTOP_PRIVATE_REPLY/);
+  const foreignStream=new Response(`event: text\ndata: ${JSON.stringify({text:foreign})}\n\nevent: message_stop\ndata: {}\n\n`,{headers:{'content-type':'text/event-stream'}});
+  a.respond(foreignStream);
+  await (await a.context.fetch('/api/chat/stream',{method:'POST',body:JSON.stringify({message:'local question'})})).text();
+  assert.doesNotMatch(JSON.stringify([...a.storage]),/OTHER_DESKTOP_PRIVATE_REPLY/);
+  assert.equal(b.api.list().items.length,1);assert.equal(b.api.list().activeId,bid);
+});
+
+test('Desktop IDs namespace sessions on the same Being and old local history migrates to only one ID',async()=>{
+  const legacy=fixture(),oldId=legacy.api.list().activeId;
+  const aId=webcrypto.randomUUID(),bId=webcrypto.randomUUID();
+  const a=fixture(legacy.storage,aId),b=fixture(legacy.storage,bId);
+  assert.equal(a.api.list().activeId,oldId);
+  assert.notEqual(b.api.list().activeId,oldId);
+  assert.equal(fixture(legacy.storage,aId).api.list().activeId,oldId);
+  await a.context.fetch('/api/chat/stream',{method:'POST',body:JSON.stringify({message:'local task'})});
+  const sent=JSON.parse(a.calls.at(-1).options.body).message;
+  assert.ok(sent.includes(`Desktop ID：${aId}`));assert.ok(!sent.includes(bId));
+  const foreign=`会话id：${oldId}\n请求id：${webcrypto.randomUUID()}\nDesktop ID：${bId}\nWrong desktop result`;
+  a.respond({messages:[{role:'being',content:foreign}]});
+  const history=await (await a.context.fetch('/api/history')).json();
+  assert.ok(!history.messages.some(m=>m.content.includes('Wrong desktop result')));
+});
+
+test('split Desktop ID headers never leak into previews or final replies',async()=>{
+  const desktopId=webcrypto.randomUUID(),sessionId=webcrypto.randomUUID(),requestId=webcrypto.randomUUID();
+  const received=[],storage=new Map();
+  const context=vm.createContext({crypto:webcrypto,TextEncoder,Uint8Array,received,
+    localStorage:{get length(){return storage.size;},key:i=>[...storage.keys()][i],getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)}});
+  vm.runInContext('window={addEventListener(){}}',context);
+  const router=vm.runInContext(`(${createSessionRouter.toString()})({key:'test',desktopId:'${desktopId}',ownId:'${sessionId}',sessions:()=>[{id:'${sessionId}'}],receive:item=>received.push(item)})`,context);
+  const first=`会话id：${sessionId}\n请求id：${requestId}\n`,line=`Desktop ID：${desktopId}\n`;
+  for(let i=1;i<=line.length;i++)router.preview(first+line.slice(0,i),'split-'+i);
+  assert.equal(received.length,0);
+  router.preview(first+line+'Reply','complete');assert.equal(received[0].content,'Reply');
+  const foreign=`Desktop ID：${webcrypto.randomUUID()}\n`;
+  router.preview(first+foreign+'Foreign','foreign');assert.equal(received.length,1);
+  assert.equal(await router.route(first+foreign+'Foreign',{report:true}),false);
+  assert.equal(await router.route(first+line.slice(0,-1),{report:true}),false);
+  assert.equal(storage.size,0);
+});
+
+test('a foreign Desktop reply cannot claim a local active stream using its session ID',async()=>{
+  const id=webcrypto.randomUUID(),f=fixture(new Map(),id),session=f.api.list().activeId;
+  f.respond({stream_id:'foreign-stream',finished:false,next_seq:2,events:[{seq:1,event:'content_block_delta',data:{delta:{text:`会话id：${session}\n请求id：${webcrypto.randomUUID()}\nDesktop ID：${webcrypto.randomUUID()}\nForeign content`}}}]});
+  assert.equal((await f.context.fetch('/api/stream/active')).status,204);
+  assert.ok([...f.storage.values()].every(value=>!value.includes('Foreign content')));
 });

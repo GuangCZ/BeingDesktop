@@ -3,11 +3,12 @@ const {randomUUID} = require('node:crypto');
 const {DesktopBrowser} = require('./desktop-browser.cjs');
 const {DesktopConsole} = require('./desktop-console.cjs');
 const {DesktopToolLink} = require('./desktop-tool-link.cjs');
+const {desktopPortalName} = require('./desktop-identity.cjs');
 const {DesktopTerminalTools} = require('./desktop-terminal-tools.cjs');
 
 const textResult = value => ({content:[{type:'text',text:JSON.stringify(value)}],isError:false});
 class DesktopTools {
-  constructor({WebContentsView,session,getWindow,getConnection,getWorkspace,onChange,orchestration,getTerminal=()=>null,showTerminal=()=>{},Browser=DesktopBrowser,Console=DesktopConsole,ToolLink=DesktopToolLink}) {
+  constructor({desktopId,WebContentsView,session,getWindow,getConnection,getWorkspace,onChange,orchestration,getTerminal=()=>null,showTerminal=()=>{},Browser=DesktopBrowser,Console=DesktopConsole,ToolLink=DesktopToolLink}) {
     this.onChange=onChange;this.getConnection=getConnection;this.getWorkspace=getWorkspace;
     this.orchestration=orchestration;
     this.getTerminal=getTerminal;
@@ -15,7 +16,7 @@ class DesktopTools {
     this.requests=new Map();this.remoteJobs=new Set();this.jobOrigins=new Map();this.generation=0;this.disposed=false;this.notifyQueued=false;this.requestResult=null;
     this.browser=new Browser({WebContentsView,session,getWindow,onChange:()=>this.changed()});
     this.console=new Console({getWorkspace,onChange:()=>this.changed()});
-    this.link=new ToolLink({onChange:()=>this.changed(),toolAllowed:name=>orchestration?.mode.enabled?name.startsWith('desktop_worker_'):!name.startsWith('desktop_worker_') && (!name.startsWith('desktop_terminal_') || Boolean(getTerminal()) && ['win32','darwin'].includes(process.platform)),invokeTool:(name,args,context)=>this.request(name,args,context)});
+    this.link=new ToolLink({...(desktopId?{portalName:desktopPortalName(desktopId)}:{}),onChange:()=>this.changed(),toolAllowed:name=>orchestration?.mode.enabled?name.startsWith('desktop_worker_'):!name.startsWith('desktop_worker_') && (!name.startsWith('desktop_terminal_') || Boolean(getTerminal()) && ['win32','darwin'].includes(process.platform)),invokeTool:(name,args,context)=>this.request(name,args,context)});
   }
   snapshot() {
     const consoleState=this.console.snapshot(),jobIds=new Set(consoleState.jobs.map(job=>job.id));

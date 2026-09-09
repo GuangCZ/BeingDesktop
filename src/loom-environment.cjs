@@ -6,7 +6,7 @@ function installEnvironmentReader() {
   globalThis.__beingDesktopReceiveEnvironment=({id,value,error})=>{
     const request=pending.get(id);if(!request)return;
     pending.delete(id);clearTimeout(request.timer);
-    if(error)request.reject(new Error(error==='ORCHESTRATION_NOT_ENFORCED'?'严格编排检查未通过，消息未发送。请在设置中确认编排入口与 Worker 连接；不会改为 Being 自行执行。':'桌面环境尚未就绪，请稍后重新发送。'));
+    if(error)request.reject(new Error(error==='ORCHESTRATION_NOT_ENFORCED'?'本机编排检查未通过，消息未发送。请在设置中确认当前 Desktop 与 Worker 连接；不会改为 Being 自行执行。':'桌面环境尚未就绪，请稍后重新发送。'));
     else request.resolve(value);
   };
   globalThis.__beingDesktopEnvironment=(sessionId,titleInput='')=>new Promise((resolve,reject)=>{

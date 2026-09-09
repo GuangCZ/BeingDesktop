@@ -4,7 +4,7 @@
 
 [使用文档](https://GuangCZ.github.io/BeingDesktop/) · [下载](https://github.com/GuangCZ/BeingDesktop/releases) · [English](README.md)
 
-当前源码：**0.8.22-mac.5 · Windows x64 / macOS arm64、x64**。下载附件以 GitHub Releases 为准。需要已有的 Being 与 Loom 连接；身份和记忆仍由原运行时管理。
+当前源码：**0.8.22-mac.7 · Windows x64 / macOS arm64、x64**。下载附件以 GitHub Releases 为准。需要已有的 Being 与 Loom 连接；身份和记忆仍由原运行时管理。
 
 ## 当前功能
 
@@ -18,9 +18,11 @@
 
 ## 编排模式
 
-先选择本机工作区、安装并登录受支持的 Codex CLI、Cursor CLI 或 Grok Build CLI，再进入 **设置 → 编排模式**，开启“让 Being 专职编排”。Desktop 自动检测 Agent、核验严格模型入口并保存。校验失败会恢复开关；关闭时相关设置灰显。没有可用 Worker 时不会退回 Being 自行执行代码。
+先选择本机工作区、安装并登录受支持的 Codex CLI、Cursor CLI 或 Grok Build CLI，再进入 **设置 → 编排模式**。Desktop 检测本机 Agent 并连接本机 Worker 工具桥。没有可用 Worker 时不会退回本机直接执行。
 
-严格模式需要独立部署的配套模型网关，并使用 OpenAI Responses；网关不随本仓库的 Electron 包提供。开启时会修改所连接 Being 的模型地址，可能影响它在其他入口的会话，但不会撤销远端独立后台任务。
+每个 Desktop 配置目录有持久 ID，会话、任务与结果路由归属发起它们的 Desktop。同一个 Being 可以连接直接模式的 Mac 和编排模式的 Windows；Worker 使用所在 Desktop 的本机认证、模型地址、代理和工作区。切换模式不修改 Being 的共享模型地址。Being 身份、记忆与服务端运行时仍然共享，Desktop ID 不代表服务端上下文或安全隔离。
+
+旧版若已设置 `/orchestrator/v1` 并继续拦截直接执行，请在模型设置中确认正常模型地址一次；新版不会擅自改写这项共享配置。
 
 Worker 显示在原会话下，可以查看工具调用、日志和执行状态。完成后 Desktop 保存结果并通知 Being；“执行完成”“通知送达”“验收通过”分别记录。Being 的最终摘要、折叠验收依据和“打开预览”按钮呈现在原会话，预览使用 Desktop 内置浏览器。本轮也修复了历史同步重复追加同一 Worker 结果的问题。
 

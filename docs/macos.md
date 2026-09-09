@@ -1,6 +1,6 @@
 # macOS integration
 
-This local build is version `0.8.22-mac.5`. Build with Node.js 24 and run:
+This local build is version `0.8.22-mac.7`. Build with Node.js 24 and run:
 
 ```sh
 npm ci
@@ -125,3 +125,12 @@ and installation contracts have automated coverage; Intel runtime execution
 still requires an Intel Mac. Desktop packaging does not install login-time
 services or grant macOS privacy permissions. Existing Portal accounts and
 permissions remain managed by their existing owner.
+
+## Automatic onboarding
+
+After Loom successfully loads, Desktop persists `onboardingLoomConnected: true`
+in its settings. Automatic onboarding then stays closed on future launches,
+including temporary connection failures. Saved links being restored do not flash
+the guide while connecting. A never-verified link that fails still leaves the
+guide available. Optional setup progress is preserved, and Settings can explicitly
+reopen the guide. No Portal installation or greeting is required to stop prompts.

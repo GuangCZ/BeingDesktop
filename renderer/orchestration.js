@@ -43,7 +43,7 @@ window.beingOrchestration=(()=>{
       $('orchestration-enabled').checked=value.mode.enabled;
       $('orchestration-default').value=value.mode.defaultAgent;
       for(const [id,input] of paths)input.value=value.mode.paths?.[id]||'';
-      if(!busy)say(value.mode.enabled?'严格编排模式已开启，Being 只能调度 Worker。':'编排模式已关闭。开启时会检测 Agent 与严格编排入口。');
+      if(!busy)say(value.mode.enabled?'本机编排模式已开启，Being 通过本机工具桥调度 Worker。':'本机为直接模式。开启编排时会检测本机 Agent 与工具绑定。');
     }
     if(paths.size){renderAgents();controls();}
     if(value.enforcement?.detail && $('orchestration-policy-status'))$('orchestration-policy-status').textContent=value.enforcement.detail;
@@ -130,8 +130,8 @@ window.beingOrchestration=(()=>{
     $('orchestration-default').addEventListener('change',()=>{dirty=true;controls();say('默认 Agent 尚未保存。');});
     async function saveMode(toggle=false) {
       await perform(async()=>{
-        say('正在检测 Agent 并确认严格编排入口…');
-        try{const result=await bridge.saveOrchestration(draft());dirty=false;setState(result);say(result.mode.enabled?'严格编排模式已开启，Being 只能调度 Worker。':'编排模式已关闭。');}
+        say('正在检测本机 Agent 并确认 Desktop 工具绑定…');
+        try{const result=await bridge.saveOrchestration(draft());dirty=false;setState(result);say(result.mode.enabled?'本机编排模式已开启，Being 通过本机工具桥调度 Worker。':'编排模式已关闭。');}
         catch(error){if(toggle)$('orchestration-enabled').checked=snapshot.mode.enabled;controls();throw error;}
       });
     }

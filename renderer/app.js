@@ -163,6 +163,7 @@ function acceptState(next) {
 }
 
 function render() {
+  if (state.machine.platform) document.documentElement.dataset.platform = state.machine.platform;
   window.beingPortalUpdates?.setState(state.portalUpdate);
   window.beingPortalPermissions?.setState(state);
   window.beingThemeSettings?.setState(state);
@@ -681,12 +682,22 @@ function navigateHistory(direction) {
 }
 
 function renderWindowState(value) {
+  const root = document.documentElement;
+  if (value?.platform) root.dataset.platform = value.platform;
+  if (root.dataset.platform === 'darwin') {
+    for (const target of document.querySelectorAll('[title*="Ctrl+"]')) target.title = target.title.replaceAll('Ctrl+', '⌘');
+  }
+  root.dataset.windowFocused = String(value?.focused !== false);
+  root.dataset.fullscreen = String(value?.fullscreen === true);
+  root.dataset.reducedTransparency = String(value?.reducedTransparency === true);
+  root.dataset.highContrast = String(value?.highContrast === true);
   const maximized = value?.maximized === true;
   const button = $('window-maximize');
   if (!button) return;
   button.setAttribute('aria-label', maximized ? '还原窗口' : '最大化');
   button.title = maximized ? '还原窗口' : '最大化';
   button.querySelector('use')?.setAttribute('href', maximized ? '#i-restore' : '#i-maximize');
+  scheduleView();
 }
 
 const appMenuButtons = [...document.querySelectorAll('[data-app-menu]')];

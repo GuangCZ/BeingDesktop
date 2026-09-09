@@ -68,7 +68,8 @@ test('worker dispatch is session bound, deduplicated, and serializes the shared 
   assert.equal((await manager.run(args)).id,worker.id);assert.equal(children.length,1);
   await assert.rejects(manager.tool('desktop_worker_status',{...manager.context(otherId),workerId:worker.id}),/其他会话/);
   await assert.rejects(manager.run({...args,requestId:randomUUID()}),/工作区已有/);
-  assert.equal(children[0].input,args.prompt);
+  assert.ok(children[0].input.endsWith('\n\n'+args.prompt));
+  assert.equal(JSON.parse(children[0].input.split('\n')[1]).workspace,children[0].cwd);
   assert.ok(children[0].args.includes('--skip-git-repo-check'));
   assert.equal(children[0].args[children[0].args.indexOf('--sandbox')+1],'workspace-write');
   assert.ok(!children[0].args.some(arg=>arg.includes('dangerously')));
@@ -172,4 +173,40 @@ test('failed CLI naming keeps the default title and disabled mode never launches
   await manager.configure({enabled:false},async()=>{});
   assert.equal(await manager.generateTitle(sessionId,'task'),'');
   assert.equal(children.length,1);
+});
+
+test('separate Desktops reject each other capabilities and keep tasks and execution targets local',async t=>{
+  const a=await fixture(t),b=await fixture(t);
+  const aId=randomUUID(),bId=randomUUID();
+  a.manager.getExecutionContext=()=>({desktopId:aId,place:'desktop-a',apiKey:'must-not-enter-prompt'});
+  b.manager.getExecutionContext=()=>({desktopId:bId,place:'desktop-b',apiKey:'must-not-enter-prompt'});
+  // Even identical conversation IDs do not make per-Desktop capabilities interchangeable.
+  b.manager.getSessionIds=()=>[a.sessionId];
+  const bArgs={...b.manager.context(a.sessionId),requestId:randomUUID(),title:'B',prompt:'Task B'};
+  await assert.rejects(b.manager.run(a.args),/有效会话/);
+  await assert.rejects(a.manager.run(bArgs),/有效会话/);
+  const wa=await a.manager.run(a.args),wb=await b.manager.run(bArgs);
+  assert.equal(a.children.length,1);assert.equal(b.children.length,1);
+  assert.notEqual(wa.execution.desktopInstanceId,wb.execution.desktopInstanceId);
+  assert.equal(wa.execution.workspace,await fs.realpath(a.directory));assert.equal(wb.execution.workspace,await fs.realpath(b.directory));
+  assert.equal(wa.execution.place,'desktop-a');assert.equal(wb.execution.place,'desktop-b');
+  assert.equal(wa.execution.desktopId,aId);assert.equal(wb.execution.desktopId,bId);
+  assert.doesNotMatch(a.children[0].input,/must-not-enter-prompt/);
+  assert.throws(()=>a.manager.get(wb.id),/不存在/);
+  await a.manager.stop(wa.id);assert.equal(b.manager.get(wb.id).status,'running');
+  await a.manager.configure({enabled:false},async()=>{});assert.equal(b.manager.mode.enabled,true);
+});
+
+
+test('copied foreign Desktop worker history cannot be read or resume callbacks',async t=>{
+  const a=await fixture(t),b=await fixture(t);
+  const id=randomUUID();a.manager.getExecutionContext=()=>({desktopId:id});
+  const worker=await a.manager.run(a.args);await a.manager.stop(worker.id);await a.manager.flush();
+  await b.manager.selectOwner('other');
+  b.manager.getExecutionContext=()=>({desktopId:randomUUID()});
+  await fs.mkdir(b.directory,{recursive:true});
+  await fs.copyFile(a.manager.historyPath(),require('node:path').join(b.manager.directory,require('node:path').basename(a.manager.historyPath())));
+  await b.manager.selectOwner('owner-one');
+  assert.equal(b.manager.workers.length,0);assert.throws(()=>b.manager.get(worker.id),/不存在/);
+  await assert.rejects(b.manager.callbacks.receive(randomUUID()),/有效任务/);
 });

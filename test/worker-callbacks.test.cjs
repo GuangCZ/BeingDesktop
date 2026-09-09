@@ -12,8 +12,8 @@ const {validArguments}=require('../src/desktop-tool-link.cjs');
 
 async function fixture(t,{send=async()=>({accepted:true,status:202,inboxId:'42',detail:'accepted'}),report=async()=>{}}={}) {
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'being-callbacks-'));
-  const sessionId=randomUUID(),otherId=randomUUID(),children=[];let available=false,now=1000;
-  const manager=new Orchestration({directory,getWorkspace:()=>directory,getSessionIds:()=>[sessionId,otherId],
+  const sessionId=randomUUID(),otherId=randomUUID(),desktopId=randomUUID(),children=[];let available=false,now=1000;
+  const manager=new Orchestration({directory,getWorkspace:()=>directory,getSessionIds:()=>[sessionId,otherId],getExecutionContext:()=>({desktopId,place:'being-desktop-tools-'+desktopId}),
     detect:async()=>[{id:'codex',path:'fixture',status:'ready'}],callbacks:{send,ready:()=>available,report,now:()=>now},
     launch:options=>{let finish;const child={...options,done:new Promise(resolve=>{finish=resolve;}),finish,stop:async()=>finish({code:null,stopped:true})};children.push(child);return child;}});
   await manager.selectOwner('owner');await manager.configure({enabled:true},async()=>{});
@@ -35,6 +35,8 @@ test('terminal result and stable notification are on disk before native delivery
   assert.equal(sent.length,0);f.enable();await f.manager.callbacks.pump();
   assert.equal(sent.length,1);assert.equal(sent[0].task_id,worker.id);
   assert.equal(sent[0].result.desktop_session_id,f.sessionId);
+  assert.equal(sent[0].result.desktop_id,worker.execution.desktopId);
+  assert.equal(sent[0].result.target_portal,'being-desktop-tools-'+worker.execution.desktopId);
   assert.doesNotMatch(JSON.stringify(sent[0]),/sessionToken|taskPrompt|EXPECTED/);
   assert.equal(f.manager.get(worker.id).completion.state,'accepted');
   await f.manager.callbacks.pump();assert.equal(sent.length,1);

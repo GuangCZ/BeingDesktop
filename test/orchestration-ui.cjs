@@ -38,7 +38,7 @@ if(!process.versions.electron) {
     handle('renameChatSession',(id,title)=>{state.chatSessions.items.find(item=>item.id===id).title=title;win.webContents.send('being:state',state);return true;});
     handle('getOrchestration',()=>mode);handle('inspectAgents',()=>mode.agents);handle('getWorker',id=>{assert.equal(id,workerId);return worker;});
     handle('getModelConfig',()=>({config:{model:'fixture',provider:'openai',baseUrl:'https://fixture.invalid',hasApiKey:false},models:[],providers:[],connectionId:1}));
-    handle('saveOrchestration',value=>{if(rejectModeSave)throw new Error('严格编排入口不可用');mode={...mode,mode:value};return mode;});
+    handle('saveOrchestration',value=>{if(rejectModeSave)throw new Error('本机 Worker 工具不可用');mode={...mode,mode:value};return mode;});
     handle('cancelWorker',id=>{assert.equal(id,workerId);worker.status='cancelled';worker.detail='Worker 已停止';win.webContents.send('being:workers',mode);return worker;});handle('reconnectWorkers',()=>({status:'connected'}));
     win=new BrowserWindow({show:false,width:1440,height:960,webPreferences:{preload:path.join(root,'src/preload.cjs'),sandbox:true,contextIsolation:true,nodeIntegration:false,offscreen:true}});
     win.webContents.session.webRequest.onBeforeRequest((details,callback)=>callback({cancel:/^https?:/.test(details.url)}));

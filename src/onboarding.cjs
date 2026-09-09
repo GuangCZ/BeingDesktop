@@ -51,4 +51,18 @@ async function completeOnboardingAfterBonfire(receipt, {settings, configured, pe
   }
 }
 
-module.exports = {restoreOnboarding, validateOnboardingStep, saveOnboardingStep, completeOnboardingAfterBonfire};
+// Separate automatic display from optional setup progress. A successful Loom
+// load is enough to stop prompting, even if Portal/Channel steps are unfinished.
+async function rememberLoomConnection({settings, persist}) {
+  if (settings.onboardingLoomConnected === true) return;
+  const previous = settings.onboardingLoomConnected;
+  settings.onboardingLoomConnected = true;
+  try { await persist(); }
+  catch {
+    if (previous === undefined) delete settings.onboardingLoomConnected;
+    else settings.onboardingLoomConnected = previous;
+    throw new Error('Loom 已连接，但自动引导状态未能保存。');
+  }
+}
+
+module.exports = {rememberLoomConnection,restoreOnboarding, validateOnboardingStep, saveOnboardingStep, completeOnboardingAfterBonfire};

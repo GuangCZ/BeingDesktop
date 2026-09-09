@@ -123,6 +123,7 @@ if (!process.versions.electron) {
   }
 
   async function restartOnboarding() {
+    if (!await execute("document.body.dataset.page==='settings'")) await click('.nav-button[data-page="settings"]');
     await click('[data-settings-section="about"]');
     await click('#setup-restart');
   }
@@ -328,6 +329,11 @@ if (!process.versions.electron) {
     check('native-loom-hidden-while-connecting', latestView()?.visible === false);
     fixtureState.connection.status = 'connected';
     await publish();
+    await domWait("!document.getElementById('setup-wizard').open", 'connected Loom suppresses automatic guide');
+    check('successful-loom-closes-auto-guide-without-inspection', calls('inspectOnboarding').length === 0);
+    fixtureState.onboardingAutoSuppressed = true;
+    await restartOnboarding();
+    await click('#setup-loom-existing');
     await waitFor(() => inspections.length === 1, 'configuration inspection IPC');
     check('configuration-loading-keeps-loom-card', await execute(stepVisible('loom')) && calls('setOnboardingStep').length === 0);
     check('configuration-loading-has-progress-feedback', await execute("document.getElementById('setup-wizard').getAttribute('aria-busy')==='true'&&Boolean(document.getElementById('setup-feedback-loom').textContent.trim())"));
@@ -493,6 +499,7 @@ if (!process.versions.electron) {
 
     fixtureState.onboarding = {step: 'bonfire', completed: false};
     await load();
+    await restartOnboarding();
     await waitStep('bonfire');
     await click('#setup-bonfire-open');
     const retryGreeting = '大家好，期待在 Town 与大家交流！';
@@ -531,24 +538,31 @@ if (!process.versions.electron) {
     await publish();
     check('background-state-does-not-reopen-dismissed-wizard', !await execute("document.getElementById('setup-wizard').open"));
     await load();
+    check('connected-pending-guide-stays-closed-after-reload', !await execute("document.getElementById('setup-wizard').open"));
+    await restartOnboarding();
     await waitStep('channel');
-    check('pending-onboarding-resumes-on-next-launch', fixtureState.onboarding.step === 'channel' && latestView()?.visible === false);
+    check('pending-onboarding-resumes-manually', fixtureState.onboarding.step === 'channel' && latestView()?.visible === false);
     await click('#setup-channel-skip');
     await waitStep('grove');
-    check('channel-skip-continues-to-grove-without-opening-channel', !fixtureState.onboarding.completed && fixtureState.onboarding.step === 'grove' && await execute("document.body.dataset.page==='chat'"));
+    check('channel-skip-continues-to-grove-without-opening-channel', !fixtureState.onboarding.completed && fixtureState.onboarding.step === 'grove' && await execute("document.body.dataset.page==='settings'"));
     for (const pendingStep of ['grove', 'town', 'bonfire']) {
       fixtureState.onboarding = {step: pendingStep, completed: false};
       await load();
+      check(`${pendingStep}-does-not-auto-open-after-reload`, !await execute("document.getElementById('setup-wizard').open"));
+      await restartOnboarding();
       await waitStep(pendingStep);
       check(`${pendingStep}-resumes-after-reload`, fixtureState.onboarding.step === pendingStep && latestView()?.visible === false);
       await click('#setup-close');
       await publish();
       check(`${pendingStep}-dismiss-retains-step-without-reopening`, fixtureState.onboarding.step === pendingStep && !fixtureState.onboarding.completed && !await execute("document.getElementById('setup-wizard').open"));
       await load();
+      check(`${pendingStep}-does-not-auto-open-after-reload`, !await execute("document.getElementById('setup-wizard').open"));
+      await restartOnboarding();
       await waitStep(pendingStep);
     }
     fixtureState.onboarding = {step: 'grove', completed: false};
     await load();
+    await restartOnboarding();
     await waitStep('grove');
     await click('#setup-grove-open');
     await domWait("!document.getElementById('setup-wizard').open&&!document.getElementById('setup-resume').hidden", 'Grove handoff before disconnect');
@@ -575,6 +589,7 @@ if (!process.versions.electron) {
       fixtureState.townApp.portalInstall = {status: 'idle', phase: '', detail: ''};
       fixtureState.onboarding = {step: 'portal', completed: false};
       await load();
+      await restartOnboarding();
       await waitStep('portal');
     };
     const originalDeployments = calls('deployPortal').length;
@@ -629,6 +644,7 @@ if (!process.versions.electron) {
       fixtureState.onboardingInspection = null;
       fixtureState.onboarding = {step, completed: false};
       await load();
+      await restartOnboarding();
       await waitStep(step);
     };
 
@@ -748,6 +764,23 @@ if (!process.versions.electron) {
     check('only-explicit-greeting-clicks-invoke-simulated-send', calls('sendBonfireMessage').length === 4);
     check('fixture-window-never-shown', BrowserWindow.getAllWindows().every(item => !item.isVisible()));
     check('no-network-attempts', report.blockedRequests.length === 0, report.blockedRequests);
+    fixtureState.onboarding = {step: 'portal', completed: false};
+    fixtureState.onboardingAutoSuppressed = true;
+    for (const status of ['connecting', 'error', 'disconnected']) {
+      fixtureState.connection.status = status;
+      await load();
+      check(`verified-loom-stays-suppressed-on-reload-${status}`, !await execute("document.getElementById('setup-wizard').open"));
+    }
+    fixtureState.onboardingAutoSuppressed = false;
+    fixtureState.connection.status = 'connecting';
+    await load();
+    check('saved-link-waits-for-validation-without-guide-flash', !await execute("document.getElementById('setup-wizard').open"));
+    fixtureState.connection.status = 'error';
+    await publish();
+    check('never-verified-link-failure-keeps-guide-available', await execute("document.getElementById('setup-wizard').open"));
+    fixtureState.connection.status = 'connected';
+    await publish();
+    check('recovered-link-closes-automatic-guide', !await execute("document.getElementById('setup-wizard').open"));
     check('no-renderer-errors', report.errors.length === 0, report.errors);
     check('report-does-not-contain-fixture-credential', !JSON.stringify(report).includes('offline-fixture-only'));
     report.passed = true;

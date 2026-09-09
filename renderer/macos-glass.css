@@ -1,0 +1,245 @@
+/* macOS: one glass navigation layer above quiet, opaque content.
+   Keep these overrides scoped so other desktop platforms retain their chrome. */
+:root[data-platform="darwin"] {
+  --titlebar-height: 60px;
+  --sidebar-width: 252px;
+  --workspace-toolbar-height: 44px;
+  --glass-opacity: 68%;
+  --glass-blur: blur(28px) saturate(1.35);
+  --glass-edge: rgb(255 255 255 / 14%);
+  --glass-highlight: rgb(255 255 255 / 9%);
+  --glass-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+  --glass-selection: color-mix(in srgb, var(--sidebar-text) 11%, transparent);
+  --glass-stroke: color-mix(in srgb, var(--text) 12%, transparent);
+  --glass-surface: color-mix(in srgb, var(--surface) 86%, transparent);
+  --glass-tint: color-mix(in srgb, var(--sidebar) var(--glass-opacity), transparent);
+  --glass-chrome: color-mix(in srgb, var(--window-chrome) var(--glass-opacity), transparent);
+}
+
+:root[data-platform="darwin"][data-color-scheme="light"] {
+  --glass-edge: rgb(255 255 255 / 76%);
+  --glass-highlight: rgb(255 255 255 / 48%);
+  --glass-selection: rgb(255 255 255 / 62%);
+  --glass-shadow: 0 6px 22px rgb(28 35 48 / 7%);
+}
+
+:root[data-platform="darwin"] body { background: transparent; }
+:root[data-platform="darwin"] .desktop-layout { background: var(--glass-tint); }
+
+/* The native traffic lights live in the first 88 points. Only interactive
+   controls opt out of the remaining titlebar's native drag region. */
+:root[data-platform="darwin"] .titlebar {
+  padding: 0 12px 0 92px;
+  background: var(--glass-chrome);
+}
+:root[data-platform="darwin"] .titlebar-navigation {
+  height: 36px;
+  gap: 2px;
+  padding: 0;
+}
+:root[data-platform="darwin"] :is(.window-controls, .app-menubar) { display: none; }
+:root[data-platform="darwin"] .workspace-toolbar {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  left: calc(var(--sidebar-width) + 16px);
+  right: 20px;
+  height: var(--workspace-toolbar-height);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  -webkit-app-region: drag;
+}
+:root[data-platform="darwin"] .sidebar-collapsed .workspace-toolbar { left: 220px; }
+:root[data-platform="darwin"] :is(.titlebar, .workspace-toolbar) .icon-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+:root[data-platform="darwin"] :is(.titlebar, .workspace-toolbar) .icon-button:hover {
+  background: color-mix(in srgb, var(--chrome-text) 10%, transparent);
+}
+:root[data-platform="darwin"] .workspace-toolbar { color: var(--chrome-text); }
+:root[data-platform="darwin"] .workspace-toolbar :is(.icon-button, .connection-chip, .titlebar-caption, .page-context-icon) { color: var(--chrome-muted); }
+:root[data-platform="darwin"] .header-actions {
+  gap: 3px;
+  padding: 3px 5px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 999px;
+  background: linear-gradient(165deg, var(--glass-highlight), transparent 65%), var(--glass-chrome);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), 0 2px 8px rgb(0 0 0 / 4%);
+  backdrop-filter: var(--glass-blur);
+}
+:root[data-platform="darwin"] .connection-chip { padding: 0 8px; font-size: 12px; }
+:root[data-platform="darwin"] .header-divider { margin: 0 3px; background: var(--glass-stroke); }
+:root[data-platform="darwin"] .top-page-context h1 { font-weight: 600; }
+
+:root[data-platform="darwin"] .sidebar {
+  padding: 0 12px 6px;
+  border: 0;
+  background: transparent;
+}
+:root[data-platform="darwin"] .sidebar-brand { height: 56px; padding: 0 12px; }
+:root[data-platform="darwin"] .primary-nav { gap: 4px; }
+:root[data-platform="darwin"] :is(.nav-button, .workspace-shortcut, .session-shortcut) {
+  min-height: 36px;
+  height: auto;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 11px;
+  font-size: 13px;
+  transition: background-color 160ms ease, box-shadow 160ms ease;
+}
+:root[data-platform="darwin"] :is(.nav-button, .workspace-shortcut, .session-shortcut):hover {
+  background: color-mix(in srgb, var(--sidebar-text) 7%, transparent);
+}
+:root[data-platform="darwin"] :is(.nav-button.active, .session-shortcut.active, .settings-nav-item[aria-current]),
+:root[data-platform="darwin"] .has-connection .primary-nav [data-page="chat"].active {
+  background: linear-gradient(145deg, var(--glass-highlight), transparent 75%), var(--glass-selection);
+  box-shadow: inset 0 0 0 1px var(--glass-edge), 0 2px 5px rgb(0 0 0 / 4%);
+  font-weight: 600;
+}
+:root[data-platform="darwin"] :is(.nav-button.active, .settings-nav-item[aria-current]) .icon { color: var(--sidebar-text); }
+:root[data-platform="darwin"] .sidebar-section-heading { padding-inline: 12px; font-size: 11px; }
+:root[data-platform="darwin"] .sidebar-section-toggle { font-weight: 600; }
+:root[data-platform="darwin"] .sidebar-hint { padding-inline: 12px; font-size: 12px; }
+:root[data-platform="darwin"] .sidebar-bottom { padding-top: 10px; }
+:root[data-platform="darwin"] .version-row { padding: 12px 12px 4px; font-size: 10px; opacity: .75; }
+
+/* Main content stays solid. Native WebContentsView bounds are still measured
+   from their DOM placeholders; never scale or animate those containers. */
+:root[data-platform="darwin"] .main-area {
+  margin: 0 10px 10px 0;
+  border: 1px solid var(--glass-stroke);
+  border-radius: 18px;
+  background: var(--background);
+  box-shadow: var(--glass-shadow);
+}
+:root[data-platform="darwin"] .page-column { border-radius: 17px; }
+:root[data-platform="darwin"] .inspector {
+  margin: 8px;
+  border: 1px solid var(--glass-stroke);
+  border-radius: 14px;
+  background: var(--surface);
+}
+:root[data-platform="darwin"] .inspector-title { padding: 14px 16px; }
+:root[data-platform="darwin"] .inspector-footer { border-radius: 0 0 14px 14px; }
+:root[data-platform="darwin"] .onboarding { padding: 48px 32px; }
+:root[data-platform="darwin"] .onboarding h2 { font-size: 28px; font-weight: 650; letter-spacing: -.8px; }
+:root[data-platform="darwin"] .being-brand-icon { mix-blend-mode: normal; }
+:root[data-platform="darwin"] .welcome-brand-icon { border-radius: 16px; box-shadow: 0 4px 12px rgb(0 0 0 / 10%); }
+
+:root[data-platform="darwin"] .button {
+  min-height: 34px;
+  padding: 7px 16px;
+  border-radius: 999px;
+  font-weight: 500;
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+:root[data-platform="darwin"] .button.primary { box-shadow: inset 0 1px 0 rgb(255 255 255 / 18%), 0 2px 5px rgb(0 0 0 / 10%); }
+:root[data-platform="darwin"] .button.secondary {
+  border-color: var(--glass-stroke);
+  background: linear-gradient(160deg, var(--glass-highlight), transparent), var(--surface);
+  color: var(--surface-text);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 5%);
+}
+:root[data-platform="darwin"] :is(.secret-input, .settings-search) {
+  border-radius: 12px;
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 4%);
+}
+:root[data-platform="darwin"] .secret-input:focus-within {
+  outline: 3px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  outline-offset: 1px;
+}
+:root[data-platform="darwin"] :is(button, input, textarea, select):focus-visible { outline-offset: 2px; }
+
+/* Settings share the same translucent sidebar and grouped content surfaces. */
+:root[data-platform="darwin"] body[data-page="settings"] .main-area { margin: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+:root[data-platform="darwin"] body[data-page="settings"] .page-column { border-radius: 0; }
+:root[data-platform="darwin"] #page-settings { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
+:root[data-platform="darwin"] .settings-navigation { gap: 18px; padding: 16px 12px; background: transparent; }
+:root[data-platform="darwin"] :is(.settings-back, .settings-nav-item) { min-height: 38px; border-radius: 11px; font-size: 13px; }
+:root[data-platform="darwin"] .settings-search { background: color-mix(in srgb, var(--sidebar) 60%, transparent); border-color: var(--sidebar-line); }
+:root[data-platform="darwin"] .settings-content-frame {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  margin: 0 10px 10px 0;
+  padding: 18px 4px 18px 0;
+  border: 1px solid var(--glass-stroke);
+  border-radius: 18px;
+  background: var(--background);
+  box-shadow: var(--glass-shadow);
+}
+/* Inset the scrollport itself: Chromium doesn't reliably clip a scrollbar to
+   its own border radius. The outer frame owns the material and rounded clip. */
+:root[data-platform="darwin"] .settings-content {
+  flex: 1;
+  padding: 20px 44px 38px 48px;
+}
+:root[data-platform="darwin"] #page-settings :is(.theme-fields, .switch-row, .portal-update-panel, .portal-setup-panel, .portal-runtime-group, .settings-disclosure) {
+  border-color: var(--glass-stroke);
+  border-radius: 16px;
+  background: var(--surface);
+}
+:root[data-platform="darwin"] #page-settings .theme-preset { border-radius: 14px; }
+:root[data-platform="darwin"] #page-settings .theme-preset[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+:root[data-platform="darwin"] #page-settings .theme-preset-swatches { border-radius: 9px; }
+:root[data-platform="darwin"] #page-settings .button { min-height: 30px; }
+
+/* Sheets and transient feedback get glass. Reading and editing surfaces don't. */
+:root[data-platform="darwin"] :is(.setup-wizard, .toast) {
+  border: 1px solid var(--glass-edge);
+  background: linear-gradient(145deg, var(--glass-highlight), transparent 55%), var(--glass-surface);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), 0 24px 70px rgb(0 0 0 / 24%);
+}
+:root[data-platform="darwin"] .setup-wizard { border-radius: 26px; }
+:root[data-platform="darwin"] .setup-wizard::backdrop { background: rgb(0 0 0 / 24%); backdrop-filter: blur(4px); }
+:root[data-platform="darwin"] .setup-wizard .icon-button { border-radius: 50%; }
+:root[data-platform="darwin"] .toast { border-radius: 16px; }
+:root[data-platform="darwin"] :is(.tools-heading, .browser-address-row, .terminal-toolbar) {
+  background: var(--glass-surface);
+  border-color: var(--glass-stroke);
+}
+:root[data-platform="darwin"] :is(.browser-tab, .terminal-tab) { border-radius: 10px; }
+:root[data-platform="darwin"] .desktop-tools { border-radius: 0 17px 17px 0; }
+
+:root[data-platform="darwin"][data-window-focused="false"] { --glass-opacity: 88%; }
+:root[data-platform="darwin"][data-window-focused="false"] :is(.titlebar-navigation, .top-page-context, .header-actions) { opacity: .72; }
+
+/* Respect accessibility preferences both before and after the native IPC state
+   arrives. No moving highlights or continuous glass animations are needed. */
+:root[data-platform="darwin"][data-reduced-transparency="true"],
+:root[data-platform="darwin"][data-high-contrast="true"] {
+  --glass-opacity: 100%;
+  --glass-blur: none;
+  --glass-surface: var(--surface);
+  --glass-selection: var(--sidebar-hover);
+  --glass-highlight: transparent;
+}
+:root[data-platform="darwin"][data-reduced-transparency="true"] body,
+:root[data-platform="darwin"][data-high-contrast="true"] body { background: var(--background); }
+:root[data-platform="darwin"][data-high-contrast="true"] { --glass-edge: var(--muted); --glass-stroke: var(--muted); }
+:root[data-platform="darwin"][data-high-contrast="true"] :is(.nav-button.active, .session-shortcut.active, .settings-nav-item[aria-current]) { outline: 2px solid var(--sidebar-text); outline-offset: -2px; }
+:root[data-platform="darwin"][data-reduced-transparency="true"] .setup-wizard::backdrop,
+:root[data-platform="darwin"][data-high-contrast="true"] .setup-wizard::backdrop { backdrop-filter: none; }
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-platform="darwin"] { --glass-opacity: 100%; --glass-blur: none; --glass-surface: var(--surface); --glass-highlight: transparent; --glass-selection: var(--sidebar-hover); }
+  :root[data-platform="darwin"] body { background: var(--background); }
+  :root[data-platform="darwin"] .setup-wizard::backdrop { backdrop-filter: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-platform="darwin"] *, :root[data-platform="darwin"] *::before, :root[data-platform="darwin"] *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+@media (max-width: 1100px) {
+  :root[data-platform="darwin"] { --sidebar-width: 224px; }
+  :root[data-platform="darwin"] .settings-content { padding: 12px 24px 26px 28px; }
+  :root[data-platform="darwin"] .titlebar-caption { display: none; }
+}

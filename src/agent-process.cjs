@@ -3,12 +3,22 @@ const {spawn} = require('node:child_process');
 const path = require('node:path');
 const {consoleEnvironment, WINDOWS_RUNNER} = require('./desktop-console.cjs');
 
+// Only CLI configuration is inherited; Desktop/Loom tokens and runtime code
+// injection variables stay excluded. Never persist or put these values in prompts.
+const CLI_ENVIRONMENT_KEYS = new Set([
+  'http_proxy','https_proxy','all_proxy','no_proxy','codex_home',
+  'xdg_config_home','xdg_data_home','xdg_cache_home',
+  'openai_api_key','openai_base_url','openai_org_id','openai_organization','openai_project_id',
+  'cursor_api_key','xai_api_key','grok_api_key',
+  'node_extra_ca_certs','ssl_cert_file','ssl_cert_dir','requests_ca_bundle',
+]);
+
 // Encode values as data, including prompts; never interpolate user text as shell code.
 const psValue = value => `[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(value).toString('base64')}'))`;
 function agentEnvironment(source = process.env) {
   const env = consoleEnvironment(source);
   for (const [key,value] of Object.entries(source)) {
-    if (/^(?:https?_proxy|all_proxy|no_proxy|codex_home)$/i.test(key) && typeof value === 'string' && !value.includes('\0')) env[key] = value;
+    if (CLI_ENVIRONMENT_KEYS.has(key.toLowerCase()) && typeof value === 'string' && !value.includes('\0')) env[key] = value;
   }
   return env;
 }
@@ -18,7 +28,7 @@ function launchAgent({file, args = [], input = '', cwd, onData = () => {}, platf
   if (platform === 'win32') {
     const command = `$agentExecutable = ${psValue(file)}\n$agentArguments = @(${args.map(psValue).join(',')})\n`
       + (input ? `${psValue(input)} | & $agentExecutable @agentArguments` : '& $agentExecutable @agentArguments');
-    const shell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    const shell = path.win32.join(env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
     child = spawnImpl(shell, ['-NoLogo','-NoProfile','-NonInteractive','-OutputFormat','Text','-EncodedCommand',Buffer.from(WINDOWS_RUNNER,'utf16le').toString('base64')],
       {cwd,env,windowsHide:true,shell:false,stdio:['pipe','pipe','pipe']});
     child.stdin.on('error',()=>{});

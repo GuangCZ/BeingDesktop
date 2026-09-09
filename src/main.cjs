@@ -1,5 +1,5 @@
 'use strict';
-const {app, BrowserWindow, WebContentsView, ipcMain, protocol, net, session, safeStorage, dialog, shell, Menu, Tray, Notification, powerMonitor, clipboard} = require('electron');
+const {app, BrowserWindow, WebContentsView, ipcMain, protocol, net, session, safeStorage, dialog, shell, Menu, Tray, Notification, powerMonitor, clipboard, nativeTheme} = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
@@ -19,7 +19,7 @@ const {prepareTargetRuntime} = require('./portal-target-runtime.cjs');
 const {readSessionRecovery} = require('./session-recovery.cjs');
 const {normalizeTypography,validateTypography} = require('./typography.cjs');
 const {normalizeColors,saveColors} = require('./ui-theme.cjs');
-const {restoreOnboarding,saveOnboardingStep,completeOnboardingAfterBonfire} = require('./onboarding.cjs');
+const {restoreOnboarding,saveOnboardingStep,completeOnboardingAfterBonfire,rememberLoomConnection} = require('./onboarding.cjs');
 const {normalizeAppMenuRequest,commandForInput,captureMenuEditingTarget,getDesktopWindowState,createDesktopMenuTemplate} = require('./desktop-menu.cjs');
 const {getTownCatalog,townPageUrl,prepareTownFeature,prepareTownAssistance,prepareFiresideDraft,prepareLoomDraft} = require('./town.cjs');
 const {PortalInstaller} = require('./portal-installer.cjs');
@@ -37,6 +37,7 @@ const {Orchestration} = require('./orchestration.cjs');
 const {WorkerPresentation}=require('./worker-presentation.cjs');
 const {createCallbackSender,createContinuationSender}=require('./worker-callbacks.cjs');
 const {OrchestrationPolicy} = require('./orchestration-policy.cjs');
+const {loadDesktopId} = require('./desktop-identity.cjs');
 const {normalizeMode} = require('./agent-kits.cjs');
 const {createBrowserLinks} = require('./browser-links.cjs');
 const {DesktopTerminal} = require('./desktop-terminal.cjs');
@@ -56,6 +57,7 @@ const {discussFeatureTask} = require('./feature-task-discussion.cjs');
 const {applyLoomComposer,updateLoomComposerData,takeLoomComposerIntents,reportLoomComposerResult,detachLoomComposer} = require('./loom-composer.cjs');
 
 const {desktopPlatform, desktopEnvironment} = require('./platform.cjs');
+const {windowAppearance, systemAppearance, applyWindowAppearance} = require('./desktop-appearance.cjs');
 
 function startDesktop({onReady = null, portalUpdateChecksEnabled = true} = {}) {
 if (process.platform === 'darwin') process.env.PATH = desktopEnvironment().PATH;
@@ -83,6 +85,7 @@ function boot() {
   let composerTimer=null;
   let messageQueueTimer=null;
   let menuEditingContents=null;
+  let desktopId;
   let composerRevision=0;
   let modelConfigRevision=0;
   let townSuspended=false;
@@ -119,7 +122,7 @@ function boot() {
     localProxy:{status:'unknown',baseUrl:'http://127.0.0.1:8317/v1'},
     activity:[],settings:{closeToTray:true,typography:normalizeTypography(),colors:normalizeColors()}
   };
-  const orchestration=new Orchestration({directory:path.join(app.getPath('userData'),'workers'),getWorkspace:()=>state.workspace.path,
+  const orchestration=new Orchestration({getExecutionContext:()=>({desktopId,place:desktopTools?.link.capabilities().place}),directory:path.join(app.getPath('userData'),'workers'),getWorkspace:()=>state.workspace.path,
     getSessionIds:()=>[...new Set([...chatViews.keys(),...(state.chatSessions?.items||[]).map(item=>item.id)])],
     onChange:snapshot=>{if(win&&!win.isDestroyed())win.webContents.send('being:workers',snapshot);}});
   orchestration.callbacks.setTransport({send:createCallbackSender({getConnection:()=>connection,fetchImpl:(url,options)=>net.fetch(url,options)}),
@@ -155,14 +158,14 @@ function boot() {
   async function desktopEnvironment(sessionId) {
     const enabled=orchestration.mode.enabled;
     if(orchestration.configuring)throw Object.assign(new Error('编排模式正在切换，请完成后再发送消息。'),{code:'ORCHESTRATION_NOT_ENFORCED'});
-    if(enabled)await orchestrationPolicy.assertEnforced();
     if(desktopConnectPromise)await desktopConnectPromise;
+    if(enabled)await orchestrationPolicy.assertEnforced();
     if(enabled!==orchestration.mode.enabled||orchestration.configuring)throw Object.assign(new Error('编排模式已变化，请重新发送。'),{code:'ORCHESTRATION_NOT_ENFORCED'});
     const bridge=desktopTools.link.capabilities();
     if(enabled&&!bridge.tools.includes('desktop_worker_start'))throw Object.assign(new Error('Worker 工具尚未连接，禁止发送执行任务。'),{code:'ORCHESTRATION_NOT_ENFORCED'});
     const terminalCallable=bridge.tools.includes('desktop_terminal_create');
     return desktopMessageContext({runtime:{
-      capturedAt:new Date().toISOString(),application:{name:'Being Desktop',version:app.getVersion()},
+      desktopId,capturedAt:new Date().toISOString(),application:{name:'Being Desktop',version:app.getVersion()},
       chatSessionId:sessionId,workspace:state.workspace.path || null,
       portal:{name:DESKTOP_PORTAL_NAME,status:state.portal.status,health:state.portal.health},
       bridge,mode:orchestration.mode.enabled?'orchestrator':'direct',
@@ -243,10 +246,9 @@ function boot() {
     },onChange:()=>broadcast()});
 
   const modelConfig=new ModelConfig({getContext:()=>({connection,connectionId:generation,exiting:exitStarted}),fetchImpl:(url,options)=>net.fetch(url,options)});
-  const orchestrationPolicy=new OrchestrationPolicy({readConfig:()=>modelConfig.get(),saveConfig:async value=>publishModelConfig(await modelConfig.save(value)),
-    getIdentity:()=>connection?sessionPartition(connection):'',getRecord:()=>disk.orchestrationPolicy,
-    saveRecord:async record=>{const previous=disk.orchestrationPolicy;disk.orchestrationPolicy=record;try{await persist();}catch(error){disk.orchestrationPolicy=previous;throw error;}},
-    fetchImpl:(url,options)=>net.fetch(url,options),fallbackFetchImpl:(url,options)=>fetch(url,options),onChange:policy=>{orchestration.enforcement=policy;orchestration.notify();}});
+  const orchestrationPolicy=new OrchestrationPolicy({getIdentity:()=>connection?sessionPartition(connection):'',
+    getDesktopId:()=>desktopId,getBridge:()=>desktopTools?.link.capabilities(),getMode:()=>orchestration.mode,
+    onChange:policy=>{orchestration.enforcement=policy;orchestration.notify();}});
   orchestration.assertEnforced=()=>orchestrationPolicy.assertEnforced();
   function publishModelConfig(snapshot) {
     if(!connection || snapshot.connectionId!==generation)throw new Error('Being 连接已变化，请重新读取模型配置。');
@@ -397,13 +399,13 @@ function boot() {
   }
   function publicState() {
     const portalState=portal.state;
-    return structuredClone({...state,orchestration:orchestration.snapshot(),portal:{...portalState,logs:portalState.owned?portal.logs:[],watchdog:portalWatchdog?.state(),connectionBeingName:portalState.owned?portalBeingName:'',connectionCurrent:portalState.owned?portalIdentityRevision===identityRevision:null},portalUpdate:portalUpdates.state(),townApp:townState()});
+    return structuredClone({...state,desktopId,onboardingAutoSuppressed:disk.onboardingLoomConnected===true,orchestration:orchestration.snapshot(),portal:{...portalState,logs:portalState.owned?portal.logs:[],watchdog:portalWatchdog?.state(),connectionBeingName:portalState.owned?portalBeingName:'',connectionCurrent:portalState.owned?portalIdentityRevision===identityRevision:null},portalUpdate:portalUpdates.state(),townApp:townState()});
   }
   function broadcast() {
     if (win && !win.isDestroyed()) win.webContents.send('being:state',publicState());
     updateTray();
   }
-  function windowState() { return getDesktopWindowState(win); }
+  function windowState() { return {...getDesktopWindowState(win), platform: process.platform, fullscreen: win?.isFullScreen() === true, focused: win?.isFocused() === true, ...systemAppearance(nativeTheme)}; }
   function publishWindowState() {
     if (win && !win.isDestroyed()) win.webContents.send('being:window-state',windowState());
   }
@@ -450,6 +452,7 @@ function boot() {
     await fs.rename(tmp,settingsPath());
   }
   async function restore() {
+    desktopId=await loadDesktopId(app.getPath('userData'));
     await fs.mkdir(groveKitsDir,{recursive:true});
     try { disk = {...disk,...JSON.parse(await fs.readFile(settingsPath(),'utf8'))}; }
     catch (error) { if (error.code !== 'ENOENT') activity('warning','设置读取失败','已保留原文件，请重新检查连接设置。'); }
@@ -553,6 +556,9 @@ function boot() {
     const w=Math.max(0,Math.min(width-x,Math.round(viewport.width)));
     const h=Math.max(0,Math.min(height-y,Math.round(viewport.height)));
     view.setBounds({x,y,width:w,height:h});
+    // WebContentsView sits above the shell DOM, so CSS cannot clip its corners.
+    // Apply the same inner radius when mounting new or cached conversations.
+    if (process.platform === 'darwin') view.setBorderRadius(17);
     view.setVisible(Boolean(viewWanted && connection && w>0 && h>0));
   }
   function discardView() {
@@ -719,6 +725,7 @@ function boot() {
       void applyLoomTownSync(contents,townSyncRecords).catch(()=>{});
       if(!isCurrent())return;
       state.chatSessions = sessions;
+      void rememberLoomConnection({settings:disk,persist}).catch(()=>activity('warning','引导状态未保存','Loom 已连接，下次启动确认连接后将自动关闭引导。'));
       state.connection.status='connected';state.connection.error='';state.connection.updatedAt=new Date().toISOString();activity('info','Loom 已加载','已连接现有会话；身份和历史由原运行时保存。');syncTownLifecycle();refresh();
       mountMessageQueue(contents,epoch);
       void mountComposer(contents,epoch).catch(()=>{if(epoch===generation)activity('warning','输入补全暂不可用','重新连接后可重试加载工具与成员。');});
@@ -734,7 +741,7 @@ function boot() {
     });
     contents.on('render-process-gone',()=>{loadRevision++;chatViewStatus.set(ownedView,{status:'error',error:'对话页面进程已退出，请重新连接。'});if(!isCurrent())return;viewRevision++;state.connection.status='error';state.connection.error='对话页面进程已退出，请重新连接。';activity('error','对话页面已退出',state.connection.error);syncTownLifecycle();});
     win.contentView.addChildView(view);mountView();
-    readSessionRecovery(app.getPath('userData'),initial).then(recovery=>prepareLoomSessions(contents,sessionId,recovery,{enabled:orchestration.mode.enabled},async (id,titleInput)=>{
+    readSessionRecovery(app.getPath('userData'),initial).then(recovery=>prepareLoomSessions(contents,sessionId,recovery,{enabled:orchestration.mode.enabled,desktopId},async (id,titleInput)=>{
       if(epoch!==generation || exitStarted || contents.isDestroyed() || chatViews.get(id)!==ownedView || !allowedNavigation(initial,contents.getURL()))throw new Error('Conversation changed');
       if(titleInput && orchestration.mode.enabled) void orchestration.generateTitle(id,titleInput).then(async title=>{
         if(!title || epoch!==generation || exitStarted || contents.isDestroyed())return;
@@ -896,10 +903,6 @@ function boot() {
     handle('saveOrchestration',async value=>{
       await orchestration.configure(value,async next=>{
         if(!connection)throw new Error('请先连接 Being。');
-        const headers=connection.secret?{'X-Relay-Secret':connection.secret}:{};
-        const response=await net.fetch(endpoint(connection,'/api/stream/active'),{headers,credentials:'omit',redirect:'error',cache:'no-store'});
-        if(!response.ok)throw new Error('无法确认 Being 是否空闲，编排模式未切换。');
-        if(response.status!==204&&(await response.json())?.finished!==true)throw new Error('Being 仍有任务执行中，请结束当前任务后切换编排模式。');
         await orchestrationPolicy.configure(next.enabled);
         const previous=disk.orchestration;disk.orchestration=next;
         try{await persist();}catch(error){disk.orchestration=previous;throw error;}
@@ -1139,7 +1142,7 @@ function boot() {
     handle('setColors',async(value)=>{
       const colors=await saveColors(value,{settings:disk,persist});
       state.settings.colors=colors;
-      if(win && !win.isDestroyed()) win.setBackgroundColor(colors.background);
+      if(win && !win.isDestroyed()) applyWindowAppearance(win,nativeTheme,colors.background);
       if(view && !view.webContents.isDestroyed() && !view.webContents.isLoadingMainFrame()) {
         view.setBackgroundColor(colors.background);
         try { await applyContentColors(view.webContents,colors); }
@@ -1222,7 +1225,14 @@ function boot() {
     session.defaultSession.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));
     session.defaultSession.setPermissionCheckHandler(()=>false);
     await restore();
-    win=new BrowserWindow({width:1440,height:940,minWidth:1000,minHeight:700,frame:false,backgroundColor:state.settings.colors.background,show:false,title:'Being Desktop',icon:path.join(__dirname,'../renderer/assets/being/being-icon.ico'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true}});
+    win=new BrowserWindow({width:1440,height:940,minWidth:1000,minHeight:700,...windowAppearance({background:state.settings.colors.background,...systemAppearance(nativeTheme)}),show:false,title:'Being Desktop',icon:path.join(__dirname,'../renderer/assets/being/being-icon.ico'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true}});
+    const updateAppearance=()=>{
+      if(!win || win.isDestroyed())return;
+      applyWindowAppearance(win,nativeTheme,state.settings.colors.background);
+      publishWindowState();
+    };
+    nativeTheme.on('updated',updateAppearance);
+    win.once('closed',()=>nativeTheme.removeListener('updated',updateAppearance));
     if (process.platform === 'darwin') {
       const nativeMenu=name=>createDesktopMenuTemplate(name,{sendCommand:sendShellCommand,closeWindow:()=>win.close()});
       const fileMenu=nativeMenu('file');
@@ -1237,7 +1247,7 @@ function boot() {
       ]));
     }
     else win.removeMenu();
-    desktopTools=new DesktopTools({WebContentsView,session,getWindow:()=>win,getConnection:()=>connection,getWorkspace:()=>state.workspace.path,orchestration,
+    desktopTools=new DesktopTools({desktopId,WebContentsView,session,getWindow:()=>win,getConnection:()=>connection,getWorkspace:()=>state.workspace.path,orchestration,
       getTerminal:()=>desktopTerminal,showTerminal:async id=>{
         if(exitStarted || !win || win.isDestroyed())throw new Error('桌面窗口已关闭。');
         desktopTerminal.activate(id);
@@ -1263,6 +1273,7 @@ function boot() {
     win.on('resize',mountView);
     win.on('maximize',publishWindowState);
     win.on('unmaximize',publishWindowState);
+    for(const event of ['focus','blur','enter-full-screen','leave-full-screen'])win.on(event,publishWindowState);
     win.on('close',event=>{if(quitCommitted)return;event.preventDefault();if(exitStarted)return;if(state.settings.closeToTray && tray)win.hide();else shutdown();});
     registerIPC();
     tray=new Tray(trayIcon());tray.on('double-click',showDesktopWindow);updateTray();

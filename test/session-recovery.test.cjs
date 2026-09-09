@@ -23,3 +23,16 @@ test('recovery preserves current sessions, retains conflicts separately, and imp
   recovery.origin='https://foreign.invalid';recovery.id='backup-2';run();
   assert.equal(JSON.parse(storage.get(key)).items.length,3);
 });
+
+test('post-migration recovery reaches only its owning Desktop namespace',()=>{
+  const id=webcrypto.randomUUID(),other=webcrypto.randomUUID();
+  const legacy='being-desktop-sessions-v1:/loom/Being',key='being-desktop-sessions-v2:'+id+':/loom/Being';
+  const storage=new Map([[key,JSON.stringify({active:'current',items:[{id:'current'}]})],[legacy+':desktop-owner',id]]);
+  const context=vm.createContext({crypto:webcrypto,location:{origin:'https://fixture.invalid',pathname:'/loom/Being'},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)}});
+  vm.runInContext('window=globalThis;window.top=window',context);
+  const recovery={origin:'https://fixture.invalid',id:'new-backup',entries:[[legacy,JSON.stringify({active:'recovered',items:[{id:'recovered',title:'Recovered',messages:[]}]})]]};
+  const run=desktop=>vm.runInContext(`(${importSessionRecovery.toString()})(${JSON.stringify(recovery)},'${desktop}')`,context);
+  run(other);assert.equal(storage.size,2);
+  run(id);run(id);assert.equal(JSON.parse(storage.get(key)).items.length,2);
+  assert.equal(JSON.parse(storage.get(key+':recovered')).title,'Recovered');assert.equal(storage.has(legacy),false);
+});

@@ -228,3 +228,25 @@ test('preload forwards onboarding progress through the dedicated IPC channel', a
   assert.equal(calls[0].channel, 'being:setOnboardingStep');
   assert.deepEqual(calls[0].args, ['channel']);
 });
+
+test('successful Loom connection persists automatic suppression without completing optional setup', async () => {
+  const {rememberLoomConnection} = require('../src/onboarding.cjs');
+  const settings = {onboarding: {step: 'portal', completed: false}};
+  let saved, writes = 0;
+  const persist = async () => { saved = JSON.parse(JSON.stringify(settings)); writes++; };
+  await rememberLoomConnection({settings, persist});
+  assert.equal(saved.onboardingLoomConnected, true);
+  assert.deepEqual(restoreOnboarding(saved), {step: 'portal', completed: false});
+  await saveOnboardingStep('loom', {settings, configured: true, persist});
+  await rememberLoomConnection({settings, persist});
+  assert.equal(writes, 2, 'manual setup and repeated connections retain suppression');
+});
+
+test('failed suppression save is retryable and hides filesystem details', async () => {
+  const {rememberLoomConnection} = require('../src/onboarding.cjs');
+  const settings = {};
+  await assert.rejects(rememberLoomConnection({settings, persist: async () => {throw new Error('private filesystem');}}), error => /未能保存/.test(error.message) && !/private/.test(error.message));
+  assert.equal(Object.hasOwn(settings, 'onboardingLoomConnected'), false);
+  await rememberLoomConnection({settings, persist: async () => {}});
+  assert.equal(settings.onboardingLoomConnected, true);
+});

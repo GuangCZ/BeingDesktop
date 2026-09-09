@@ -18,13 +18,13 @@ Current source version **0.8.22**, Windows x64. Download availability follows Gi
 
 ## Orchestrator mode
 
-Choose a local workspace, install and authenticate a supported CLI, then enable **Settings → 编排模式**. Desktop detects the Agent Kit, verifies a compatible strict OpenAI Responses endpoint, and saves the mode. A failed check restores the switch; unavailable workers never fall back to direct Being execution. The companion model gateway is deployed separately and is not bundled with this Electron repository.
+Choose a local workspace, install and authenticate a supported CLI, then enable **Settings → 编排模式**. Desktop detects the Agent Kit and connects its own Worker tool bridge. Unavailable workers never fall back to local direct execution.
 
-Workers appear beneath their original conversation with execution status, tool events and logs. Completion is saved before notifying Being; notification delivery and acceptance are separate states. Being's final summary, collapsed evidence and **Open preview** button appear in the original conversation. Web previews use Desktop's embedded browser. Stable delivery identities prevent history synchronization from repeatedly appending the same worker result.
+Every Desktop profile has a persistent ID. Sessions, tasks and result routing belong to the originating Desktop; local direct/orchestrator modes can differ while connecting to the same Being. CLI workers use that Desktop's local authentication, endpoint, proxy and workspace. Switching modes does not modify Being's shared model endpoint. Identity, memory and the remote runtime remain shared; Desktop IDs are not server-side context or security isolation.
 
-The switch applies to all Desktop conversations and changes the connected Being's model endpoint. It does not revoke independent remote runtime jobs. CLI calls nested inside restricted workers may need a host execution integration; the project-specific poker workaround is not a general Desktop-managed launcher.
+For upgrades from the old shared gateway mode, confirm the ordinary endpoint in Model settings if `/orchestrator/v1` still prevents direct execution. The app will not silently rewrite this shared setting.
 
-Read the [user guide](docs/orchestration.html) for setup and recovery, or the [implementation notes](docs/orchestration.md) for the gateway contract, callback lifecycle and enforcement limits.
+Read the [user guide](docs/orchestration.html) for setup and recovery, or the [implementation notes](docs/orchestration.md) for Desktop identity, callback lifecycle and isolation limits.
 
 ## Develop
 
@@ -89,6 +89,6 @@ MIT. Third-party assets and dependencies retain their respective licenses. See [
 
 ## macOS integration
 
-This branch (`0.8.22-mac.5`) supports the official arm64/x86_64 Heart Portal binaries, architecture-specific hash verification, existing-process detection, zsh terminals and console jobs, Command shortcuts, and Homebrew runtime discovery when launched from Finder. External Portal services retain ownership of their own process and configuration. Reviewed Grove recipes remain pinned to verified package versions and hashes.
+This branch (`0.8.22-mac.7`) supports the official arm64/x86_64 Heart Portal binaries, architecture-specific hash verification, existing-process detection, zsh terminals and console jobs, Command shortcuts, and Homebrew runtime discovery when launched from Finder. External Portal services retain ownership of their own process and configuration. Reviewed Grove recipes remain pinned to verified package versions and hashes.
 
 Run `npm run test:mac` on a Mac, and `npm run dist:mac:arm64` to build an Apple Silicon DMG and ZIP. Test packages use a persistent local signing certificate without Apple notarization. See [macOS details](docs/macos.md) for validation and boundaries.

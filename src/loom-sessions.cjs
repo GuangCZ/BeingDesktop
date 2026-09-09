@@ -11,7 +11,25 @@ const {createWorkerResults}=require('./loom-worker-results.cjs');
 // Runs before Loom's own scripts, including its history/stream prefetches.
 function installSessions(requestedId = null, routingFactory = createSessionRouter, messageContext = '', orchestration = {enabled:false}) {
   if (window !== window.top || globalThis.__beingDesktopSessions) return;
-  const key = 'being-desktop-sessions-v1:' + location.pathname;
+  const desktopId=orchestration.desktopId;
+  if(desktopId!==undefined && !/^[0-9a-f-]{36}$/i.test(desktopId))throw new Error('Invalid Desktop identity');
+  const legacyKey='being-desktop-sessions-v1:'+location.pathname;
+  const key=desktopId?'being-desktop-sessions-v2:'+desktopId+':'+location.pathname:legacyKey;
+  if(desktopId && !localStorage.getItem(key)) {
+    const owner=localStorage.getItem(legacyKey+':desktop-owner');
+    // Import this profile's pre-ID conversations once, preserving their IDs.
+    // A second Desktop namespace must never import the same legacy transcript.
+    if(!owner || owner===desktopId) {
+      const legacy=localStorage.getItem(legacyKey);
+      if(legacy) {
+        const entries=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
+          .filter(name=>name?.startsWith(legacyKey+':')&&name!==legacyKey+':desktop-owner');
+        for(const name of entries)localStorage.setItem(key+name.slice(legacyKey.length),localStorage.getItem(name));
+        localStorage.setItem(legacyKey+':desktop-owner',desktopId);
+        localStorage.setItem(key,legacy);
+      }
+    }
+  }
   let store;
   try { store = JSON.parse(localStorage.getItem(key)); } catch {}
   if (!store || !Array.isArray(store.items) || !store.items.some(item => item.id === store.active)) {
@@ -129,7 +147,7 @@ function installSessions(requestedId = null, routingFactory = createSessionRoute
     const latest = JSON.parse(localStorage.getItem(key) || 'null') || store;
     return {activeId:own.id, items:latest.items.map(({id,title}) => ({id,title})), routingWarning:Boolean(localStorage.getItem(key + ':unrouted'))};
   }
-  const router = routingFactory({key, ownId:own.id, sessions:()=>list().items, receive(item) {
+  const router = routingFactory({key,desktopId, ownId:own.id, sessions:()=>list().items, receive(item) {
     if (!mounted) return false;
     const messages = document.getElementById('messages');
     if (!messages) return false;
@@ -268,8 +286,11 @@ function installSessions(requestedId = null, routingFactory = createSessionRoute
       if(event==='error'){replay.awaitingStop=false;if(replay.owned)liveErrorKey=replay.requestId||replay.id;}
       if(event==='content_block_delta') {
         replay.text+=data?.delta?.text || '';
-        const destination=/^会话id[：:]\s*([0-9a-f-]{36})\r?\n(?:请求id[：:]\s*([0-9a-f-]{36})\r?\n)?/i.exec(replay.text.trimStart());
-        if(destination?.[1]===own.id) {
+        const destination=/^会话id[：:]\s*([0-9a-f-]{36})\r?\n(?:请求id[：:]\s*([0-9a-f-]{36})\r?\n)?(?:Desktop ID[：:]\s*([0-9a-f-]{36})\r?\n)?/i.exec(replay.text.trimStart());
+        if(desktopId && destination?.[3] && destination[3]!==desktopId) {
+          replay.foreign=true;replay.owned=false;replay.process=[];
+        }
+        if(!replay.foreign && destination?.[1]===own.id) {
           replay.owned=true;
           if(destination[2]) {
             replay.requestId=destination[2];
@@ -277,6 +298,10 @@ function installSessions(requestedId = null, routingFactory = createSessionRoute
           }
         }
         router.preview(replay.text,replay.deliveryId);
+      }
+      if(replay.foreign) {
+        if(event==='message_stop'){replay.awaitingStop=false;replay.text='';}
+        return;
       }
       if (eventHistory) {
         replay.process.push({deliveryId:replay.deliveryId,streamId:replay.id,event,data,seq});
@@ -478,7 +503,7 @@ async function prepareLoomSessions(contents, sessionId = null, recovery = null, 
   if (!contents.getURL()) await contents.loadURL('about:blank');
   contents.debugger.attach('1.3');
   await contents.debugger.sendCommand('Page.enable');
-  if (recovery) await contents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {source:`(${importSessionRecovery.toString()})(${JSON.stringify(recovery)})`});
+  if (recovery) await contents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {source:`(${importSessionRecovery.toString()})(${JSON.stringify(recovery)},${JSON.stringify(orchestration.desktopId)})`});
   await contents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {source:`globalThis.__beingDesktopWorkerResultsFactory=${createWorkerResults.toString()};globalThis.__beingDesktopEventHistoryFactory=${createEventHistory.toString()};\n(${installSessions.toString()})(${JSON.stringify(sessionId)},${createSessionRouter.toString()},${JSON.stringify(desktopMessageContext())},${JSON.stringify(orchestration)})`});
   await contents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {source:`(${installTaskQueue.toString()})()`});
   await contents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {source:`(${installAcceptedProgress.toString()})()`});

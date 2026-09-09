@@ -4,7 +4,8 @@ window.beingOnboarding = (() => {
   const steps = ['loom', 'review', 'portal', 'channel', 'grove', 'town', 'bonfire'];
   const $ = id => document.getElementById(id);
   let options, dialog, state = {}, dismissed = false, action = '', displayedStep = '';
-  let awaitingConnection = false;
+  let awaitingConnection = false, manuallyOpened = false, loomSeen = false;
+  const mayOpen = () => manuallyOpened || !(loomSeen || state.onboardingAutoSuppressed === true || (state.connection?.configured && state.connection?.status === 'connecting' && !awaitingConnection));
   let inspectionRequest = 0, inspectionAttempt = '';
   let handoff = '', greetingSent = false;
   let pageTransition = null, transitionPending = false;
@@ -158,7 +159,7 @@ window.beingOnboarding = (() => {
   function render() {
     if (transitionPending) return;
     const changingStep = dialog?.open && displayedStep && displayedStep !== step();
-    const active = state.onboarding && !state.onboarding.completed && state.onboarding.step !== 'complete' && !dismissed;
+    const active = state.onboarding && !state.onboarding.completed && state.onboarding.step !== 'complete' && !dismissed && mayOpen();
     if (!changingStep || !active || !document.startViewTransition || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       if (!active) pageTransition?.skipTransition();
       renderContent();
@@ -183,7 +184,7 @@ window.beingOnboarding = (() => {
   function renderContent() {
     if (!dialog) return;
     const current = step();
-    const active = Boolean(state.onboarding && !state.onboarding.completed && state.onboarding.step !== 'complete' && !dismissed);
+    const active = Boolean(state.onboarding && !state.onboarding.completed && state.onboarding.step !== 'complete' && !dismissed && mayOpen());
     const resuming = Boolean(handoff && state.onboarding && !state.onboarding.completed && dismissed);
     if ($('setup-resume').hidden === resuming) {
       $('setup-resume').hidden = !resuming;
@@ -313,6 +314,7 @@ window.beingOnboarding = (() => {
     }
     if (handoff && next.onboarding?.step !== handoff && !next.onboarding?.completed) handoff = '';
     state = next;
+    if (connected()) { loomSeen = true; if (!manuallyOpened) awaitingConnection = false; }
     if (previousKey !== connectionKey()) {
       inspectionRequest++;
       inspectionAttempt = '';
@@ -322,7 +324,7 @@ window.beingOnboarding = (() => {
     if (awaitingConnection && ['error', 'disconnected'].includes(state.connection?.status) && action !== 'connect') awaitingConnection = false;
     render();
     maybeContinue();
-    if (step() === 'review' && !dismissed && connected() && !inspection() && inspectionAttempt !== connectionKey() && !action) void inspectConnection();
+    if (mayOpen() && step() === 'review' && !dismissed && connected() && !inspection() && inspectionAttempt !== connectionKey() && !action) void inspectConnection();
   }
 
   async function run(name, operation) {
@@ -490,6 +492,7 @@ window.beingOnboarding = (() => {
   }
 
   async function restart() {
+    manuallyOpened = true;
     dismissed = false;
     if (state.onboarding?.completed || !state.onboarding) {
       handoff = '';
@@ -498,6 +501,7 @@ window.beingOnboarding = (() => {
       if (!ok) options.onError?.(errors[step()]);
     }
     render();
+    if (step() === 'review' && connected() && !inspection() && !action) void inspectConnection();
   }
 
   return { init, setState, isOpen: () => Boolean(dialog?.open), restart, onBonfireSent };

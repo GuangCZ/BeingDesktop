@@ -1,58 +1,43 @@
 'use strict';
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {OrchestrationPolicy,PROTOCOL}=require('../src/orchestration-policy.cjs');
+const {randomUUID}=require('node:crypto');
+const {OrchestrationPolicy}=require('../src/orchestration-policy.cjs');
+const {desktopPortalName}=require('../src/desktop-identity.cjs');
 function fixture() {
-  let identity='being-one',record=null,current={connectionId:4,config:{model:'fixture',provider:'openai-responses',baseUrl:'https://proxy.fixture.invalid/v1'}};
-  const writes=[];
-  const gate=new OrchestrationPolicy({getIdentity:()=>identity,getRecord:()=>record,saveRecord:async value=>{record=value;writes.push({record:value});},readConfig:async()=>structuredClone(current),saveConfig:async value=>{assert.ok(record,'must save recovery record first');writes.push(value);current.config={...current.config,...value};},fetchImpl:async()=>Response.json({protocol:PROTOCOL,provider:'openai-responses',enforcement:'worker-tools-only'})});
-  return {gate,writes,record:()=>record,current:()=>current,setIdentity:value=>{identity=value;}};
+  let id=randomUUID(),identity='shared-being';
+  const mode={enabled:false};
+  const bridge={place:desktopPortalName(id),status:'connected',tools:['desktop_worker_start','desktop_worker_status']};
+  const gate=new OrchestrationPolicy({getDesktopId:()=>id,getIdentity:()=>identity,getMode:()=>mode,getBridge:()=>bridge,
+    readConfig:()=>assert.fail('must not read shared model'),saveConfig:()=>assert.fail('must not write shared model'),fetchImpl:()=>assert.fail('must not contact a shared gateway')});
+  return {gate,mode,bridge,setId:value=>{id=value;},setIdentity:value=>{identity=value;}};
 }
-test('strict mode switches the remote model endpoint and restores its exact original URL',async()=>{
-  const f=fixture();await f.gate.configure(true);
-  assert.equal(f.record().originalBaseUrl,'https://proxy.fixture.invalid/v1');
-  assert.equal(f.current().config.baseUrl,'https://proxy.fixture.invalid/orchestrator/v1');
-  assert.equal(f.gate.state.status,'enforced');
-  await f.gate.configure(false);assert.equal(f.current().config.baseUrl,'https://proxy.fixture.invalid/v1');assert.equal(f.record(),null);
+test('Desktop mode switches and preflight never read or mutate Being model settings',async()=>{
+  const f=fixture();await f.gate.configure(true);f.mode.enabled=true;await f.gate.assertEnforced();
+  assert.equal(f.gate.state.status,'enforced');assert.equal(f.gate.state.scope,'desktop');
+  await f.gate.configure(false);f.mode.enabled=false;assert.equal(f.gate.state.status,'disabled');
+  await assert.rejects(f.gate.assertEnforced(),/未启用/);
 });
-test('a missing or dishonest capability endpoint cannot enable mode',async()=>{
-  const f=fixture();f.gate.fetchImpl=async()=>Response.json({ok:true});
-  await assert.rejects(f.gate.configure(true),/没有确认/);assert.equal(f.writes.length,0);
-  f.gate.fetchImpl=async()=>new Response('not found',{status:404});
-  await assert.rejects(f.gate.configure(true),/尚未提供/);assert.equal(f.writes.length,0);
+test('one Being can have a direct Desktop and an orchestrator Desktop independently',async()=>{
+  const mac=fixture(),win=fixture();
+  await mac.gate.configure(false);await win.gate.configure(true);win.mode.enabled=true;
+  await win.gate.assertEnforced();assert.equal(mac.mode.enabled,false);
+  await mac.gate.configure(false);await win.gate.assertEnforced();
+  assert.notEqual(mac.bridge.place,win.bridge.place);
 });
-test('preflight rejects an endpoint changed back to direct mode or a changed Being identity',async()=>{
-  const f=fixture();await f.gate.configure(true);f.current().config.baseUrl='https://proxy.fixture.invalid/v1';
-  await assert.rejects(f.gate.assertEnforced(),/消息已阻止/);assert.equal(f.gate.state.status,'blocked');
-  f.setIdentity('being-two');await assert.rejects(f.gate.assertEnforced(),/绑定/);
+test('another Desktop bridge cannot satisfy local preflight even on the same Being',async()=>{
+  const a=fixture(),b=fixture();a.mode.enabled=true;a.bridge.place=b.bridge.place;
+  await assert.rejects(a.gate.assertEnforced(),/本机 Worker/);
+  assert.equal(a.gate.state.status,'blocked');
 });
-test('remote mutation failure preserves recovery metadata and does not report enforcement',async()=>{
-  const f=fixture();f.gate.saveConfig=async()=>{throw new Error('save failed');};
-  await assert.rejects(f.gate.configure(true),/save failed/);assert.ok(f.record());assert.notEqual(f.gate.state.status,'enforced');
+test('missing dispatch and direct tools in an orchestrator bridge fail closed',async()=>{
+  const f=fixture();f.mode.enabled=true;
+  f.bridge.tools=[];await assert.rejects(f.gate.assertEnforced(),/未连接/);
+  f.bridge.tools=['desktop_worker_start','desktop_console_run'];await assert.rejects(f.gate.assertEnforced(),/范围未生效/);
+  f.bridge.tools=['desktop_worker_start'];f.bridge.status='disconnected';await assert.rejects(f.gate.assertEnforced(),/未连接/);
 });
-test('disabling never overwrites a separately changed model endpoint',async()=>{
-  const f=fixture();await f.gate.configure(true);f.current().config.baseUrl='https://another.fixture.invalid/v1';f.current().config.provider='anthropic';
-  await f.gate.configure(false);assert.equal(f.current().config.baseUrl,'https://another.fixture.invalid/v1');assert.equal(f.record(),null);
-});
-
-test('connection failure can retry the same capability endpoint without weakening validation',async()=>{
-  const f=fixture(),requests=[];
-  f.gate.fetchImpl=async()=>{throw new Error('net::ERR_CONNECTION_CLOSED');};
-  f.gate.fallbackFetchImpl=async(url,options)=>{requests.push({url,options});return Response.json({protocol:PROTOCOL,provider:'openai-responses',enforcement:'worker-tools-only'});};
-  await f.gate.configure(true);
-  assert.equal(f.gate.state.status,'enforced');
-  assert.ok(requests.every(({url,options})=>url==='https://proxy.fixture.invalid/orchestrator/capabilities'&&options.redirect==='error'&&options.credentials==='omit'));
-  f.gate.fallbackFetchImpl=async()=>Response.json({ok:true});
-  await assert.rejects(f.gate.assertEnforced(),/没有确认/);
-  assert.equal(f.gate.state.status,'blocked');
-});
-
-test('HTTP refusal and invalid capability responses never trigger a fallback',async()=>{
-  const f=fixture();let retries=0;
-  f.gate.fallbackFetchImpl=async()=>{retries++;throw new Error('unexpected fallback');};
-  for(const response of [new Response('denied',{status:403}),Response.json({ok:true})]){
-    f.gate.fetchImpl=async()=>response;
-    await assert.rejects(f.gate.configure(true));
-  }
-  assert.equal(retries,0);assert.equal(f.writes.length,0);
+test('invalid identity cannot configure mode; a disconnected Being cannot dispatch',async()=>{
+  const f=fixture();f.setId('malformed');await assert.rejects(f.gate.configure(true),/身份/);
+  const g=fixture();g.setIdentity('');await assert.rejects(g.gate.configure(true),/连接 Being/);
+  g.mode.enabled=true;await assert.rejects(g.gate.assertEnforced(),/身份/);
 });

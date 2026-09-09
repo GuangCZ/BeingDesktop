@@ -201,7 +201,8 @@ if (!process.versions.electron) {
     await click('.nav-button[data-page="settings"]');
     check('settings-open-on-general-with-one-visible-panel', await execute("document.querySelector('[data-settings-section=general]').getAttribute('aria-current')==='page'&&[...document.querySelectorAll('[data-settings-panel]')].filter(panel=>!panel.hidden).length===1"));
     await capture('general-1440x940');
-    await execute("const search=document.querySelector('#settings-search');search.value='权限';search.dispatchEvent(new Event('input'))");
+    // Orchestration also documents permissions; use both terms to select Portal.
+    await execute("const search=document.querySelector('#settings-search');search.value='Portal 权限';search.dispatchEvent(new Event('input'))");
     check('search-finds-portal-by-setting-content', await execute("[...document.querySelectorAll('[data-settings-section]')].filter(button=>!button.hidden).map(button=>button.dataset.settingsSection).join(',')==='portal'"));
     await execute("document.querySelector('#settings-search').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))");
     check('search-enter-opens-result-and-focuses-heading', await execute("document.querySelector('#portal-settings').checkVisibility()&&document.activeElement.id==='settings-heading'"));

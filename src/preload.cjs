@@ -1,6 +1,8 @@
 'use strict';
 const {contextBridge, ipcRenderer} = require('electron');
 const api = {};
+// Set before first paint, without exposing Node or another privileged API.
+if (typeof window !== 'undefined') window.addEventListener('DOMContentLoaded',()=>{document.documentElement.dataset.platform=process.platform;});
 api.showSessionMenu=id=>ipcRenderer.invoke('being:showSessionMenu',id);
 api.renameChatSession=(id,title)=>ipcRenderer.invoke('being:renameChatSession',id,title);
 for(const name of ['getOrchestration','inspectAgents','saveOrchestration','getWorker','cancelWorker','retryWorkerCallback','reconnectWorkers'])api[name]=(...args)=>ipcRenderer.invoke(`being:${name}`,...args);

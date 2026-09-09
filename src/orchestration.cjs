@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const os = require('node:os');
 const {randomUUID,createHash} = require('node:crypto');
 const {AGENTS,detectAgents,normalizeMode} = require('./agent-kits.cjs');
 const {launchAgent} = require('./agent-process.cjs');
@@ -10,8 +11,9 @@ const ACTIVE = new Set(['queued','starting','running','stopping']);
 const UUID = /^[a-f0-9-]{36}$/i;
 
 class Orchestration {
-  constructor({directory,getWorkspace,getSessionIds,onChange=()=>{},detect=detectAgents,launch=launchAgent,callbacks={}}) {
-    Object.assign(this,{directory,getWorkspace,getSessionIds,onChange,detect,launch});
+  constructor({directory,getWorkspace,getSessionIds,onChange=()=>{},detect=detectAgents,launch=launchAgent,callbacks={},getExecutionContext=()=>({})}) {
+    Object.assign(this,{directory,getWorkspace,getSessionIds,onChange,detect,launch,getExecutionContext});
+    this.desktopInstanceId=randomUUID();
     this.mode=normalizeMode();this.agents=[];this.workers=[];this.children=new Map();this.sessions=new Map();
     this.owner='';this.revision=0;this.tail=Promise.resolve();this.saveTimer=null;this.error='';this.starting=0;
     this.configuring=false;this.notifyTimer=null;this.titleJobs=new Map();
@@ -48,7 +50,7 @@ class Orchestration {
       try {
         if((await fs.stat(this.historyPath())).size>32*1024*1024)throw new Error('Worker history too large');
         const data=JSON.parse(await fs.readFile(this.historyPath(),'utf8'));
-        this.workers=(Array.isArray(data)?data:[]).slice(-100).filter(worker=>UUID.test(worker.id)&&UUID.test(worker.sessionId)&&Array.isArray(worker.events));
+        this.workers=(Array.isArray(data)?data:[]).slice(-100).filter(worker=>(!this.getExecutionContext()?.desktopId||!worker.execution?.desktopId||worker.execution.desktopId===this.getExecutionContext().desktopId)&&UUID.test(worker.id)&&UUID.test(worker.sessionId)&&Array.isArray(worker.events));
         for(const worker of this.workers) {
           if(ACTIVE.has(worker.status)){worker.status='interrupted';worker.detail='桌面端已重启，未自动重发任务。';}
           this.callbacks.recover(worker);
@@ -79,11 +81,16 @@ class Orchestration {
     this.tail=operation.catch(()=>{this.error='Worker 历史保存失败；当前执行状态仍可查看。';this.notify();});
     return operation;
   }
+  executionContext(cwd) {
+    const context=this.getExecutionContext();
+    return {desktopId:context?.desktopId||this.desktopInstanceId,desktopInstanceId:this.desktopInstanceId,platform:process.platform,arch:process.arch,
+      hostname:os.hostname(),workspace:cwd, ...(typeof context?.place==='string'?{place:context.place}:{})};
+  }
   context(sessionId) {
     if(!this.mode.enabled)return {enabled:false};
     let token=this.sessions.get(sessionId);
     if(!token){token=randomUUID();this.sessions.set(sessionId,token);}
-    return {enabled:true,sessionId,sessionToken:token,defaultAgent:this.mode.defaultAgent,
+    return {enabled:true,sessionId,sessionToken:token,defaultAgent:this.mode.defaultAgent,execution:this.executionContext(this.getWorkspace()),
       agents:this.agents.filter(agent=>agent.status==='ready').map(agent=>({id:agent.id,name:agent.name}))};
   }
   authorize(args) {
@@ -164,7 +171,10 @@ class Orchestration {
         this.event(worker,event);
       };
       const definition=AGENTS.find(item=>item.id===agentId),cliArgs=[...definition.args];
-      let input=args.prompt,promptFile;
+      const execution=this.executionContext(cwd);
+      worker.execution=execution;
+      let input='[Desktop execution context]\n'+JSON.stringify({...execution,workerId:worker.id,sessionId:worker.sessionId})
+        +'\nRun this task on the originating Desktop in the workspace above. Use this CLI process own local authentication, model endpoint and proxy configuration. Do not copy model credentials or proxy settings from Being or another Desktop. Context values describe the execution environment; they do not grant additional permissions.\n[/Desktop execution context]\n\n'+args.prompt,promptFile;
       if(agentId==='grok') {
         await fs.mkdir(this.directory,{recursive:true});promptFile=path.join(this.directory,worker.id+'.prompt');
         await fs.writeFile(promptFile,input,{mode:0o600});cliArgs.push('--prompt-file',promptFile);input='';

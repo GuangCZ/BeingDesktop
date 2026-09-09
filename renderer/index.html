@@ -17,6 +17,7 @@
   <link rel="stylesheet" href="terminal-panel.css">
   <link rel="stylesheet" href="settings-layout.css">
   <link rel="stylesheet" href="orchestration.css">
+  <link rel="stylesheet" href="macos-glass.css">
   <script src="orchestration.js" defer></script>
   <script src="vendor/xterm/xterm.js" defer></script>
   <script src="vendor/xterm/addon-fit.js" defer></script>
@@ -327,14 +328,15 @@
             </section>
             <section class="settings-card" id="orchestration-settings" data-mode-disabled="true">
               <div class="card-heading"><div><h3>Orchestrator 模式</h3><p class="field-help">Being 细化需求、拆分任务和验收结果，由外部 Agent 执行。</p></div></div>
-              <label class="switch-row" for="orchestration-enabled"><span><strong>让 Being 专职编排</strong><span class="field-help">自动检测并保存。成功后仅允许 Worker 调度；没有可用 CLI 时不执行任务。</span></span><input type="checkbox" id="orchestration-enabled" role="switch" aria-describedby="orchestration-status"><span class="switch-track" aria-hidden="true"></span></label>
-              <p id="orchestration-status" class="field-help orchestration-feedback" role="status" aria-live="polite">开启时会检测 Agent 与严格编排入口。</p>
+              <label class="switch-row" for="orchestration-enabled"><span><strong>让 Being 专职编排</strong><span class="field-help">自动检测并保存。本机工具桥仅允许 Worker 调度；没有可用 CLI 时不执行本机任务。</span></span><input type="checkbox" id="orchestration-enabled" role="switch" aria-describedby="orchestration-status"><span class="switch-track" aria-hidden="true"></span></label>
+              <p id="orchestration-status" class="field-help orchestration-feedback" role="status" aria-live="polite">开启时会检测本机 Agent 与 Desktop 工具绑定。</p>
               <label class="worker-default-label" for="orchestration-default">默认 Worker</label>
               <select id="orchestration-default"><option value="codex">Codex CLI</option><option value="cursor">Cursor CLI</option><option value="grok">Grok Build CLI</option></select>
               <div id="agent-kit-list"></div>
-              <p class="field-help">Worker 在选定的工作区运行，沿用 CLI 的登录与权限配置。共享工作区的任务依次执行。Cursor 当前接入 CLI，SDK 尚未接入。</p>
-              <p class="field-help">开启后将此 Being 的模型地址切换到 CLIProxyAPI 的严格编排入口，仅支持 OpenAI Responses。该入口只提供 Worker 工具，并在结果返回 Being 前拦截直接执行调用。关闭时恢复原地址。</p>
-              <p id="orchestration-policy-status" class="field-help" role="status">严格编排入口尚未核验。</p>
+              <p class="field-help">Worker 在发起任务的这台 Desktop 上运行，使用本机工作区、CLI 登录、模型地址和代理配置。共享工作区的任务依次执行。Cursor 当前接入 CLI，SDK 尚未接入。</p>
+              <p class="field-help">执行模式仅对当前 Desktop 生效，以 Desktop ID 和会话凭据绑定工具、任务与回执。切换模式不修改 Being 的共享模型地址或其他 Desktop 的配置。本机 Worker 使用本机 CLI 的代理和认证配置。</p>
+              <details class="settings-note"><summary>旧版编排配置迁移</summary><p class="field-help">如果旧版将 Being 的模型地址设为 /orchestrator/v1，旧网关仍可能拦截直接模式。请在模型设置中确认正常模型地址；这项设置仍由所有 Desktop 共享。新版不会自动改写它。</p></details>
+              <p id="orchestration-policy-status" class="field-help" role="status">本机工具绑定尚未核验。</p>
               <div class="worker-settings-actions"><button type="button" class="button secondary" id="agent-kit-detect">检测 Agent Kit</button><button type="button" class="button primary" id="orchestration-save">保存模式</button><button type="button" class="button secondary" id="worker-reconnect">重连调度工具</button></div>
               <p id="worker-link-status" class="field-help" role="status"></p>
             </section>
