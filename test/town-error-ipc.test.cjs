@@ -17,7 +17,7 @@ test('Town transport failures survive the production preload and task ledger wit
     },
   });
   const tasks = new FeatureTasks();
-  for (const code of ['TOWN_TOOL_NOT_CALLED', 'RESULT_SOURCE_NOT_CONFIGURED']) {
+  for (const code of ['TOWN_TOOL_NOT_CALLED', 'RESULT_SOURCE_NOT_CONFIGURED', 'READINESS_UNKNOWN', 'RESULT_UNCONFIRMED']) {
     const task = tasks.begin({feature: 'bonfire', operation: 'read', title: '读取篝火消息', execution: 'being'});
     response = {__townError: true, code, message: '固定诊断信息'};
     await assert.rejects(api.requestTownRead({kind: 'bonfire'}), error => {

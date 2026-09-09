@@ -276,6 +276,7 @@ function boot() {
   });
   const beingTownReader=new BeingTownReader({
     allowBonfireRelay:true,
+    fallbackFetchImpl:(url,options)=>globalThis.fetch(url,options),
     getConnection:()=>!exitStarted&&state.connection.status==='connected'?connection:null,
     getRuntime:()=>({activeStream:{active:channelBeing.state().status==='working'}}),
     fetchImpl:(url,options)=>net.fetch(url,options),

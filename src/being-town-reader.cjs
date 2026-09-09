@@ -192,11 +192,12 @@ function toolBody(event) {
 }
 
 class BeingTownReader {
-  constructor({getConnection, fetchImpl = globalThis.fetch, getRuntime = null, backgroundMode = 'loom-idle', onRequest = null, toolResults = null, allowBonfireRelay = false, pollDelay = signal => pause(5000, undefined, {signal}), maxResultPolls = 60} = {}) {
+  constructor({getConnection, fetchImpl = globalThis.fetch, fallbackFetchImpl = null, getRuntime = null, backgroundMode = 'loom-idle', onRequest = null, toolResults = null, allowBonfireRelay = false, pollDelay = signal => pause(5000, undefined, {signal}), maxResultPolls = 60} = {}) {
     if (typeof getConnection !== 'function' || typeof fetchImpl !== 'function' || getRuntime !== null && typeof getRuntime !== 'function' || onRequest !== null && typeof onRequest !== 'function' || typeof backgroundMode !== 'function' && backgroundMode !== 'loom-idle' || toolResults !== null && ['prepare', 'read', 'release'].some(method => typeof toolResults?.[method] !== 'function')) throw new TypeError('Invalid Being Town reader configuration');
     if (typeof pollDelay !== 'function' || !Number.isInteger(maxResultPolls) || maxResultPolls < 1 || maxResultPolls > 60) throw new TypeError('Invalid result polling configuration');
     if (typeof allowBonfireRelay !== 'boolean') throw new TypeError('Invalid Town relay setting');
-    Object.assign(this, {getConnection, fetchImpl, getRuntime, backgroundMode, onRequest, toolResults, allowBonfireRelay, pollDelay, maxResultPolls});
+    if (fallbackFetchImpl !== null && typeof fallbackFetchImpl !== 'function') throw new TypeError('Invalid fallback transport');
+    Object.assign(this, {getConnection, fetchImpl, fallbackFetchImpl, getRuntime, backgroundMode, onRequest, toolResults, allowBonfireRelay, pollDelay, maxResultPolls});
     this._epoch = 0; this._active = null; this._queue = []; this._lastRead = null; this._pending = null;
   }
 
@@ -268,6 +269,7 @@ class BeingTownReader {
     const awaitingAccepted = item.awaitingAccepted || this._pending?.url === item.connection.url;
     const calls = [], results = [];
     let reply = '';
+    let transport = this.fetchImpl;
     const toolRecord = Object.freeze({requestId: item.requestId, route: item.route, beingId: item.connection.beingName, query: Object.freeze({...item.query})});
     const cancelled = new Promise((_, reject) => item.controller.signal.addEventListener('abort', () => reject(failure('ABORTED')), {once: true}));
     void cancelled.catch(() => {});
@@ -281,7 +283,15 @@ class BeingTownReader {
           try { item.onRequest?.({requestId: item.requestId, route: item.route, beingId: item.connection.beingName, prompt: JSON.parse(options.body).message}); } catch { /* UI bookkeeping does not change the request. */ }
           this._assert(item);
         }
-        return this.fetchImpl(url.href, {...options, credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', signal: item.controller.signal});
+        const init = {...options, credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', signal: item.controller.signal};
+        return Promise.resolve().then(() => transport(url.href, init)).catch(error => {
+          this._assert(item);
+          // Select a working network stack before sending any chat request.
+          // HTTP responses (including busy/auth errors) and POST failures never retry.
+          if (route !== '/api/stream/active' || options.method !== 'GET' || !this.fallbackFetchImpl) throw error;
+          transport = this.fallbackFetchImpl;
+          return transport(url.href, init);
+        });
       })
         .then(value => { if (item.controller.signal.aborted) cancelBody(value); return value; });
       const value = await wait(operation); this._assert(item);

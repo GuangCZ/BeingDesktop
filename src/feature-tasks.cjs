@@ -14,6 +14,7 @@ const ERROR_DETAILS = Object.freeze({
   RATE_LIMITED: '请求过于频繁，请稍后重试。',
   BUSY: 'Being 当时正在处理其他请求，本次操作未发送。请打开功能页重试。',
   READINESS_UNKNOWN: '未能确认 Being 是否空闲，本次操作未发送。请打开功能页重试。',
+  RESULT_UNCONFIRMED: '读取已发送，但尚未取得可核对结果；不会自动重复发送。',
   REQUEST_ACCEPTED: '请求已送达，执行结果尚待确认；不会自动重发。',
   SESSION_CHANGED: '连接已变化，当前界面不再跟踪此请求。',
   ABORTED: '本地等待已停止，远端执行状态需另行确认。',

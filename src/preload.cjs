@@ -42,6 +42,7 @@ for (const name of ['getPortalPermissions','savePortalPermissions','getState','r
 const townErrorCodes=new Set(['AUTH_REQUIRED','INVALID_REQUEST','IDENTITY_MISMATCH','NOT_CONNECTED','SESSION_CHANGED','BUSY','REQUEST_ACCEPTED','RATE_LIMITED','RESULT_UNKNOWN','NETWORK_ERROR','SERVICE_ERROR','INVALID_RESPONSE','BACKGROUND_UNAVAILABLE','NOT_RUNNING','PAUSED','INCOMPLETE_RESULT','RESULT_SOURCE_UNAVAILABLE','WAITING_SBS','SBS_NOT_CONFIGURED','TASK_LIMIT_REACHED']);
 townErrorCodes.add('TOWN_TOOL_NOT_CALLED');
 townErrorCodes.add('RESULT_SOURCE_NOT_CONFIGURED');
+townErrorCodes.add('READINESS_UNKNOWN');townErrorCodes.add('RESULT_UNCONFIRMED');
 for(const name of ['getTownCachedData','listScrolls','getScroll','listBeings','getBeingMembers','getBonfireMessages','getFiresides','getFiresideMessages','getFiresideMembers','getTownMessageSnapshot','refreshTownMessages','requestTownRead','sendBonfireMessage','beginChannelConnection','updateFeishuCredentials','checkChannelStatus']) {
   api[name]=async(...args)=>{
     const result=await ipcRenderer.invoke(`being:${name}`,...args);

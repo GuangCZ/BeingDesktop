@@ -14,7 +14,7 @@ const RAW = {ok: true, being: 'cz_being', messages: [{seq: 9, being: 'other', me
 const idle = () => new Response(null, {status: 204});
 const json = (value, status = 200) => new Response(JSON.stringify(value), {status, headers: {'Content-Type': 'application/json'}});
 const event = (name, data) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
-const flush = async () => { for (let index = 0; index < 10; index++) await Promise.resolve(); };
+const flush = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return {promise, resolve}; };
 function requestInfo(options) {
   const message = JSON.parse(options.body).message;
@@ -119,6 +119,30 @@ test('live Town contract allows absent revised_at on unedited messages', async (
   const result = await reader.read(ROUTE, {query: {limit: 3}});
   assert.equal(messagesDto(result).messages[0].revisedAt, '');
   assert.equal(messagesDto(result).source, 'being_relay');
+});
+
+test('a network failure during readiness selects fallback before sending a single POST', async () => {
+  const primary = [], fallback = [];
+  const {reader} = fixture({fetchImpl: async (_url, init) => { primary.push(init.method); throw new Error('net::ERR_CONNECTION_CLOSED'); }, fallbackFetchImpl: async (_url, init) => {
+    fallback.push(init.method);
+    return init.method === 'GET' ? idle() : stream(init, {result: {content: JSON.stringify({status: 200, body: RAW})}});
+  }});
+  assert.deepEqual(await reader.read(ROUTE), RAW);
+  assert.deepEqual(primary, ['GET']);
+  assert.deepEqual(fallback, ['GET', 'POST']);
+});
+
+test('fallback never retries POSTs or bypasses an HTTP readiness rejection', async () => {
+  for (const mode of ['busy', 'auth', 'post']) {
+    let fallbackCalls = 0, posts = 0;
+    const {reader} = fixture({fetchImpl: async (_url, init) => {
+      if (init.method === 'POST') { posts++; throw new Error('connection lost after dispatch'); }
+      return mode === 'busy' ? json({finished: false}) : mode === 'auth' ? json({}, 401) : idle();
+    }, fallbackFetchImpl: async () => { fallbackCalls++; return idle(); }});
+    await assert.rejects(reader.read(ROUTE), {code: {busy:'BUSY', auth:'AUTH_REQUIRED', post:'SERVICE_ERROR'}[mode]});
+    assert.equal(fallbackCalls, 0);
+    assert.equal(posts, mode === 'post' ? 1 : 0);
+  }
 });
 
 test('real Loom event shape: truncated summary requires the actual tool-result mirror', async () => {
