@@ -135,7 +135,7 @@
       },
       {
         "title": "常见问题与尚未支持的能力",
-        "html": "<ul><li><strong>开启后又关闭：</strong>依次检查工作区、CLI 检测与登录、OpenAI Responses 配置、严格入口能力及其可达性。</li><li><strong>Worker 完成但 Being 没回复：</strong>分别看执行、通知和验收状态；已有 Worker 结果保留，优先恢复通知或接续。</li><li><strong>模型接口报 HTTP 500 等错误：</strong>Being 当前回复可能中断，已启动 Worker 不因此自动重跑；需另查代理及模型服务。</li><li><strong>Worker 内再启动 Codex 失败：</strong>外层 Worker 的沙箱、代理、登录与证书环境可能与宿主不同。本次牌局验证通过宿主运行解决了调用问题，但宿主接续尚未成为 Desktop 通用自动托管功能。不要以关闭 TLS 校验或删除沙箱标记代替正确接入。</li><li><strong>退出与重启：</strong>切换 Desktop 会话或关闭到托盘保留执行；退出、断开连接或切换 Being 会停止 Worker。重启后原执行中记录标为中断，不自动重放。</li></ul><p>Cursor SDK、任意 Agent SDK、跨任务通用宿主子进程接续均不属于当前承诺的能力。此轮更新的是源码与文档，下载附件以 Releases 实际发布内容为准。</p>"
+        "html": "<ul><li><strong>开启后又关闭：</strong>依次检查工作区、CLI 检测与登录、OpenAI Responses 配置、严格入口能力及其可达性。</li><li><strong>Worker 完成但 Being 没回复：</strong>分别看执行、通知和验收状态；已有 Worker 结果保留，优先恢复通知或接续。</li><li><strong>模型接口报 HTTP 500 等错误：</strong>Being 当前回复可能中断，已启动 Worker 不因此自动重跑；需另查代理及模型服务。</li><li><strong>Worker 内再启动 Codex 失败：</strong>外层 Worker 的沙箱、代理、登录与证书环境可能与宿主不同。本次牌局验证通过宿主运行解决了调用问题，但宿主接续尚未成为 Desktop 通用自动托管功能。不要以关闭 TLS 校验或删除沙箱标记代替正确接入。</li><li><strong>退出与重启：</strong>切换 Desktop 会话或关闭到托盘保留执行；退出、断开连接或切换 Being 会停止 Worker。重启后原执行中记录标为中断，不自动重放。</li></ul><p>Cursor SDK、任意 Agent SDK、跨任务通用宿主子进程接续均不属于当前承诺的能力。下载附件、版本与平台以 Releases 实际发布内容为准。</p>"
       }
     ]
   },
