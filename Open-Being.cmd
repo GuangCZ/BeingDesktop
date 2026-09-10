@@ -1,4 +1,4 @@
 @echo off
-powershell.exe -NoProfile -File "%~dp0Start.ps1" -Packaged
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Start.ps1"
 
 
