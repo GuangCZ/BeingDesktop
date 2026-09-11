@@ -242,19 +242,123 @@ test('manual refresh can run immediately while scheduled reads remain completion
   reader.stop();
 });
 
-test('full snapshots replace edits and deletions, deduplicate IDs, sort and cap the latest window', async () => {
+test('a page shorter than the window is the whole feed: it replaces edits and deletions, deduplicates and sorts', async () => {
   const {reader, state} = harness({overrides: {limit: 100}});
-  state.result = data(Array.from({length: 200}, (_, index) => entry(200 - index)));
+  state.result = data([entry(3), entry(1), entry(2), entry(3, 'final')]);
   reader.start(); await settle();
-  assert.equal(reader.snapshot().messages.length, 100);
-  assert.equal(reader.snapshot().messages[0].id, '101');
-  assert.equal(reader.snapshot().messages.at(-1).id, '200');
+  assert.deepEqual(reader.snapshot().messages.map(value => [value.id, value.content]), [['1', 'Message 1'], ['2', 'Message 2'], ['3', 'final']]);
   state.result = data([entry(200, 'old'), {...entry(200, 'revised'), revisedAt: '2026-09-07T10:00:00Z'}, entry(201)], 201);
   await reader.refresh();
   assert.deepEqual(reader.snapshot().messages.map(value => [value.id, value.content]), [['200', 'revised'], ['201', 'Message 201']]);
   state.result = data([], 201); await reader.refresh();
   assert.deepEqual(reader.snapshot().messages, []);
   assert.equal(reader.snapshot().latestSeq, 201);
+  reader.stop();
+});
+
+test('a full tail page is authoritative only from its first sequence on: older history accumulates', async () => {
+  const {reader, state} = harness({overrides: {limit: 3}});
+  state.result = data([entry(5), entry(6), entry(7)], 7);
+  reader.start(); await settle();
+  // The window moved on; 5 and 6 are history now and stay, whatever happened to them upstream.
+  state.result = data([entry(7), entry(8), entry(9)], 9);
+  await reader.refresh();
+  assert.deepEqual(reader.snapshot().messages.map(value => value.id), ['5', '6', '7', '8', '9']);
+  assert.equal(reader.snapshot().lastRefresh.boundarySeq, 7);
+  // Inside the window a deletion (8) and an edit (9) both land; the marker moves to the newest
+  // message held before this refresh.
+  state.result = data([entry(7), {...entry(9, 'revised'), revisedAt: '2026-09-07T10:00:00Z'}, entry(10)], 10);
+  await reader.refresh();
+  assert.deepEqual(reader.snapshot().messages.map(value => [value.id, value.content]), [['5', 'Message 5'], ['6', 'Message 6'], ['7', 'Message 7'], ['9', 'revised'], ['10', 'Message 10']]);
+  assert.equal(reader.snapshot().lastRefresh.boundarySeq, 9);
+  // A refresh that brings nothing new keeps the marker where it was.
+  await reader.refresh();
+  assert.equal(reader.snapshot().lastRefresh.boundarySeq, 9);
+  reader.stop();
+});
+
+test('loading older walks back through sparse sequences and stops at the beginning', async () => {
+  // Bonfire sequences have gaps (deletions); fireside sequences are one counter shared by every room.
+  const feed = [1, 2, 3, 4, 41, 42, 43, 53, 79, 80, 81, 82];
+  const read = ({since, limit}) => {
+    const seqs = since === undefined ? feed.slice(-limit) : feed.filter(seq => seq > since).slice(0, limit);
+    return {messages: seqs.map(seq => entry(seq)), latestSeq: 82, total: feed.length};
+  };
+  const {reader, state} = harness({overrides: {limit: 3, pageable: true}, read});
+  reader.start(); await settle();
+  assert.deepEqual(reader.snapshot().messages.map(value => Number(value.id)), [80, 81, 82]);
+  assert.equal(reader.snapshot().hasOlder, true);
+  // Dense guess first: the page before 80 holds 79 and overlaps what we have.
+  await reader.loadOlder();
+  assert.deepEqual(reader.snapshot().messages.map(value => Number(value.id)), [79, 80, 81, 82]);
+  assert.equal(state.calls.length, 2);
+  // Then the gap below 79: widen until 41–43 appear, walk forward to close the stretch up to 79.
+  await reader.loadOlder();
+  assert.deepEqual(reader.snapshot().messages.map(value => Number(value.id)), [41, 42, 43, 53, 79, 80, 81, 82]);
+  assert.ok(state.calls.length - 2 <= 6);
+  await reader.loadOlder();
+  assert.deepEqual(reader.snapshot().messages.map(value => Number(value.id)), [1, 2, 3, 4, 41, 42, 43, 53, 79, 80, 81, 82]);
+  assert.equal(reader.snapshot().hasOlder, false);
+  const calls = state.calls.length;
+  await reader.loadOlder();
+  assert.equal(state.calls.length, calls);
+  // Every request stayed within the SDK's bounds and only ever asked for what lies above `since`.
+  assert.ok(state.calls.every(call => call.limit === 3 && (call.since === undefined || call.since >= 0)));
+  reader.stop();
+});
+
+test('a walk that runs out of pages resumes where it stopped instead of starting over', async () => {
+  const feed = [1, 100000, 100001, 100002];
+  const read = ({since, limit}) => {
+    const seqs = since === undefined ? feed.slice(-limit) : feed.filter(seq => seq > since).slice(0, limit);
+    return {messages: seqs.map(seq => entry(seq)), latestSeq: 100002, total: feed.length};
+  };
+  const {reader, state} = harness({overrides: {limit: 3, pageable: true}, read});
+  reader.start(); await settle();
+  await reader.loadOlder();
+  assert.equal(reader.snapshot().messages.length, 3);
+  assert.equal(reader.snapshot().hasOlder, true);
+  const probed = state.calls.slice(1).map(call => call.since);
+  assert.equal(probed.length, 6);
+  await reader.loadOlder();
+  const resumed = state.calls.slice(7).map(call => call.since);
+  assert.ok(resumed[0] < probed[probed.length - 1]);
+  let guard = 0;
+  while (reader.snapshot().hasOlder && guard++ < 10) await reader.loadOlder();
+  assert.deepEqual(reader.snapshot().messages.map(value => Number(value.id)), feed);
+  assert.equal(reader.snapshot().hasOlder, false);
+  reader.stop();
+});
+
+test('a burst that outran the window is filled from the server before the timeline shows a hole', async () => {
+  let feed = [1, 2, 3];
+  const read = ({since, limit}) => {
+    const seqs = since === undefined ? feed.slice(-limit) : feed.filter(seq => seq > since).slice(0, limit);
+    return {messages: seqs.map(seq => entry(seq)), latestSeq: feed[feed.length - 1], total: feed.length};
+  };
+  const {reader, state} = harness({overrides: {limit: 3, pageable: true}, read});
+  reader.start(); await settle();
+  feed = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  await reader.refresh(); await settle();
+  assert.deepEqual(reader.snapshot().messages.map(value => Number(value.id)), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.deepEqual(state.calls.slice(1).map(call => call.since), [undefined, 3, 6]);
+  reader.stop();
+});
+
+test('loading older is refused where the transport cannot page, and never runs twice at once', async () => {
+  const {reader} = harness();
+  reader.start(); await settle();
+  await assert.rejects(reader.loadOlder(), {code: 'BACKGROUND_UNAVAILABLE'});
+  assert.equal(reader.snapshot().hasOlder, false);
+  const gate = deferred();
+  const paged = harness({overrides: {limit: 2, pageable: true}, read: ({since}) => since === undefined ? data([entry(8), entry(9)], 9) : gate.promise.then(() => ({messages: [entry(6), entry(7)], latestSeq: 9, total: 9}))});
+  paged.reader.start(); await settle();
+  const first = paged.reader.loadOlder(), second = paged.reader.loadOlder();
+  assert.equal(first, second);
+  gate.resolve(); await first;
+  assert.deepEqual(paged.reader.snapshot().messages.map(value => Number(value.id)), [6, 7, 8, 9]);
+  paged.reader.stop();
+  await assert.rejects(paged.reader.loadOlder(), {code: 'NOT_RUNNING'});
   reader.stop();
 });
 
@@ -387,7 +491,7 @@ test('missing or malformed identity clears cached messages and last success befo
     reader.start(); await settle(); assert.equal(reader.snapshot().messages.length, 1);
     state.identity = identity;
     await assert.rejects(reader.refresh(), {code: identity ? 'IDENTITY_MISMATCH' : 'NOT_CONNECTED'});
-    assert.deepEqual(reader.snapshot(), {identity: null, messages: [], latestSeq: null});
+    assert.deepEqual(reader.snapshot(), {identity: null, messages: [], latestSeq: null, total: null, hasOlder: false, lastRefresh: null});
     assert.equal(reader.status().lastSuccessAt, null); assert.equal(clock.timers.size, 0);
     assert.ok(!JSON.stringify(state.statuses).includes('DO_NOT_LEAK'));
     assert.equal(state.calls.length, 1); reader.stop();

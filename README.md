@@ -10,7 +10,7 @@ A Windows and macOS desktop home for your existing Being: Loom conversations, lo
 - Workspace browser, embedded web browser, and persistent PowerShell tabs.
 - Local Portal setup, process status, permissions, and update notifications.
 - Grove discovery, environment checks, and supported Kit installation.
-- Town and Channel entry points, subject to the connected service's capabilities.
+- Town and Channel entry points; pair with Town to sync messages and read Scrolls directly through the Client SDK without consuming Being chat turns.
 - Settings for appearance, reading, Loom connections, and model configuration.
 - Orchestrator mode: Being plans and evaluates; Codex, Cursor or Grok Build CLI workers execute, report progress beneath their conversation, and return results to that conversation.
 

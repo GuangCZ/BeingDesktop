@@ -89,7 +89,8 @@ function validTown(value, route, beingId, query) {
     : route === '/api/bonfire/mentions' ? record(value) && value.being === beingId && Array.isArray(value.mentions)
       : route === '/api/fireside/list' ? record(value) && Array.isArray(value.owned) && Array.isArray(value.joined)
         : route === '/api/fireside/members' ? Array.isArray(value)
-          : record(value) && value.being === beingId && Array.isArray(value.messages) && sequence(value.latest_seq));
+          : route === '/api/messages' ? record(value) && Array.isArray(value.messages)
+            : record(value) && value.being === beingId && Array.isArray(value.messages) && sequence(value.latest_seq));
   if (!valid || record(value) && (value.ok === false || Object.hasOwn(value, 'error')) || Buffer.byteLength(JSON.stringify(value)) > MAX_BYTES) throw failure('INVALID_RESPONSE');
   return value;
 }

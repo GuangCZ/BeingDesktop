@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="theme-settings.css">
   <link rel="stylesheet" href="onboarding.css">
   <link rel="stylesheet" href="town-app.css">
+  <link rel="stylesheet" href="chat-app.css">
   <link rel="stylesheet" href="feature-tasks.css">
   <link rel="stylesheet" href="town-library.css">
   <link rel="stylesheet" href="desktop-tools.css">
@@ -19,6 +20,7 @@
   <link rel="stylesheet" href="orchestration.css">
   <link rel="stylesheet" href="macos-glass.css">
   <script src="orchestration.js" defer></script>
+  <script src="chat-app.js" defer></script>
   <script src="vendor/xterm/xterm.js" defer></script>
   <script src="vendor/xterm/addon-fit.js" defer></script>
   <script src="terminal-panel.js" defer></script>
@@ -169,6 +171,7 @@
             </section>
             <div class="loom-panel" id="loom-panel" hidden>
               <div class="loom-toolbar" hidden><strong id="loom-being-name">Being</strong><button id="reconnect-inline">重新连接</button></div>
+              <div id="chat-native" aria-label="Being 对话" hidden></div>
               <div id="loom-host" aria-label="Loom 对话区域">
                 <div class="loom-placeholder" id="loom-placeholder">
                   <span class="loading-orbit" aria-hidden="true"></span>
@@ -246,6 +249,10 @@
                 <div class="secret-input"><svg class="icon"><use href="#i-link"/></svg><input id="settings-url" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴完整的 Loom 连接地址" required><button class="icon-button" type="button" data-reveal="settings-url" aria-label="显示 Loom 地址"><svg class="icon"><use href="#i-eye"/></svg></button></div>
                 <div class="form-footer"><details class="settings-note"><summary>连接说明</summary><p class="field-help">凭据在本机加密保存。切换身份或主动断开会清除未转交的围炉草稿；同身份重连会保留。</p></details><button class="button primary small-button" type="submit" id="settings-connect">保存并连接</button></div>
               </form>
+            </section>
+            <section class="settings-card" id="town-connection-settings" aria-labelledby="town-connection-heading">
+              <div class="card-heading"><div class="setting-icon"><svg class="icon"><use href="#i-link"/></svg></div><div><h3 id="town-connection-heading">Town 实时连接</h3><p>管理消息同步与本机配对。</p></div></div>
+              <div id="town-connection-controls"></div>
             </section>
             <section class="settings-card" id="model-settings" aria-labelledby="model-settings-heading">
               <div class="card-heading"><div class="setting-icon"><svg class="icon"><use href="#i-cpu"/></svg></div><div><h3 id="model-settings-heading">模型配置</h3><p>选择支持的模型，或使用自定义模型。</p></div></div>
@@ -325,6 +332,7 @@
             <section class="settings-card">
               <div class="card-heading"><div class="setting-icon"><svg class="icon"><use href="#i-settings"/></svg></div><div><h3>桌面偏好</h3></div></div>
               <label class="switch-row" for="close-to-tray"><span><strong>关闭窗口后保留在托盘</strong><span class="field-help">退出应用可在托盘菜单中操作。</span></span><input type="checkbox" id="close-to-tray" role="switch"><span class="switch-track" aria-hidden="true"></span></label>
+              <div class="reading-option"><label for="chat-mode"><span>对话模式</span><span class="field-help">原生模式直接调用 Being 接口，每个会话是一个独立场景；内嵌 Loom 为旧版回退入口。</span></label><select id="chat-mode"><option value="native">原生对话（默认）</option><option value="loom">内嵌 Loom 页面</option></select></div>
             </section>
             <section class="settings-card" id="orchestration-settings" data-mode-disabled="true">
               <div class="card-heading"><div><h3>Orchestrator 模式</h3><p class="field-help">本机任务由外部 Agent 执行，Being 负责协调和验收；原生通信、记忆等能力仍可直接使用。</p></div></div>

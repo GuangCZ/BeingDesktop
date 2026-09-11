@@ -12,7 +12,7 @@
 - 本机文件浏览、内置浏览器与持续终端会话（Windows PowerShell / macOS zsh）。
 - Portal 一键配置、进程与连接状态、权限管理和更新提示。
 - Grove 环境检查、受支持 Kit 的单项与批量安装。
-- Town、篝火、围炉与 Channel 入口。
+- Town、篝火、围炉与 Channel 入口；配对后通过 Town Client SDK 直接同步消息和读取卷轴，不占用 Being 对话。
 - 分栏设置、主题颜色、阅读字号、Loom 与模型配置。
 - 编排模式：Being 拆分和验收任务，外部 CLI Worker 执行，会话下显示状态与工具事件，最终结果回到原会话。
 

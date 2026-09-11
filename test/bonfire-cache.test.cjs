@@ -148,7 +148,7 @@ test('authoritative empty snapshots persist and malformed values do not overwrit
   const dir = await directory(t), cache = new BonfireCache({directory: dir, safeStorage: encryptedStorage()}), identityKey = 'persist:being-alice';
   const empty = {...snapshot(), messages: [], latestSeq: 0};
   assert.equal(await cache.save(identityKey, empty), true);
-  for (const value of [{...snapshot(), messages: Array.from({length: 201}, () => snapshot().messages[0])}, snapshot('x'.repeat(32001)), {...snapshot(), revision: 'invalid\nrevision'}]) {
+  for (const value of [{...snapshot(), messages: Array.from({length: 501}, () => snapshot().messages[0])}, snapshot('x'.repeat(32001)), {...snapshot(), revision: 'invalid\nrevision'}, {...snapshot(), messages: [{...snapshot().messages[0], replyTo: {id: 'p', beingId: 'x'.repeat(101), preview: ''}}]}]) {
     assert.equal(await cache.save(identityKey, value), false);
   }
   assert.equal(await cache.save('', snapshot()), false);

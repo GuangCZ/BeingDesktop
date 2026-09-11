@@ -24,7 +24,7 @@ api.setOnboardingStep=step=>ipcRenderer.invoke('being:setOnboardingStep',step);
 for(const name of ['inspectOnboarding','cancelOnboardingInspection'])api[name]=()=>ipcRenderer.invoke(`being:${name}`);
 for(const name of ['getModelConfig','saveModelConfig'])api[name]=(...args)=>ipcRenderer.invoke(`being:${name}`,...args);
 for (const name of ['getDesktopTools','desktopAction','setBrowserView','copyDesktopText','getTerminalState','readTerminal','terminalAction','readNativeText']) api[name]=(...args)=>ipcRenderer.invoke(`being:${name}`,...args);
-for(const [name,channel] of [['onFeatureTasks','being:feature-tasks'],['onTerminalState','being:terminal-state'],['onTerminalData','being:terminal-data'],['onTownMessages','being:town-messages'],['onWindowState','being:window-state']])api[name]=callback=>{
+for(const [name,channel] of [['onChatEvent','being:chat-event'],['onFeatureTasks','being:feature-tasks'],['onTerminalState','being:terminal-state'],['onTerminalData','being:terminal-data'],['onTownMessages','being:town-messages'],['onWindowState','being:window-state']])api[name]=callback=>{
   if(typeof callback!=='function')throw new TypeError('Expected callback');
   const listener=(_event,value)=>callback(value);ipcRenderer.on(channel,listener);
   return ()=>ipcRenderer.removeListener(channel,listener);
@@ -35,7 +35,7 @@ api.onToolsState=callback=>{
   ipcRenderer.on('being:tools-state',listener);
   return ()=>ipcRenderer.removeListener('being:tools-state',listener);
 };
-for (const name of ['getPortalPermissions','savePortalPermissions','getState','refresh','getTownCatalog','openTownPage','prepareTownFeature','prepareTownAssistance','prepareFiresideDraft','getTownAppState','refreshTownApp','getGroveCatalog','getGroveDetail','prepareGroveInstallation','beginChannelConnection','updateFeishuCredentials','checkChannelStatus','getFiresides','getFiresideMessages','getFiresideMembers','sendFiresideMessage','createFireside','joinFireside','deployPortal','connect','disconnect','reconnect','selectWorkspace','selectPortalWorkspace','openWorkspace','listWorkspace','selectPortalExecutable','selectPortalConfig','startPortal','stopPortal','testPortalConnection','setView','minimize','maximize','close','setCloseToTray','setTypography','exportDiagnostics']) {
+for (const name of ['setChatMode','getPortalPermissions','savePortalPermissions','getState','refresh','getTownCatalog','openTownPage','prepareTownFeature','prepareTownAssistance','prepareFiresideDraft','getTownAppState','refreshTownApp','getGroveCatalog','getGroveDetail','prepareGroveInstallation','beginChannelConnection','updateFeishuCredentials','checkChannelStatus','getFiresides','getFiresideMessages','getFiresideMembers','sendFiresideMessage','createFireside','joinFireside','deployPortal','connect','disconnect','reconnect','selectWorkspace','selectPortalWorkspace','openWorkspace','listWorkspace','selectPortalExecutable','selectPortalConfig','startPortal','stopPortal','testPortalConnection','setView','minimize','maximize','close','setCloseToTray','setTypography','exportDiagnostics']) {
   api[name] = (...args) => ipcRenderer.invoke(`being:${name}`, ...args);
 }
 // Electron strips custom Error fields. Preserve only known Town error categories.
@@ -44,7 +44,7 @@ townErrorCodes.add('TOWN_TOOL_NOT_CALLED');
 townErrorCodes.add('RESULT_SOURCE_NOT_CONFIGURED');
 townErrorCodes.add('READINESS_UNKNOWN');townErrorCodes.add('RESULT_UNCONFIRMED');
 townErrorCodes.add('NOT_SENT');
-for(const name of ['getTownCachedData','listScrolls','getScroll','listBeings','getBeingMembers','getBonfireMessages','getFiresides','getFiresideMessages','getFiresideMembers','getTownMessageSnapshot','refreshTownMessages','requestTownRead','sendBonfireMessage','sendFiresideMessage','beginChannelConnection','updateFeishuCredentials','checkChannelStatus']) {
+for(const name of ['chatView','chatSend','chatStop','chatReload','chatForgetSession','pairTownClient','forgetTownClient','prepareTownPairing','getTownCachedData','listScrolls','getScroll','listBeings','getBeingMembers','getBonfireMessages','getFiresides','getFiresideMessages','getFiresideMembers','getDirectMessages','sendDirectMessage','getTownMessageSnapshot','refreshTownMessages','loadOlderTownMessages','requestTownRead','sendBonfireMessage','sendFiresideMessage','beginChannelConnection','updateFeishuCredentials','checkChannelStatus']) {
   api[name]=async(...args)=>{
     const result=await ipcRenderer.invoke(`being:${name}`,...args);
     if(result?.__townError===true) {

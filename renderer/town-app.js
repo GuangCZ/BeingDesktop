@@ -1,15 +1,16 @@
 'use strict';
 
 (() => {
-  const ids = new Set(['grove', 'channel', 'portal', 'fireside', 'bonfire', 'scroll', 'beings']);
+  const ids = new Set(['grove', 'channel', 'portal', 'fireside', 'bonfire', 'inbox', 'scroll', 'beings']);
   const libraryIds = new Set(['scroll', 'beings']);
-  const names = { grove: '工具市场', channel: '消息渠道', portal: '电脑连接', fireside: '围炉', bonfire: '篝火', scroll: '卷轴', beings: '居民名录' };
+  const names = { grove: '工具市场', channel: '消息渠道', portal: '电脑连接', fireside: '围炉', bonfire: '篝火', inbox: '私信', scroll: '卷轴', beings: '居民名录' };
   const subtitles = {
     grove: '为 Being 发现新的能力。',
     channel: '让 Being 出现在你常用的聊天工具里。',
     portal: '把这台电脑上的工作区交给 Being 使用。',
-    fireside: '打开或选择围炉时先显示上次缓存的消息，再请 Being 读取一次；每 60 秒检查已有结果。',
-    bonfire: '打开时先显示上次缓存的消息，再请 Being 读取一次；每 60 秒检查已有结果。',
+    fireside: 'Town 实时同步围炉消息，断线恢复后自动更新。',
+    bonfire: 'Town 实时同步篝火消息，断线恢复后自动更新。',
+    inbox: '收到的私信。进入页面、手动刷新或收到新私信时读取。',
     scroll: '浏览卷轴文档，在这里继续阅读。',
     beings: '认识 Town 的 Being 与人类伙伴。',
   };
@@ -42,14 +43,16 @@
   let townRevision = 0;
   let lastPublicRender = '';
   let messageSubscription = null;
+  let bonfireMembersCollapsed = false;
   const busy = new Set();
   const townReads = new Map();
   const model = {
     grove: { kits: [], count: 0, query: '', category: '', status: 'idle', error: '', selected: '', detail: null, detailStatus: 'idle', detailError: '', checks: new Map(), operations: new Map(), operationErrors: new Map(), batch: null, batchRunning: false, expanded: new Set(), scrollTop: 0 },
     channel: { selected: 'feishu', wizard: false, status: 'unknown', detail: '', qr: '', step: 0 },
     portal: { confirm: false, status: '', detail: '', permissions: { files: true, exec: false, web: false } },
-    fireside: { rooms: [], selected: '', messages: [], members: [], status: 'idle', error: '', messageError: '', roomError: '', latestSeq: null, refresh: {}, drafts: new Map(), deliveries: [], showMembers: null, dialog: '' },
-    bonfire: { messages: [], members: [], status: 'idle', error: '', memberError: '', sendError: '', draft: '', sender: '', latestSeq: null, refresh: {}, mentionIndex: 0, mentionClosed: false },
+    fireside: { rooms: [], selected: '', messages: [], members: [], status: 'idle', error: '', messageError: '', roomError: '', latestSeq: null, refresh: {}, drafts: new Map(), replies: new Map(), deliveries: [], showMembers: null, dialog: '', hasOlder: false, lastRefresh: null, loadingOlder: false, olderError: '' },
+    bonfire: { messages: [], members: [], status: 'idle', error: '', memberError: '', sendError: '', draft: '', sender: '', latestSeq: null, refresh: {}, mentionIndex: 0, mentionClosed: false, replyTo: null, hasOlder: false, lastRefresh: null, loadingOlder: false, olderError: '' },
+    inbox: { messages: [], status: 'idle', error: '', sendError: '', recipient: '', draft: '', replyTo: null },
   };
 
   const string = (value, fallback = '') => typeof value === 'string' && value ? value : fallback;
@@ -62,6 +65,35 @@
     return result;
   };
   const append = (parent, ...children) => { parent.append(...children.filter(Boolean)); return parent; };
+  // Town tags every message with who actually spoke: "being" is the Being itself, while
+  // "client:<name>" is a human speaking through a paired client token. Only the borrowed
+  // case is labelled, matching the SDK reference client.
+  const viaBadge = (entry) => {
+    const via = string(entry.via);
+    return via.startsWith('client:') ? node('span', 'ta-message-via', `借 ${via.slice(7)}`) : null;
+  };
+  // Town reports the parent of a reply as {id, beingId, preview}; the preview is a short excerpt.
+  const replyQuote = (entry) => {
+    const parent = record(entry.replyTo);
+    if (!parent.id) return null;
+    const who = string(parent.beingId, '某位 Being');
+    const preview = string(parent.preview);
+    return append(node('div', 'ta-message-quote'), node('span', 'ta-message-quote-who', `回复 ${who}`), node('span', 'ta-message-quote-text', preview || '（原文未提供）'));
+  };
+  const replyButton = (entry, onReply) => {
+    const control = button('回复', () => onReply(entry), 'ta-quiet ta-message-reply');
+    control.setAttribute('aria-label', `回复 ${string(entry.beingName, string(entry.senderName, '这条消息'))}`);
+    return control;
+  };
+  // Shown above a composer while a reply target is pending.
+  const replyBanner = (parent, onCancel) => {
+    const target = record(parent);
+    if (!target.id) return null;
+    const strip = append(node('div', 'ta-reply-banner'),
+      node('span', 'ta-reply-banner-text', `正在回复 ${string(target.beingName, string(target.beingId, '某位 Being'))}：${string(target.preview, '（原文未提供）').slice(0, 60)}`),
+      button('取消', onCancel, 'ta-quiet ta-reply-cancel'));
+    return strip;
+  };
   const text = (target, value) => { target.textContent = value == null ? '' : String(value); };
   const visible = (target, show) => { target.hidden = !show; };
   const button = (label, action, variant = '', id = '') => {
@@ -95,6 +127,10 @@
   };
   const can = (id) => access(id) === 'ready';
   const canSendFireside = () => can('firesideSend') || can('fireside');
+  const canSendBonfire = () => publicState.connection?.status === 'connected';
+  // reply_to only travels on the paired client path; the Being relay fallback has no way to carry it,
+  // so the control is not offered when replying would silently drop the parent.
+  const canReply = () => record(town.client).paired === true;
   const beingName = () => string(town.identity?.displayName, string(publicState.connection?.beingName, '当前 Being'));
   const beingId = () => string(town.identity?.beingId);
   const sameEpoch = (value) => value === epoch;
@@ -103,19 +139,19 @@
   const connected = () => publicState.connection?.status === 'connected';
   const townReadKey = () => JSON.stringify([epoch, current, current === 'fireside' ? [model.fireside.selected, roomSelection] : '']);
   const refreshErrors = {
-    AUTH_REQUIRED: 'Being 的连接或 Town 读取被拒绝，请检查当前 Being 的访问状态。',
+    AUTH_REQUIRED: '请在「设置 → 连接」中用 Being 提供的六位配对码连接 Town。',
     IDENTITY_MISMATCH: '后台身份与当前 Being 不一致，请重新连接。',
     BACKGROUND_UNAVAILABLE: '消息读取接口暂不可用，请稍后手动更新。',
     NOT_CONNECTED: '请先连接 Being。', NETWORK_ERROR: '连接暂时中断，请稍后手动更新。',
     RATE_LIMITED: '请求较频繁，请稍后手动更新。', SERVICE_ERROR: 'Town 服务暂时不可用，请稍后手动更新。',
     INVALID_RESPONSE: '消息格式未通过检查，已保留上次同步内容。',
-    TOWN_TOOL_NOT_CALLED: 'Being 没有调用消息读取工具。请在模型设置检查工具限制，再请 Being 读取一次。',
+    TOWN_TOOL_NOT_CALLED: 'Being 没有调用消息读取工具。请在模型设置检查工具限制，再立即同步。',
     RESULT_SOURCE_NOT_CONFIGURED: 'Being 的读取结果只有摘要，尚未配置完整结果通道；刷新显示不会补全消息。',
     BUSY: 'Being 正在处理其他消息，请空闲后再点击更新。',
     READINESS_UNKNOWN: '未能确认 Being 是否空闲，本次读取未发送。请重试。',
     RESULT_UNCONFIRMED: '读取已发送，但尚未取得可核对结果。自动检查已停止，请在功能任务中查看。',
     REQUEST_ACCEPTED: '请求已送达 Being，结果待确认。请等待当前对话完成，不要重复提交。',
-    SBS_NOT_CONFIGURED: '后台采集尚未设置，可请 Being 读取一次。',
+    SBS_NOT_CONFIGURED: '后台采集尚未设置，可立即同步。',
     INCOMPLETE_RESULT: 'Being 的工具结果不完整，已保留上次同步内容。',
     RESULT_SOURCE_UNAVAILABLE: '本机工具结果通道暂不可用，请稍后手动更新。',
   };
@@ -131,12 +167,14 @@
     const collected = timestamp(status.lastSuccessAt, '最近采集');
     const paused = status.status === 'paused';
     const permission = /auth|trust|permission/i.test(`${status.reason || ''} ${status.errorCode || ''}`);
-    const prefix = !connected() ? '等待连接' : paused && permission ? 'Being 读取被拒绝' : backgroundNotConfigured(state) ? '后台采集尚未设置，可请 Being 读取一次' : status.errorCode === 'REQUEST_ACCEPTED' ? '请求已送达 · 等待 Being 完成' : status.reason === 'being_busy' ? 'Being 正忙 · 稍后可读取一次' : status.status === 'refreshing' ? '正在检查后台结果' : status.status === 'error' ? '结果检查失败 · 可刷新显示' : status.reason === 'waiting_sbs' || !collected ? '等待 Being 后台读取' : '已显示读取结果';
+    const prefix = !connected() ? '等待连接' : paused && permission ? 'Town 需要配对' : backgroundNotConfigured(state) ? '后台采集尚未设置，可立即同步' : status.errorCode === 'REQUEST_ACCEPTED' ? '请求已送达 · 等待 Being 完成' : status.reason === 'being_busy' ? 'Being 正忙 · 稍后可读取一次' : status.status === 'refreshing' ? '正在同步 Town 消息' : status.status === 'error' ? '结果检查失败 · 可刷新显示' : status.reason === 'waiting_sbs' || !collected ? '等待 Town 同步' : '已显示读取结果';
     return [prefix, checked, collected, status.stale ? '显示上次同步内容' : ''].filter(Boolean).join(' · ');
   }
 
   function acceptTownMessages(value) {
     const envelope = record(value);
+    // dm arrives as a bare hint: the inbox is not part of background collection.
+    if (envelope.kind === 'dm') { if (visibleModule('inbox')) void loadInbox(); return true; }
     if (!['bonfire', 'fireside'].includes(envelope.kind)) return false;
     if (envelope.kind === 'fireside' && envelope.firesideId !== model.fireside.selected) return false;
     const snapshot = record(envelope.snapshot);
@@ -147,6 +185,11 @@
     state.messages = array(snapshot.messages);
     state.source = snapshot.source === 'being_relay' ? 'being_relay' : '';
     state.latestSeq = snapshot.latestSeq ?? null;
+    // The accumulated timeline says whether history continues above what is shown, and where the
+    // last refresh that brought something new started.
+    state.hasOlder = snapshot.hasOlder === true;
+    const refresh = record(snapshot.lastRefresh);
+    state.lastRefresh = Number.isSafeInteger(refresh.boundarySeq) ? {at: Number(refresh.at) || 0, boundarySeq: refresh.boundarySeq} : null;
     state.refresh = record(envelope.status);
     if (envelope.kind === 'bonfire') state.status = state.refresh.status === 'refreshing' ? 'loading' : state.refresh.status;
     state[envelope.kind === 'fireside' ? 'messageError' : 'error'] = ['paused', 'error'].includes(state.refresh.status) ? refreshErrors[state.refresh.errorCode] || (state.refresh.status === 'paused' ? '后台读取已暂停，恢复连接后继续。' : '后台读取暂时失败，请稍后重试。') : '';
@@ -155,6 +198,93 @@
       else renderMessages();
     }
     return true;
+  }
+
+  // Older history above the shown messages: one bounded walk per request, triggered from the
+  // top of the list. The reply is the same envelope a refresh returns.
+  async function loadOlderMessages(kind) {
+    const state = model[kind];
+    if (!connected() || state.loadingOlder || !state.hasOlder) return;
+    const firesideId = kind === 'fireside' ? model.fireside.selected : '';
+    if (kind === 'fireside' && !firesideId) return;
+    const requestEpoch = epoch, selection = roomSelection;
+    const isCurrent = () => sameEpoch(requestEpoch) && (kind !== 'fireside' || selection === roomSelection && model.fireside.selected === firesideId);
+    state.loadingOlder = true; state.olderError = '';
+    renderTimeline(kind);
+    try {
+      const result = await call('loadOlderTownMessages', kind === 'fireside' ? { kind, firesideId } : { kind });
+      if (isCurrent()) acceptTownMessages(result);
+    } catch (error) {
+      if (isCurrent()) state.olderError = errorText(error);
+    } finally {
+      if (isCurrent()) { state.loadingOlder = false; renderTimeline(kind); }
+    }
+  }
+  function renderTimeline(kind) {
+    if (!visibleModule(kind)) return;
+    if (kind === 'bonfire') renderBonfire(); else renderMessages();
+  }
+  // The control above the first message: more history, loading it, or the beginning of the feed.
+  function olderControl(kind) {
+    const state = model[kind];
+    if (state.loadingOlder) return node('p', 'ta-timeline-edge ta-muted', '正在读取更早的消息…');
+    if (state.olderError) return append(node('p', 'ta-timeline-edge'), node('span', 'ta-muted', state.olderError), button('重试', () => { state.olderError = ''; void loadOlderMessages(kind); }, 'ta-quiet'));
+    if (state.hasOlder) return button('加载更早的消息', () => { void loadOlderMessages(kind); }, 'ta-quiet ta-load-older');
+    return state.messages.length ? node('p', 'ta-timeline-edge ta-muted', '已经是最早的消息') : null;
+  }
+  // "The last refresh started here": the divider before the first message the last refresh brought.
+  function refreshMarker(state, entries) {
+    const boundary = state.lastRefresh?.boundarySeq;
+    if (!Number.isSafeInteger(boundary)) return { before: null, node: null };
+    const first = entries.find((entry) => Number(entry.id) > boundary);
+    if (!first) return { before: null, node: null };
+    const at = state.lastRefresh.at ? new Date(state.lastRefresh.at) : null;
+    const stamp = at && !Number.isNaN(at.getTime()) ? at.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
+    const marker = node('div', 'ta-refresh-mark'); marker.setAttribute('role', 'separator');
+    marker.append(node('span', '', `上次刷新到这里${stamp ? ` · ${stamp}` : ''}`));
+    return { before: first.id, node: marker };
+  }
+  // The sticky jump control at the foot of a list: to the refresh marker when there is one, else
+  // to the newest message. Shown only while the target is out of view.
+  function jumpControl(container) {
+    const control = button('', () => {
+      const marker = container.querySelector('.ta-refresh-mark');
+      if (marker) container.scrollTop = Math.max(0, marker.offsetTop - 12);
+      else container.scrollTop = container.scrollHeight;
+      updateJump(container);
+    }, 'ta-jump');
+    control.hidden = true;
+    return control;
+  }
+  function updateJump(container) {
+    const control = container.querySelector('.ta-jump');
+    if (!control) return;
+    const marker = container.querySelector('.ta-refresh-mark');
+    const top = container.scrollTop, bottom = top + container.clientHeight;
+    let away;
+    if (marker) {
+      // The list is the marker's offsetParent, so offsetTop is its place in the scrolled content.
+      const at = marker.offsetTop;
+      away = at < top || at > bottom - 40;
+      text(control, '直达上次刷新处');
+    } else {
+      away = container.scrollHeight - bottom > 120;
+      text(control, '回到最新');
+    }
+    control.hidden = !away;
+  }
+  function watchTimeline(container, kind) {
+    container.addEventListener('scroll', () => {
+      updateJump(container);
+      if (container.scrollTop < 80 && model[kind].hasOlder && !model[kind].loadingOlder) void loadOlderMessages(kind);
+    }, { passive: true });
+  }
+  // Keep what the reader is looking at when older messages are inserted above it.
+  function keepPosition(container, before, nearBottom, changed) {
+    if (changed || nearBottom) { container.scrollTop = container.scrollHeight; return; }
+    const firstId = Number(container.dataset.firstId || 0), previousFirst = Number(before.firstId || 0);
+    const prepended = firstId && previousFirst && firstId < previousFirst;
+    container.scrollTop = prepended ? before.scrollTop + (container.scrollHeight - before.scrollHeight) : before.scrollTop;
   }
 
   async function readTownMessages(kind, firesideId = '', manual = false) {
@@ -214,26 +344,77 @@
     connected ? helpButton(operation) : button('连接 Being', () => options.onNavigateChat?.(), 'ta-quiet'));
   }
 
+  function buildTownPairing() {
+    ui.pairPanel = node('div', 'ta-town-pair');
+    ui.pairPanel.setAttribute('aria-label', 'Town 连接');
+    ui.pairStatus = node('p', 'field-help');
+    ui.pairStatus.setAttribute('role', 'status');
+    ui.pairNotice = notice();
+    ui.pairCode = node('input'); ui.pairCode.type = 'password'; ui.pairCode.maxLength = 6;
+    ui.pairCode.placeholder = '六位配对码'; ui.pairCode.autocomplete = 'off'; ui.pairCode.setAttribute('aria-label', 'Town 六位配对码');
+    ui.pairSubmit = button('配对 Town', async () => {
+      if (busy.has('town-pair')) return;
+      const code = ui.pairCode.value.trim().toUpperCase(); ui.pairCode.value = '';
+      const requestEpoch = epoch;
+      setNotice(ui.pairNotice, '');
+      busy.add('town-pair'); renderTownPairing();
+      try {
+        const result = await call('pairTownClient', {code});
+        if (!sameEpoch(requestEpoch)) return;
+        town.client = result;
+        await loadTownState();
+      } catch (error) { if (sameEpoch(requestEpoch)) setNotice(ui.pairNotice, errorText(error), true); }
+      finally { busy.delete('town-pair'); renderTownPairing(); }
+    }, 'ta-primary', 'town-pair-submit');
+    ui.pairHelp = button('向 Being 获取配对码', async () => {
+      try { await call('prepareTownPairing'); options.onNavigateChat?.(); }
+      catch (error) { setNotice(ui.pairNotice, errorText(error), true); }
+    }, 'ta-quiet', 'town-pair-help');
+    ui.pairForget = button('清除本机配对', async () => {
+      setNotice(ui.pairNotice, '');
+      try { await call('forgetTownClient'); await loadTownState(); renderTownPairing(); }
+      catch (error) { setNotice(ui.pairNotice, errorText(error), true); }
+    }, 'ta-quiet', 'town-pair-forget');
+    ui.pairSubmit.className = 'button primary small-button';
+    ui.pairHelp.className = ui.pairForget.className = 'button quiet small-button';
+    append(ui.pairPanel, ui.pairStatus, append(node('div', 'inline-actions'), ui.pairCode, ui.pairSubmit, ui.pairHelp, ui.pairForget), ui.pairNotice);
+    document.getElementById('town-connection-controls')?.replaceChildren(ui.pairPanel);
+  }
+
+  function renderTownPairing() {
+    if (!ui.pairPanel) return;
+    const client = record(town.client), paired = client.paired === true;
+    const needsPair = !paired || ['auth_required', 'identity_mismatch'].includes(client.status);
+    const labels = {paused: 'Town 同步已暂停', connected: 'Town 实时连接已建立', connecting: 'Town 正在连接', reconnecting: 'Town 连接中断，正在重连', auth_required: 'Town 需要配对', identity_mismatch: 'Town 身份不一致，请重新配对'};
+    text(ui.pairStatus, labels[client.status] || '连接 Town 后直接同步消息');
+    for (const control of [ui.pairCode, ui.pairSubmit, ui.pairHelp]) control.hidden = !needsPair;
+    ui.pairForget.hidden = !paired;
+    ui.pairSubmit.disabled = !connected() || busy.has('town-pair');
+    ui.pairHelp.disabled = !connected();
+  }
+
   function build() {
     root.classList.add('town-app');
     root.setAttribute('aria-label', 'Town 应用');
     ui.heading = node('h2');
     ui.subtitle = node('p', 'ta-subtitle');
     ui.refresh = button('刷新', () => void refresh(), 'ta-quiet', 'town-app-refresh');
-    ui.readOnce = button('请 Being 读取一次', () => void requestReadOnce(), 'ta-secondary', 'town-app-read-once');
-    ui.readOnce.title = '请求 Being 在当前会话读取一次 Town 数据，会占用当前会话。';
+    ui.readOnce = button('立即同步', () => void requestReadOnce(), 'ta-secondary', 'town-app-read-once');
+    ui.readOnce.title = '直接从 Town 获取最新消息。';
     ui.readOnce.hidden = true;
     const tasks = button('功能任务', () => options.onTasks?.(current), 'ta-quiet', 'town-feature-tasks');
     tasks.hidden = typeof options.onTasks !== 'function';
     const top = append(node('header', 'ta-page-header'), append(node('div'), ui.heading, ui.subtitle), append(node('div', 'ta-actions'), tasks, ui.refresh, ui.readOnce));
     ui.notice = notice();
     ui.content = node('div', 'ta-app-content');
+    buildTownPairing();
     root.replaceChildren(top, ui.notice, ui.content);
     buildGrove();
     buildChannel();
     buildPortal();
     buildFireside();
     buildBonfire();
+    buildInbox();
     window.beingTownLibrary?.init({ root: ui.content, bridge, onNavigateChat: options.onNavigateChat });
   }
 
@@ -903,6 +1084,7 @@
     ui.roomMessages = node('div', 'ta-room-messages');
     ui.roomMessages.setAttribute('aria-label', '围炉消息');
     ui.roomMessages.setAttribute('aria-live', 'polite');
+    watchTimeline(ui.roomMessages, 'fireside');
     ui.roomComposer = node('div', 'ta-composer ta-fireside-composer ta-capsule-composer');
     ui.roomDraft = node('textarea', 'ta-input ta-capsule-input');
     ui.roomDraft.id = 'fireside-draft'; ui.roomDraft.rows = 1; ui.roomDraft.maxLength = 32000;
@@ -919,7 +1101,8 @@
     ui.roomSendIcon = icon('external');
     append(ui.roomSend, ui.roomSendLabel, ui.roomSendIcon);
     append(ui.roomComposer, append(node('div', 'ta-composer-capsule'), ui.roomDraft, ui.roomSend));
-    append(ui.roomCenter, ui.roomHeading, ui.roomStatus, ui.roomNotice, ui.roomMessages, ui.roomComposer);
+    ui.roomReply = node('div', 'ta-reply-slot');
+    append(ui.roomCenter, ui.roomHeading, ui.roomStatus, ui.roomNotice, ui.roomMessages, ui.roomReply, ui.roomComposer);
     ui.roomMembers = node('aside', 'ta-members'); ui.roomMembers.id = 'fireside-members'; ui.roomMembers.setAttribute('aria-label', '围炉成员');
     ui.roomDialog = node('div', 'ta-room-dialog'); ui.roomDialog.hidden = true;
     append(page, rooms, ui.roomCenter, ui.roomMembers, ui.roomDialog);
@@ -933,7 +1116,7 @@
     else if (fireside.status === 'loading' && !fireside.rooms.length) ui.roomList.append(message('读取围炉中', ''));
     else if (fireside.error) ui.roomList.append(message('暂时无法读取围炉', fireside.error, button('重试', () => void loadRooms(), 'ta-secondary')));
     else if (fireside.status === 'ready' && !fireside.rooms.length) ui.roomList.append(message('还没有围炉', ''));
-    else if (fireside.status === 'idle') ui.roomList.append(message('围炉目录尚未读取', '可请 Being 读取一次；刷新显示只检查已有结果。'));
+    else if (fireside.status === 'idle') ui.roomList.append(message('围炉目录尚未读取', '配对 Town 后可直接读取围炉目录。'));
     for (const room of connected() ? fireside.rooms : []) {
       const id = String(room.id);
       const row = button('', () => void selectRoom(id, { readOnce: true }), 'ta-room-row');
@@ -960,6 +1143,12 @@
   function renderComposer() {
     const fireside = model.fireside;
     const enabled = canSendFireside() && Boolean(fireside.selected) && connected();
+    if (ui.roomReply) {
+      if (!canReply()) fireside.replies.delete(fireside.selected);
+      ui.roomReply.replaceChildren();
+      const banner = replyBanner(fireside.replies.get(fireside.selected), () => { fireside.replies.delete(fireside.selected); renderFireside(); });
+      if (banner) ui.roomReply.append(banner);
+    }
     const pending = busy.has(`send:${fireside.selected}`);
     const canCarry = publicState.connection?.status === 'connected' && Number.isSafeInteger(town.identity?.connectionRevision);
     const carryPending = busy.has('draft-handoff');
@@ -997,25 +1186,34 @@
     visible(ui.roomStatus, showStatus);
     const error = [fireside.roomError, fireside.messageError].filter(Boolean).join(' ');
     setNotice(ui.roomNotice, error, Boolean(error));
-    const messagesKey = JSON.stringify([connected(), fireside.selected, room?.name, fireside.messages, fireside.deliveries, busy.has('room'), error, fireside.refresh.status, backgroundNotConfigured(fireside)]);
+    const messagesKey = JSON.stringify([connected(), fireside.selected, room?.name, fireside.messages, fireside.deliveries, busy.has('room'), error, fireside.refresh.status, backgroundNotConfigured(fireside), canReply(), fireside.hasOlder, fireside.loadingOlder, fireside.olderError, fireside.lastRefresh]);
     if (ui.roomMessages.dataset.rendered === messagesKey) { renderComposer(); return; }
     const nearBottom = ui.roomMessages.scrollHeight - ui.roomMessages.scrollTop - ui.roomMessages.clientHeight < 80;
-    const scrollTop = ui.roomMessages.scrollTop;
+    const before = { scrollTop: ui.roomMessages.scrollTop, scrollHeight: ui.roomMessages.scrollHeight, firstId: ui.roomMessages.dataset.firstId };
     const changedRoom = ui.roomMessages.dataset.room !== fireside.selected;
     ui.roomMessages.dataset.rendered = messagesKey; ui.roomMessages.dataset.room = fireside.selected;
+    ui.roomMessages.dataset.firstId = connected() && fireside.messages.length ? String(fireside.messages[0].id) : '';
     ui.roomMessages.replaceChildren();
+    if (connected() && room && fireside.messages.length) ui.roomMessages.append(olderControl('fireside'));
+    const marker = refreshMarker(fireside, connected() && room ? fireside.messages : []);
     if (!connected()) ui.roomMessages.append(message('连接 Being 后同步围炉', ''));
     else if (!room) ui.roomMessages.append(message('选择一个围炉', ''));
     else if (!fireside.messages.length && (busy.has('room') || fireside.refresh.status === 'refreshing')) ui.roomMessages.append(message('读取消息中', ''));
     else if (!fireside.messages.length && error) ui.roomMessages.append(message('消息尚未同步', error));
-    else if (!fireside.messages.length && !fireside.refresh.lastSuccessAt) ui.roomMessages.append(message(backgroundNotConfigured(fireside) ? '后台采集尚未设置' : '等待 Being 后台读取', '刷新显示只检查已有结果，也可请 Being 读取一次。'));
+    else if (!fireside.messages.length && !fireside.refresh.lastSuccessAt) ui.roomMessages.append(message(backgroundNotConfigured(fireside) ? '后台采集尚未设置' : '等待 Town 同步', '配对 Town 后自动同步，也可点击立即同步。'));
     else if (!fireside.messages.length) ui.roomMessages.append(message('这里还没有消息', ''));
     for (const entry of connected() ? fireside.messages : []) {
+      if (marker.node && entry.id === marker.before) ui.roomMessages.append(marker.node);
       const mine = bonfireSender(entry) === beingId();
       const messageNode = node('article', `ta-message${mine ? ' is-mine' : ''}`);
       const time = entry.createdAt || entry.at ? new Date(entry.createdAt || entry.at) : null;
       const timestamp = time && !Number.isNaN(time.getTime()) ? time.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-      append(messageNode, append(node('div', 'ta-message-meta'), node('strong', '', string(entry.beingName, string(entry.speaker_name, bonfireSender(entry) || 'Being'))), node('span', '', `${timestamp}${entry.revisedAt || entry.revised_at ? ' · 已编辑' : ''}`)), node('p', 'ta-message-body', string(entry.content, string(entry.message))));
+      const author = string(entry.beingName, string(entry.speaker_name, bonfireSender(entry) || 'Being'));
+      append(messageNode,
+        append(node('div', 'ta-message-meta'), node('strong', '', author), viaBadge(entry), node('span', '', `${timestamp}${entry.revisedAt || entry.revised_at ? ' · 已编辑' : ''}`),
+          canSendFireside() && canReply() ? replyButton({...entry, beingName: author}, startFiresideReply) : null),
+        replyQuote(entry),
+        node('p', 'ta-message-body', string(entry.content, string(entry.message))));
       ui.roomMessages.append(messageNode);
     }
     for (const delivery of canSendFireside() ? fireside.deliveries.filter((entry) => entry.room === fireside.selected) : []) {
@@ -1029,7 +1227,9 @@
       }, 'ta-quiet'));
       ui.roomMessages.append(item);
     }
-    ui.roomMessages.scrollTop = nearBottom || changedRoom ? ui.roomMessages.scrollHeight : scrollTop;
+    ui.roomMessages.append(jumpControl(ui.roomMessages));
+    keepPosition(ui.roomMessages, before, nearBottom, changedRoom);
+    updateJump(ui.roomMessages);
     renderComposer();
   }
 
@@ -1092,11 +1292,13 @@
     fireside.drafts.set(room, messageText); fireside.roomError = '';
     busy.add(`send:${room}`); renderMessages();
     try {
-      const result = record(await call('sendFiresideMessage', { firesideId: room, message: messageText, connectionRevision: town.identity?.connectionRevision, requestId: delivery.requestId }));
+      const parent = fireside.replies.get(room);
+      const result = record(await call('sendFiresideMessage', { firesideId: room, message: messageText, connectionRevision: town.identity?.connectionRevision, requestId: delivery.requestId, ...(parent ? { replyTo: parent.id } : {}) }));
       if (!sameEpoch(requestEpoch)) return;
       if (result.status === 'uncertain' || result.ok !== true) delivery.status = 'uncertain';
       else {
         fireside.deliveries = fireside.deliveries.filter((entry) => entry !== delivery);
+        fireside.replies.delete(room);
         if (fireside.drafts.get(room) === messageText) fireside.drafts.set(room, '');
         if (fireside.selected === room) {
           if (ui.roomDraft.value === messageText) ui.roomDraft.value = '';
@@ -1158,12 +1360,19 @@
     page.setAttribute('aria-label', '篝火对话');
     const sidebar = node('aside', 'ta-bonfire-sidebar'); sidebar.setAttribute('aria-label', 'Being 成员筛选');
     ui.bonfireMembers = node('div', 'ta-bonfire-members');
-    append(sidebar, node('h3', '', 'Being members'), ui.bonfireMembers);
+    ui.bonfireMembers.id = 'bonfire-members';
+    ui.bonfireMembersToggle = button('', () => {
+      bonfireMembersCollapsed = !bonfireMembersCollapsed;
+      renderBonfireMembersLayout();
+    }, 'ta-quiet ta-bonfire-members-toggle', 'bonfire-members-toggle');
+    ui.bonfireMembersToggle.append(icon('chevron'));
+    ui.bonfireMembersToggle.setAttribute('aria-controls', 'bonfire-members');
+    append(sidebar, append(node('div', 'ta-bonfire-members-heading'), node('h3', '', 'Being members'), ui.bonfireMembersToggle), ui.bonfireMembers);
+    renderBonfireMembersLayout();
     const center = node('div', 'ta-room-center');
-    ui.bonfireTitle = node('h3', '', '篝火'); ui.bonfireStatus = node('p', 'ta-muted'); ui.bonfireStatus.id = 'bonfire-refresh-status';
-    ui.bonfireNotice = notice();
     ui.bonfireMessages = node('div', 'ta-room-messages'); ui.bonfireMessages.id = 'bonfire-messages';
     ui.bonfireMessages.setAttribute('role', 'log'); ui.bonfireMessages.setAttribute('aria-label', '篝火消息'); ui.bonfireMessages.setAttribute('aria-live', 'polite');
+    watchTimeline(ui.bonfireMessages, 'bonfire');
     const composer = node('div', 'ta-composer ta-bonfire-composer ta-capsule-composer');
     ui.bonfireDraft = node('textarea', 'ta-input ta-capsule-input'); ui.bonfireDraft.id = 'bonfire-draft'; ui.bonfireDraft.rows = 1; ui.bonfireDraft.maxLength = 4000;
     ui.bonfireDraft.placeholder = '在篝火里聊聊…'; ui.bonfireDraft.setAttribute('aria-label', '篝火消息草稿');
@@ -1187,7 +1396,11 @@
     ui.bonfireSendLabel = node('span', 'visually-hidden');
     append(ui.bonfireSend, ui.bonfireSendLabel, icon('arrow'));
     append(composer, append(node('div', 'ta-composer-capsule'), ui.bonfireMentions, ui.bonfireDraft, ui.bonfireSend));
-    append(center, append(node('header', 'ta-room-heading'), ui.bonfireTitle), ui.bonfireStatus, ui.bonfireNotice, ui.bonfireMessages, composer);
+    ui.bonfireFeedback = node('p', 'visually-hidden'); ui.bonfireFeedback.id = 'bonfire-send-feedback'; ui.bonfireFeedback.setAttribute('role', 'status');
+    ui.bonfireSend.setAttribute('aria-describedby', ui.bonfireFeedback.id);
+    append(composer, ui.bonfireFeedback);
+    ui.bonfireReply = node('div', 'ta-reply-slot');
+    append(center, ui.bonfireMessages, ui.bonfireReply, composer);
     append(page, sidebar, center); ui.content.append(page);
   }
 
@@ -1215,9 +1428,18 @@
   function renderBonfireComposer() {
     const state = model.bonfire;
     const connected = publicState.connection?.status === 'connected';
+    if (ui.bonfireReply) {
+      if (!canReply()) state.replyTo = null;
+      ui.bonfireReply.replaceChildren();
+      const banner = replyBanner(state.replyTo, () => { state.replyTo = null; renderBonfire(); });
+      if (banner) ui.bonfireReply.append(banner);
+    }
     ui.bonfireSend.disabled = !connected || !state.draft.trim() || busy.has('bonfire-send');
     text(ui.bonfireSendLabel, busy.has('bonfire-send') ? '处理中…' : state.sendRequest?.content === state.draft && state.sendRequest.uncertain ? '核对发送结果' : '发送到篝火');
     ui.bonfireSend.setAttribute('aria-busy', String(busy.has('bonfire-send')));
+    const feedback = state.sendRequest?.uncertain ? '发送结果待确认，草稿已保留。' : state.sendError;
+    text(ui.bonfireFeedback, feedback || '');
+    ui.bonfireSend.title = feedback || ui.bonfireSendLabel.textContent;
     const suggestions = connected ? bonfireSuggestions() : [];
     if (state.mentionIndex >= suggestions.length) state.mentionIndex = 0;
     ui.bonfireMentions.replaceChildren();
@@ -1236,15 +1458,19 @@
     });
   }
 
+  function renderBonfireMembersLayout() {
+    ui.bonfirePage.classList.toggle('members-collapsed', bonfireMembersCollapsed);
+    ui.bonfireMembers.hidden = bonfireMembersCollapsed;
+    const label = bonfireMembersCollapsed ? '展开成员栏' : '收起成员栏';
+    ui.bonfireMembersToggle.title = label;
+    ui.bonfireMembersToggle.setAttribute('aria-label', label);
+    ui.bonfireMembersToggle.setAttribute('aria-expanded', String(!bonfireMembersCollapsed));
+  }
+
   function renderBonfire() {
     const state = model.bonfire;
     const connected = publicState.connection?.status === 'connected';
-    const selectedMember = state.members.find((member) => memberId(member) === state.sender);
-    text(ui.bonfireTitle, state.sender ? `${selectedMember ? memberName(selectedMember) : state.sender} 的消息` : '篝火');
-    const showStatus = true;
-    text(ui.bonfireStatus, showStatus ? refreshLabel(state) : '');
-    visible(ui.bonfireStatus, showStatus);
-    setNotice(ui.bonfireNotice, [state.sendError, state.error, state.memberError, state.source === 'being_relay' ? 'Being 转交 · 原文未独立核验' : ''].filter(Boolean).join(' '), Boolean(state.sendError || state.error || state.memberError));
+    ui.bonfireMessages.title = [state.error, state.refresh.stale ? '显示上次同步内容' : ''].filter(Boolean).join(' · ');
     const membersKey = JSON.stringify([connected, state.members, state.sender, state.memberError]);
     if (ui.bonfireMembers.dataset.rendered !== membersKey) {
       ui.bonfireMembers.dataset.rendered = membersKey; ui.bonfireMembers.replaceChildren();
@@ -1258,24 +1484,34 @@
       if (connected && !state.members.length) ui.bonfireMembers.append(node('p', 'ta-muted', state.memberError ? '成员列表暂不可用' : '尚无成员数据'));
     }
     const shown = connected ? state.messages.filter((entry) => !state.sender || bonfireSender(entry) === state.sender) : [];
-    const messagesKey = JSON.stringify([connected, shown, state.sender, state.status === 'loading' && !state.messages.length, Boolean(state.refresh.lastSuccessAt), backgroundNotConfigured(state), state.error]);
+    const messagesKey = JSON.stringify([connected, shown, state.sender, state.status === 'loading' && !state.messages.length, Boolean(state.refresh.lastSuccessAt), backgroundNotConfigured(state), state.error, state.source, canReply(), state.hasOlder, state.loadingOlder, state.olderError, state.lastRefresh]);
     if (ui.bonfireMessages.dataset.rendered !== messagesKey) {
       const nearBottom = ui.bonfireMessages.scrollHeight - ui.bonfireMessages.scrollTop - ui.bonfireMessages.clientHeight < 80;
-      const scrollTop = ui.bonfireMessages.scrollTop;
+      const before = { scrollTop: ui.bonfireMessages.scrollTop, scrollHeight: ui.bonfireMessages.scrollHeight, firstId: ui.bonfireMessages.dataset.firstId };
       const previousSender = ui.bonfireMessages.dataset.sender;
       ui.bonfireMessages.dataset.rendered = messagesKey; ui.bonfireMessages.dataset.sender = state.sender; ui.bonfireMessages.replaceChildren();
+      ui.bonfireMessages.dataset.firstId = shown.length ? String(shown[0].id) : '';
+      if (connected && shown.length) ui.bonfireMessages.append(olderControl('bonfire'));
+      const marker = refreshMarker(state, shown);
       if (!connected) ui.bonfireMessages.append(message('连接 Being，加入篝火', '', button('连接设置', () => options.onNavigateSettings?.(), 'ta-secondary')));
-      else if (!shown.length) ui.bonfireMessages.append(message(state.error ? '消息尚未同步' : state.status === 'loading' ? '正在检查后台结果' : !state.refresh.lastSuccessAt ? backgroundNotConfigured(state) ? '后台采集尚未设置' : '等待 Being 后台读取' : state.sender ? '这位 Being 暂无消息' : '篝火里还没有消息', state.error || (!state.refresh.lastSuccessAt ? '刷新显示只检查已有结果，也可请 Being 读取一次。' : '')));
+      else if (!shown.length) ui.bonfireMessages.append(message(state.error ? '消息尚未同步' : state.status === 'loading' ? '正在同步 Town 消息' : !state.refresh.lastSuccessAt ? backgroundNotConfigured(state) ? '后台采集尚未设置' : '等待 Town 同步' : state.sender ? '这位 Being 暂无消息' : '篝火里还没有消息', state.error || (!state.refresh.lastSuccessAt ? '配对 Town 后自动同步，也可点击立即同步。' : '')));
       for (const entry of shown) {
+        if (marker.node && entry.id === marker.before) ui.bonfireMessages.append(marker.node);
         const sender = bonfireSender(entry);
         const member = state.members.find((value) => memberId(value) === sender);
         const author = string(entry.beingName, string(entry.speaker_name, string(entry.display_name, member ? memberName(member) : sender || 'Being')));
         const time = entry.at || entry.created_at || entry.createdAt; const date = time ? new Date(time) : null;
         const timestamp = date && !Number.isNaN(date.getTime()) ? date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
         const item = node('article', `ta-message${sender === beingId() ? ' is-mine' : ''}`);
-        append(item, append(node('div', 'ta-message-meta'), node('strong', '', author), node('span', '', `${timestamp}${entry.revisedAt || entry.revised_at ? ' · 已编辑' : ''}`)), node('p', 'ta-message-body', string(entry.content, string(entry.message)))); ui.bonfireMessages.append(item);
+        append(item,
+          append(node('div', 'ta-message-meta'), node('strong', '', author), viaBadge(entry), node('span', '', `${timestamp}${entry.revisedAt || entry.revised_at ? ' · 已编辑' : ''}${state.source === 'being_relay' ? ' · Being 转交 · 原文未独立核验' : ''}`),
+            canSendBonfire() && canReply() ? replyButton({...entry, beingName: author}, startBonfireReply) : null),
+          replyQuote(entry),
+          node('p', 'ta-message-body', string(entry.content, string(entry.message)))); ui.bonfireMessages.append(item);
       }
-      ui.bonfireMessages.scrollTop = nearBottom || previousSender !== state.sender ? ui.bonfireMessages.scrollHeight : scrollTop;
+      ui.bonfireMessages.append(jumpControl(ui.bonfireMessages));
+      keepPosition(ui.bonfireMessages, before, nearBottom, previousSender !== state.sender);
+      updateJump(ui.bonfireMessages);
     }
     renderBonfireComposer();
   }
@@ -1308,6 +1544,25 @@
     await Promise.all([readTownMessages('bonfire', '', manual), loadBonfireMembers()]);
   }
 
+  function replyTarget(entry, author) {
+    return {id: String(entry.id), beingId: string(entry.beingId, string(entry.senderId)), beingName: author, preview: string(entry.content).slice(0, 200)};
+  }
+  function startBonfireReply(entry) {
+    model.bonfire.replyTo = replyTarget(entry, string(entry.beingName, '某位 Being'));
+    renderBonfire(); ui.bonfireDraft?.focus({preventScroll: true});
+  }
+  function startFiresideReply(entry) {
+    model.fireside.replies.set(model.fireside.selected, replyTarget(entry, string(entry.beingName, '某位 Being')));
+    renderFireside(); ui.roomDraft?.focus({preventScroll: true});
+  }
+  function startInboxReply(entry) {
+    const state = model.inbox;
+    state.replyTo = replyTarget(entry, string(entry.senderName, '某位 Being'));
+    // A reply is addressed to whoever sent the message being replied to.
+    state.recipient = string(entry.senderId, string(entry.senderName));
+    renderInbox(); ui.inboxDraft?.focus({preventScroll: true});
+  }
+
   async function sendBonfire() {
     const state = model.bonfire; const content = state.draft;
     if (!content.trim() || publicState.connection?.status !== 'connected' || busy.has('bonfire-send')) return;
@@ -1320,7 +1575,7 @@
     try {
       let result;
       try {
-        result = record(await call('sendBonfireMessage', { content, mentions: [...new Set(mentions)], connectionRevision: town.identity?.connectionRevision, requestId: sendRequest.requestId }));
+        result = record(await call('sendBonfireMessage', { content, mentions: [...new Set(mentions)], connectionRevision: town.identity?.connectionRevision, requestId: sendRequest.requestId, ...(state.replyTo ? { replyTo: state.replyTo.id } : {}) }));
       } catch (error) {
         if (sameEpoch(requestEpoch)) {
           sendRequest.uncertain = !['VALIDATION', 'INVALID_REQUEST', 'AUTH_REQUIRED', 'NOT_SENT'].includes(error?.code);
@@ -1330,7 +1585,7 @@
       }
       if (!sameEpoch(requestEpoch)) return;
       if (result.ok !== true || result.status === 'uncertain') { sendRequest.uncertain = true; state.sendError = '发送结果待确认，草稿已保留。再次提交此草稿只核对原请求，不会重发。'; return; }
-      if (state.sendRequest === sendRequest) state.sendRequest = null;
+      if (state.sendRequest === sendRequest) { state.sendRequest = null; state.replyTo = null; }
       if (state.draft === content) { state.draft = ''; ui.bonfireDraft.value = ''; }
       state.sender = ''; state.mentionClosed = true;
       try { await options.onBonfireSent?.(result); }
@@ -1347,6 +1602,8 @@
   }
 
   function clearPrivate({ preserveDraft = false } = {}) {
+    if (ui.pairCode) ui.pairCode.value = '';
+    if (ui.pairNotice) setNotice(ui.pairNotice, '');
     epoch += 1; roomRequest += 1; roomSelection += 1;
     townReads.clear();
     channelRequest += 1; busy.delete('channel-status'); busy.delete('channel-connect');
@@ -1396,14 +1653,16 @@
   }
 
   function renderCurrent() {
+    renderTownPairing();
     if (!root || root.hidden) return;
     ui.readOnce.disabled = !connected() || townReads.has(townReadKey());
-    text(ui.readOnce, townReads.has(townReadKey()) ? '正在请求…' : '请 Being 读取一次');
+    text(ui.readOnce, townReads.has(townReadKey()) ? '正在请求…' : '立即同步');
     if (current === 'grove') renderGrove();
     if (current === 'channel') renderChannel();
     if (current === 'portal') renderPortal();
     if (current === 'fireside') renderFireside();
     if (current === 'bonfire') renderBonfire();
+    if (current === 'inbox') renderInbox();
   }
 
   function setState(next) {
@@ -1444,7 +1703,7 @@
     const isCurrent = () => sameEpoch(requestEpoch) && activeRoute(route) && current === page && (page !== 'fireside' || model.fireside.selected === firesideId && roomSelection === selection);
     let pending = townReads.get(key);
     if (!pending) { pending = call('requestTownRead', request); townReads.set(key, pending); }
-    setNotice(ui.notice, '已请求 Being 在当前会话读取一次，请等待完成。');
+    setNotice(ui.notice, '');
     renderCurrent();
     try {
       const result = await pending;
@@ -1458,7 +1717,7 @@
         }
         if (isCurrent() && firesideId) await selectRoom(firesideId);
       } else await loadBonfire();
-      if (isCurrent()) setNotice(ui.notice, '已显示本次读取结果。');
+      if (isCurrent()) setNotice(ui.notice, '');
     } catch (error) {
       if (isCurrent()) setNotice(ui.notice, refreshErrors[error?.code] || errorText(error), !['REQUEST_ACCEPTED', 'BUSY'].includes(error?.code));
     } finally {
@@ -1484,8 +1743,121 @@
       if (page === 'fireside') { await loadRooms(); if (activeRoute(route) && model.fireside.selected) await selectRoom(model.fireside.selected, { manual: true }); }
       if (page === 'bonfire') await loadBonfire(true);
       if (page === 'channel') await checkChannel();
+      if (page === 'inbox') await loadInbox();
     } catch (error) { if (sameEpoch(requestEpoch) && activeRoute(route)) setNotice(ui.notice, errorText(error), true); }
     finally { busy.delete('refresh'); ui.refresh.disabled = false; renderCurrent(); }
+  }
+
+
+  function buildInbox() {
+    const page = ui.inboxPage = node('section', 'ta-module ta-inbox');
+    page.setAttribute('aria-label', 'Town 私信');
+    const center = node('div', 'ta-room-center');
+    ui.inboxMessages = node('div', 'ta-room-messages'); ui.inboxMessages.id = 'inbox-messages';
+    ui.inboxMessages.setAttribute('role', 'log'); ui.inboxMessages.setAttribute('aria-label', '私信'); ui.inboxMessages.setAttribute('aria-live', 'polite');
+    ui.inboxReply = node('div', 'ta-reply-slot');
+
+    const composer = node('div', 'ta-composer ta-inbox-composer');
+    ui.inboxRecipient = node('input', 'ta-input ta-inbox-recipient'); ui.inboxRecipient.id = 'inbox-recipient';
+    ui.inboxRecipient.type = 'text'; ui.inboxRecipient.maxLength = 100;
+    ui.inboxRecipient.placeholder = '收件人：being_id 或展示名';
+    ui.inboxRecipient.setAttribute('aria-label', '私信收件人');
+    ui.inboxRecipient.addEventListener('input', () => { model.inbox.recipient = ui.inboxRecipient.value; renderInboxComposer(); });
+
+    ui.inboxDraft = node('textarea', 'ta-input'); ui.inboxDraft.id = 'inbox-draft'; ui.inboxDraft.rows = 2; ui.inboxDraft.maxLength = 32000;
+    ui.inboxDraft.placeholder = '写一条私信…'; ui.inboxDraft.setAttribute('aria-label', '私信草稿');
+    ui.inboxDraft.addEventListener('input', () => { model.inbox.draft = ui.inboxDraft.value; renderInboxComposer(); });
+    ui.inboxDraft.addEventListener('keydown', (event) => {
+      if (event.isComposing || event.keyCode === 229) return;
+      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (!ui.inboxSend.disabled) void sendInboxMessage(); }
+    });
+    ui.inboxSend = button('发送私信', () => void sendInboxMessage(), 'ta-secondary is-send', 'inbox-send');
+    ui.inboxFeedback = node('p', 'ta-notice'); ui.inboxFeedback.setAttribute('role', 'status'); ui.inboxFeedback.hidden = true;
+    append(composer, ui.inboxRecipient, ui.inboxDraft, append(node('div', 'ta-inbox-actions'), ui.inboxSend));
+
+    append(center, ui.inboxMessages, ui.inboxReply, composer, ui.inboxFeedback);
+    append(page, center); ui.content.append(page);
+  }
+
+  function renderInbox() {
+    const state = model.inbox;
+    if (!ui.inboxMessages) return;
+    ui.inboxMessages.replaceChildren();
+    if (!connected()) ui.inboxMessages.append(message('连接 Being 后查看私信', ''));
+    else if (!record(town.client).paired) ui.inboxMessages.append(message('私信需要配对 Town', '私信只能通过配对的客户端读取和发送，请先在设置里配对。'));
+    else if (state.status === 'loading' && !state.messages.length) ui.inboxMessages.append(message('正在读取私信', ''));
+    else if (state.error && !state.messages.length) ui.inboxMessages.append(message('私信尚未同步', state.error));
+    else if (!state.messages.length) ui.inboxMessages.append(message('还没有收到私信', ''));
+    for (const entry of connected() ? state.messages : []) {
+      const time = entry.createdAt ? new Date(entry.createdAt) : null;
+      const timestamp = time && !Number.isNaN(time.getTime()) ? time.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+      const author = string(entry.senderName, string(entry.senderId, '未知'));
+      const item = node('article', 'ta-message');
+      append(item,
+        append(node('div', 'ta-message-meta'), node('strong', '', author), viaBadge(entry), node('span', '', timestamp),
+          canReply() ? replyButton(entry, startInboxReply) : null),
+        replyQuote(entry),
+        node('p', 'ta-message-body', string(entry.content)));
+      ui.inboxMessages.append(item);
+    }
+    renderInboxComposer();
+  }
+
+  function renderInboxComposer() {
+    const state = model.inbox;
+    if (!ui.inboxSend) return;
+    const paired = record(town.client).paired === true;
+    if (!paired) state.replyTo = null;
+    ui.inboxReply.replaceChildren();
+    const banner = replyBanner(state.replyTo, () => { state.replyTo = null; renderInbox(); });
+    if (banner) ui.inboxReply.append(banner);
+    const pending = busy.has('inbox-send');
+    // Replying sets the recipient in state; mirror it into the field without disturbing typing.
+    if (ui.inboxRecipient.value !== state.recipient) ui.inboxRecipient.value = state.recipient;
+    // Private messages have no Being-relay fallback: an unpaired profile cannot send them at all.
+    ui.inboxRecipient.disabled = ui.inboxDraft.disabled = !connected() || !paired;
+    ui.inboxSend.disabled = !connected() || !paired || pending || !state.recipient.trim() || !state.draft.trim();
+    text(ui.inboxSend, pending ? '处理中…' : '发送私信');
+    ui.inboxSend.setAttribute('aria-busy', String(pending));
+    setNotice(ui.inboxFeedback, state.sendError, Boolean(state.sendError));
+  }
+
+  async function loadInbox() {
+    const state = model.inbox;
+    if (!connected() || !record(town.client).paired || busy.has('inbox-read')) return;
+    const requestEpoch = epoch;
+    busy.add('inbox-read'); state.status = 'loading'; if (visibleModule('inbox')) renderInbox();
+    try {
+      const result = record(await call('getDirectMessages'));
+      if (!sameEpoch(requestEpoch)) return;
+      state.messages = array(result.messages); state.error = ''; state.status = 'ready';
+    } catch (error) {
+      if (!sameEpoch(requestEpoch)) return;
+      state.error = errorText(error); state.status = 'error';
+    } finally {
+      if (sameEpoch(requestEpoch)) { busy.delete('inbox-read'); if (visibleModule('inbox')) renderInbox(); }
+    }
+  }
+
+  async function sendInboxMessage() {
+    const state = model.inbox;
+    const recipient = state.recipient.trim(), content = state.draft;
+    if (!recipient || !content.trim() || busy.has('inbox-send') || !connected() || !record(town.client).paired) return;
+    const requestEpoch = epoch;
+    busy.add('inbox-send'); state.sendError = ''; renderInboxComposer();
+    try {
+      const result = record(await call('sendDirectMessage', { recipient, content, ...(state.replyTo ? { replyTo: state.replyTo.id } : {}) }));
+      if (!sameEpoch(requestEpoch)) return;
+      if (result.ok !== true) { state.sendError = '发送结果待确认，草稿已保留。刷新后核对再决定是否重发。'; return; }
+      state.draft = ''; state.replyTo = null; ui.inboxDraft.value = '';
+      await loadInbox();
+    } catch (error) {
+      if (!sameEpoch(requestEpoch)) return;
+      // Only an explicit pre-send rejection is safe to describe as "not sent".
+      state.sendError = ['INVALID_REQUEST', 'AUTH_REQUIRED', 'NOT_SENT'].includes(error?.code)
+        ? `${errorText(error)} 草稿已保留。`
+        : '发送结果待确认，草稿已保留。刷新后核对再决定是否重发。';
+    } finally { if (sameEpoch(requestEpoch)) { busy.delete('inbox-send'); renderInboxComposer(); } }
   }
 
   async function open(id, { requestRead = true } = {}) {
@@ -1500,6 +1872,7 @@
     visible(ui.readOnce, ['bonfire', 'fireside'].includes(id));
     for (const key of ids) if (ui[`${key}Page`]) visible(ui[`${key}Page`], key === id);
     visible(ui.refresh, !libraryIds.has(id));
+    renderTownPairing();
     if (libraryIds.has(id)) { await window.beingTownLibrary?.open(id); return; }
     renderCurrent();
     const requestEpoch = epoch;
@@ -1517,6 +1890,7 @@
       if (model.fireside.selected) await selectRoom(model.fireside.selected, { readOnce: requestRead, includeRooms: true });
       else if (requestRead) await requestReadOnce();
     }
+    if (id === 'inbox') await loadInbox();
     if (id === 'bonfire' && connected()) {
       const members = cachedMembers || loadBonfireMembers();
       await (cachedMessages || readTownMessages('bonfire'));

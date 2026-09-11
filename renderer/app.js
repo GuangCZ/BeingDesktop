@@ -213,10 +213,13 @@ function render() {
         event.preventDefault();
         if(!connected)return;
         try {
-          if(await bridge.showSessionMenu(item.id)==='rename') {
+          const choice=await bridge.showSessionMenu(item.id);
+          if(choice==='rename') {
             const current=state.chatSessions?.items.find(session=>session.id===item.id);
             const target=[...sessionList.querySelectorAll('.session-shortcut')].find(node=>node.dataset.sessionId===item.id);
             if(current && target)renameChatSession(current,target);
+          } else if(choice==='forget' && window.confirm(`删除会话「${item.title}」？Being 的记忆不受影响，只是本机不再显示这个视图。`)) {
+            await bridge.chatForgetSession(item.id);
           }
         } catch(error){showToast(error.message);}
       });
@@ -239,6 +242,10 @@ function render() {
   renderMachine();
   $('onboarding').hidden = connection.configured;
   $('loom-panel').hidden = !connection.configured;
+  const nativeChat = state.settings?.chatMode !== 'loom';
+  window.beingChat?.setState(state);
+  if ($('loom-host')) $('loom-host').hidden = nativeChat && connection.configured;
+  if ($('chat-mode')) $('chat-mode').value = nativeChat ? 'native' : 'loom';
   $('loom-placeholder').hidden = connected;
   $('loom-placeholder').classList.toggle('is-static', connection.status !== 'connecting');
   text('loom-placeholder-title', connection.status === 'connecting' ? `正在连接 ${name}` : connection.status === 'error' ? '连接暂时遇到了问题' : '对话已断开');
@@ -762,7 +769,7 @@ function scheduleView() {
     const rect = $('loom-host')?.getBoundingClientRect();
     const coordinate = (value) => Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
     const bounds = { x: coordinate(rect?.x), y: coordinate(rect?.y), width: coordinate(rect?.width), height: coordinate(rect?.height) };
-    const visible = currentPage === 'chat' && state.connection.configured && state.connection.status === 'connected' && !window.beingOnboarding?.isOpen() && !document.hidden && bounds.width > 0 && bounds.height > 0;
+    const visible = currentPage === 'chat' && state.settings?.chatMode === 'loom' && state.connection.configured && state.connection.status === 'connected' && !window.beingOnboarding?.isOpen() && !document.hidden && bounds.width > 0 && bounds.height > 0;
     const payload = { visible, bounds };
     const key = JSON.stringify(payload);
     if (key === lastView) return;
@@ -801,6 +808,7 @@ async function perform(method, ...args) {
   }
 }
 
+window.beingShell = Object.assign(window.beingShell || {}, {toast: (message, error = false) => showToast(message, error)});
 function showToast(message, error = false) {
   clearTimeout(toastTimer);
   const toast = element('div', `toast${error ? ' error' : ''}`);
@@ -1291,6 +1299,7 @@ $('back-to-loom').addEventListener('click', () => {
   showToast('点击 Loom 对话界面右上角的齿轮，即可调整 Side by Side。');
 });
 $('close-to-tray').addEventListener('change', async (event) => { await perform('setCloseToTray', event.target.checked); render(); });
+$('chat-mode')?.addEventListener('change', async (event) => { await perform('setChatMode', event.target.value); render(); scheduleView(); });
 ['reading-chat-size', 'reading-code-size'].forEach((id) => $(id)?.addEventListener('change', () => {
   void saveTypography({ chatFontSize: Number($('reading-chat-size').value), codeFontSize: Number($('reading-code-size').value) });
 }));
@@ -1369,9 +1378,9 @@ if ($('content-grid')) hostResize.observe($('content-grid'));
 let settingsReturnPage = 'chat';
 let activeSettingsSection = 'general';
 const settingsSections = [
-  {id: 'general', label: '常规', icon: 'settings', targets: ['close-to-tray'], keywords: '托盘 窗口 桌面'},
+  {id: 'general', label: '常规', icon: 'settings', targets: ['close-to-tray', 'chat-mode'], keywords: '托盘 窗口 桌面 对话 模式 原生 Loom'},
   {id: 'appearance', label: '外观', icon: 'eye', targets: ['appearance-settings', 'reading-settings'], keywords: '颜色 配色 主题 字号 阅读'},
-  {id: 'connection', label: '连接', icon: 'link', targets: ['settings-connect-form'], keywords: 'Being Loom 地址 授权'},
+  {id: 'connection', label: '连接', icon: 'link', targets: ['settings-connect-form', 'town-connection-settings'], keywords: 'Being Loom Town 地址 授权 实时 同步 配对'},
   {id: 'models', label: '模型', icon: 'cpu', targets: ['model-settings'], keywords: 'API 服务 密钥 Side by Side'},
   {id: 'orchestration', label: '编排模式', icon: 'cpu', targets: ['orchestration-settings'], keywords: 'Orchestrator Worker Agent Kit Codex Cursor Grok 执行 工具'},
   {id: 'portal', label: '本机 Portal', icon: 'terminal', targets: ['portal-settings'], keywords: '工作区 工具 权限 程序 更新'},

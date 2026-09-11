@@ -21,9 +21,9 @@ function requestDto(value) {
 // The automatic transport reads existing results. Only requestRead may ask
 // Being to execute a new read when a cache transport is configured.
 class TownBackground {
-  constructor({townSession, getIdentity, readCachedSnapshot = null, bonfireCache = null, getCacheKey = () => '', onUpdate = () => {}, onStatus = () => {}, clock = {}}) {
+  constructor({townSession, getIdentity, readCachedSnapshot = null, direct = false, limit = 10, bonfireCache = null, getCacheKey = () => '', onUpdate = () => {}, onStatus = () => {}, clock = {}}) {
     if (readCachedSnapshot !== null && typeof readCachedSnapshot !== 'function') throw new TypeError('Invalid Town cache reader');
-    Object.assign(this, {townSession, getIdentity, readCachedSnapshot, bonfireCache, getCacheKey, onUpdate, onStatus, clock});
+    Object.assign(this, {townSession, getIdentity, readCachedSnapshot, direct, limit, bonfireCache, getCacheKey, onUpdate, onStatus, clock});
     this._cacheGeneration = 0;
     this._restorePromise = null;
     this._roomRestorePromise = null;
@@ -42,10 +42,10 @@ class TownBackground {
       if (!current()) return;
       try { this.onUpdate(this._envelope(kind, firesideId)); } catch { /* Observers do not affect reading. */ }
     };
-    return new TownRefresh({getIdentity: this.getIdentity, clock: this.clock, automatic: Boolean(this.readCachedSnapshot), cached: Boolean(this.readCachedSnapshot),
-      readSnapshot: ({signal, limit}) => this.readCachedSnapshot
+    return new TownRefresh({getIdentity: this.getIdentity, clock: this.clock, limit: this.limit, automatic: this.direct || Boolean(this.readCachedSnapshot), cached: Boolean(this.readCachedSnapshot), pageable: this.direct,
+      readSnapshot: ({signal, limit, since}) => this.readCachedSnapshot
         ? this.readCachedSnapshot({kind, firesideId, limit, signal})
-        : this._requestRead(kind, firesideId, {signal, limit}),
+        : this._requestRead(kind, firesideId, {signal, limit, since}),
       onSnapshot: publish,
       onSuccess: value => {
         if (!current() || !this.bonfireCache || this._identityKey !== JSON.stringify(this.getIdentity())) return;
@@ -56,10 +56,36 @@ class TownBackground {
     });
   }
 
-  _requestRead(kind, firesideId, {signal, limit}) {
+  // Coalesce bursts, but reconcile again if an event arrives during a REST read.
+  notifyEvent(event) {
+    if (!this.direct || !this._enabled) return;
+    const kinds = event.type === 'hello' ? ['bonfire', 'fireside'] : [event.type];
+    for (const kind of kinds) {
+      if (kind !== 'bonfire' && kind !== 'fireside') continue;
+      const reader = kind === 'bonfire' ? this._bonfire : this._room;
+      if (!reader || kind === 'fireside' && event.type !== 'hello' && event.firesideId !== this._roomId) continue;
+      reader._townDirty = true;
+      if (reader._townEventTimer || reader._townEventFlight) continue;
+      const generation = this._cacheGeneration;
+      reader._townEventTimer = setTimeout(async () => {
+        reader._townEventTimer = null; reader._townEventFlight = true;
+        try {
+          do {
+            reader._townDirty = false;
+            if (!this._enabled || generation !== this._cacheGeneration || kind === 'fireside' && reader !== this._room) break;
+            await reader.refresh().catch(() => {});
+          } while (reader._townDirty);
+        } finally { reader._townEventFlight = false; }
+      }, 250);
+      reader._townEventTimer.unref?.();
+    }
+  }
+
+  _requestRead(kind, firesideId, {signal, limit, since}) {
+    const page = {limit, ...(since === undefined ? {} : {since})};
     return kind === 'bonfire'
-      ? this.townSession.getBonfireMessages({limit}, {signal})
-      : this.townSession.getFiresideMessages({firesideId, limit}, {signal});
+      ? this.townSession.getBonfireMessages(page, {signal})
+      : this.townSession.getFiresideMessages({firesideId, ...page}, {signal});
   }
 
   _cacheKey(kind, firesideId) {
@@ -180,6 +206,21 @@ class TownBackground {
 
   async requestRead(value) {
     return this._refresh(value, true);
+  }
+
+  // Older history for the selected feed, one bounded walk per call. Only the direct SDK read can
+  // page, so a Being-relayed feed refuses.
+  async loadOlder(value) {
+    const request = this._select(value);
+    const reader = request.kind === 'bonfire' ? this._bonfire : this._room;
+    const identityKey = JSON.stringify(this.getIdentity());
+    if (request.kind === 'bonfire' && this._restorePromise) await this.restore();
+    if (request.kind === 'fireside' && this._roomRestorePromise) await this._roomRestorePromise;
+    this._assertCurrent(request, reader, identityKey);
+    if (!this._enabled) { const error = new Error('连接 Being 后再读取更早的消息。'); error.code = 'NOT_CONNECTED'; throw error; }
+    await reader.loadOlder();
+    this._assertCurrent(request, reader, identityKey);
+    return this._envelope(request.kind, request.firesideId);
   }
 
   async _refresh(value, explicit) {

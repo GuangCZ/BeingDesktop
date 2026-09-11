@@ -87,7 +87,7 @@
     ui.scrollPage.setAttribute('aria-label', '卷轴文档浏览');
     const sidebar = node('aside', 'ta-library-sidebar');
     ui.scrollSearch = searchInput('scroll-search', '搜索卷轴标题、作者或标签', (value) => { scroll.query = value; renderScrollList(); });
-    ui.scrollRefresh = button('请 Being 更新', () => void loadScrolls(), 'ta-quiet');
+    ui.scrollRefresh = button('刷新', () => void loadScrolls(), 'ta-quiet');
     ui.scrollRefresh.id = 'scroll-refresh';
     ui.scrollCount = node('p', 'ta-library-count');
     ui.scrollCount.setAttribute('aria-live', 'polite');
@@ -132,7 +132,7 @@
     const items = scroll.items.filter((item) => [item.title, item.beingName, item.beingId, ...array(item.tags)].join(' ').toLocaleLowerCase().includes(query));
     ui.scrollSearch.disabled = !connected();
     ui.scrollRefresh.disabled = !connected() || scroll.loading;
-    ui.scrollRefresh.textContent = scroll.loading ? '读取中…' : '请 Being 更新';
+    ui.scrollRefresh.textContent = scroll.loading ? '读取中…' : '刷新';
     ui.scrollList.setAttribute('aria-busy', String(scroll.loading));
     ui.scrollCount.textContent = connected() ? query ? `找到 ${items.length} 个卷轴${scroll.hasMore ? ' · 搜索已加载内容' : ''}` : `${scroll.total} 个卷轴${scroll.hasMore ? ` · 已加载 ${scroll.items.length}` : ''}` : '';
     setNotice(ui.scrollNotice, scroll.error ? `${scroll.error}${scroll.items.length ? ' 已保留上次读取的列表。' : ''}` : '', Boolean(scroll.error));
@@ -142,7 +142,7 @@
     if (!connected()) { ui.scrollList.append(connectionEmpty()); return; }
     if (!items.length) {
       const title = scroll.loading && !scroll.loaded ? '正在读取卷轴…' : scroll.error && !scroll.loaded ? '卷轴暂时无法读取' : !scroll.loaded ? '卷轴尚未读取' : query ? '没有匹配的卷轴' : '还没有卷轴';
-      const detail = scroll.loading && !scroll.loaded ? '正在刷新，已有缓存会先显示在这里。' : !scroll.loaded ? '打开时先显示上次读取的列表，再请当前 Being 更新。' : query ? '试试其他标题、作者或标签。' : '这里会显示当前 Being 可以访问的笔记和文档。';
+      const detail = scroll.loading && !scroll.loaded ? '正在刷新，已有缓存会先显示在这里。' : !scroll.loaded ? '打开时先显示上次读取的列表，再从 Town 同步最新内容。' : query ? '试试其他标题、作者或标签。' : '这里会显示当前 Being 可以访问的笔记和文档。';
       ui.scrollList.append(empty(title, detail));
       return;
     }

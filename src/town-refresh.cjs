@@ -2,6 +2,11 @@
 
 const MIN_INTERVAL = 60000;
 const MAX_BACKOFF = 300000;
+// Accumulated timeline bounds: what one feed keeps in memory, what goes to disk, and how many
+// pages one "load older" request may walk before handing control back to the user.
+const MAX_HELD = 1000;
+const MAX_PERSISTED = 500;
+const OLDER_PAGES = 6;
 const BLOCKING_ERRORS = new Set(['AUTH_REQUIRED', 'IDENTITY_MISMATCH', 'BACKGROUND_UNAVAILABLE', 'NOT_CONNECTED']);
 const SBS_WAITING_REASONS = Object.freeze({WAITING_SBS: 'waiting_sbs', SBS_NOT_CONFIGURED: 'sbs_not_configured'});
 const ERROR_MESSAGES = Object.freeze({
@@ -61,8 +66,11 @@ function identityDto(value) {
   return {beingId, connectionRevision, identityRevision};
 }
 
-function snapshotDto(value, limit, identity) {
+// One page of a feed as the transport returned it: validated, deduplicated by sequence, sorted.
+// Pages are merged into the accumulated timeline by _merge; nothing is sliced here.
+function pageDto(value) {
   if (!record(value) || !Array.isArray(value.messages) || value.messages.length > 200 || !sequence(value.latestSeq)) throw failure('INVALID_RESPONSE');
+  if (value.total !== undefined && value.total !== null && !sequence(value.total)) throw failure('INVALID_RESPONSE');
   const messages = new Map();
   for (const entry of value.messages) {
     if (!record(entry) || typeof entry.content !== 'string') throw failure('INVALID_RESPONSE');
@@ -73,11 +81,21 @@ function snapshotDto(value, limit, identity) {
       content: boundedText(entry.content, 32000), createdAt: boundedText(entry.createdAt, 64), revisedAt: boundedText(entry.revisedAt, 64),
       mentions: Array.isArray(entry.mentions) ? entry.mentions.slice(0, 20).filter(item => typeof item === 'string').map(item => boundedText(item, 100)) : [],
     };
-    // A full authoritative window replaces the previous window. The final
-    // occurrence of an ID in this response wins; removed IDs stay removed.
+    // Who spoke (a paired client or the Being itself) and what a reply answers are display facts
+    // the SDK read returns; they travel with the message so the timeline can show them.
+    if (typeof entry.via === 'string' && entry.via) message.via = boundedText(entry.via, 120);
+    if (record(entry.replyTo) && typeof entry.replyTo.id === 'string' && entry.replyTo.id) {
+      message.replyTo = {id: boundedText(entry.replyTo.id, 200), beingId: boundedText(entry.replyTo.beingId, 100), preview: boundedText(entry.replyTo.preview, 200)};
+    }
+    // The final occurrence of an ID in one page wins.
     messages.set(id, message);
   }
-  return {identity: copy(identity), messages: [...messages.values()].sort((left, right) => Number(left.id) - Number(right.id)).slice(-limit), latestSeq: value.latestSeq, ...(value.source === 'being_relay' ? {source: 'being_relay'} : {})};
+  return {messages: [...messages.values()].sort((left, right) => Number(left.id) - Number(right.id)), latestSeq: value.latestSeq,
+    total: sequence(value.total) ? value.total : null, ...(value.source === 'being_relay' ? {source: 'being_relay'} : {})};
+}
+
+function emptyTimeline(identity = null) {
+  return {identity: identity ? copy(identity) : null, messages: [], latestSeq: null, total: null, hasOlder: false, lastRefresh: null};
 }
 
 function receiptDto(value) {
@@ -86,10 +104,10 @@ function receiptDto(value) {
 }
 
 class TownRefresh {
-  constructor({readSnapshot, getIdentity, onSnapshot = () => {}, onStatus = () => {}, onSuccess = () => {}, intervalMs = MIN_INTERVAL, limit = 10, automatic = true, cached = false, clock = {}} = {}) {
+  constructor({readSnapshot, getIdentity, onSnapshot = () => {}, onStatus = () => {}, onSuccess = () => {}, intervalMs = MIN_INTERVAL, limit = 10, automatic = true, cached = false, pageable = false, clock = {}} = {}) {
     if ([readSnapshot, getIdentity, onSnapshot, onStatus, onSuccess].some(value => typeof value !== 'function')) throw new TypeError('Invalid Town refresh callbacks');
     if (!Number.isInteger(intervalMs) || intervalMs < MIN_INTERVAL || intervalMs > MAX_BACKOFF || !Number.isInteger(limit) || limit < 1 || limit > 200) throw new RangeError('Invalid Town refresh interval or limit');
-    if (typeof automatic !== 'boolean' || typeof cached !== 'boolean') throw new TypeError('Invalid Town refresh settings');
+    if (typeof automatic !== 'boolean' || typeof cached !== 'boolean' || typeof pageable !== 'boolean') throw new TypeError('Invalid Town refresh settings');
     this.readSnapshot = readSnapshot;
     this.getIdentity = getIdentity;
     this.onSnapshot = onSnapshot;
@@ -99,6 +117,9 @@ class TownRefresh {
     this.limit = limit;
     this.automatic = automatic;
     this.cached = cached;
+    // Only a transport that honours `since` can walk back through history (the SDK read does; a
+    // Being-relayed snapshot cannot).
+    this.pageable = pageable && !cached;
     this.clock = {now: clock.now || Date.now, setTimeout: clock.setTimeout || setTimeout, clearTimeout: clock.clearTimeout || clearTimeout};
     if (Object.values(this.clock).some(value => typeof value !== 'function')) throw new TypeError('Invalid Town refresh clock');
     this._running = false;
@@ -111,7 +132,10 @@ class TownRefresh {
     this._identityKey = '';
     this._receipt = null;
     this._manualRevision = 0;
-    this._cached = {identity: null, messages: [], latestSeq: null};
+    this._older = null;
+    this._probe = null;
+    this._exhausted = false;
+    this._cached = emptyTimeline();
     this._metadata = {status: 'stopped', reason: '', intervalMs, nextRefreshAt: null, lastAttemptAt: null, lastCheckedAt: null, lastSuccessAt: null, revision: null, stale: false, errorCode: '', failureCount: 0};
     this._statusKey = JSON.stringify(this.status());
   }
@@ -123,7 +147,7 @@ class TownRefresh {
 
   cacheRecord() {
     if (this._cached.latestSeq === null || this._metadata.lastSuccessAt === null) return null;
-    return copy({messages: this._cached.messages, latestSeq: this._cached.latestSeq,
+    return copy({messages: this._cached.messages.slice(-MAX_PERSISTED), latestSeq: this._cached.latestSeq,
       ...(this._cached.source === 'being_relay' ? {source: 'being_relay'} : {}),
       capturedAt: this._metadata.lastSuccessAt, revision: this._receipt?.revision || `local:${this._metadata.lastSuccessAt}`, manual: this._receipt?.manual ?? true});
   }
@@ -135,11 +159,11 @@ class TownRefresh {
     try {
       const identity = this._identity();
       if (!identity || !record(value) || typeof value.manual !== 'boolean') return false;
-      const next = snapshotDto(value, this.limit, identity);
+      const page = pageDto(value);
       const receipt = {...receiptDto(value), manual: value.manual};
       this._identityKey = JSON.stringify(identity);
       this._receipt = this.cached ? receipt : null;
-      this._replace(next);
+      this._merge(page, {limit: Math.max(this.limit, page.messages.length + 1), identity});
       this._patch({reason: 'local_cache', lastSuccessAt: receipt.capturedAt, revision: receipt.revision, stale: true});
       return true;
     } catch { return false; }
@@ -187,7 +211,9 @@ class TownRefresh {
     this._identityKey = '';
     this._receipt = null;
     this._automaticNotBefore = 0;
-    this._replace({identity: null, messages: [], latestSeq: null});
+    this._exhausted = false;
+    this._probe = null;
+    this._replace(emptyTimeline());
     this._patch({status: this._running ? 'paused' : 'stopped', reason: this._paused, nextRefreshAt: null, lastAttemptAt: null, lastCheckedAt: null, lastSuccessAt: null, revision: null, stale: false, errorCode: '', failureCount: 0});
     if (this._running && !this._paused) this._automatic();
     return this.status();
@@ -252,11 +278,55 @@ class TownRefresh {
     try { this.onStatus(state); } catch { /* Observers cannot change synchronization. */ }
   }
 
-  _replace(value) {
-    if (JSON.stringify(this._cached) === JSON.stringify(value)) return;
+  _replace(value, changed = JSON.stringify(this._cached) !== JSON.stringify(value)) {
+    if (!changed) return;
     this._cached = value;
     try { this.onSnapshot(this.snapshot()); } catch { /* Observers cannot change synchronization. */ }
   }
+
+  // Fold one page into the accumulated timeline. The page is authoritative for the range it
+  // covers: (since, last] when it is full, everything after `since` when it is not (the feed
+  // ended inside it), and [first, ∞) for a tail read. Held messages in that range that the page
+  // no longer lists were deleted upstream; listed ones are upserted, so edits land too.
+  _merge(page, {since, limit, refresh = false, identity = null} = {}) {
+    const held = new Map(this._cached.messages.map(message => [Number(message.id), message]));
+    const before = held.size ? Math.max(...held.keys()) : null;
+    const seqs = page.messages.map(message => Number(message.id));
+    const full = seqs.length >= limit;
+    const lower = since === undefined ? (full && seqs.length ? seqs[0] - 1 : -1) : since;
+    const upper = full && since !== undefined ? seqs[seqs.length - 1] : Infinity;
+    const listed = new Set(seqs);
+    let changed = false;
+    for (const seq of [...held.keys()]) if (seq > lower && seq <= upper && !listed.has(seq)) { held.delete(seq); changed = true; }
+    for (const message of page.messages) {
+      const seq = Number(message.id), previous = held.get(seq);
+      if (!previous || JSON.stringify(previous) !== JSON.stringify(message)) { held.set(seq, message); changed = true; }
+    }
+    const sorted = [...held.keys()].sort((left, right) => left - right);
+    let dropped = false;
+    while (sorted.length > MAX_HELD) { held.delete(sorted.shift()); dropped = changed = true; }
+    if (dropped) this._exhausted = false;
+    const messages = sorted.map(seq => held.get(seq));
+    const latestSeq = Math.max(page.latestSeq, this._cached.latestSeq ?? 0);
+    const total = page.total ?? this._cached.total ?? null;
+    const oldest = sorted.length ? sorted[0] : null;
+    const hasOlder = this.pageable && oldest !== null && oldest > 1 && !this._exhausted && (total === null || messages.length < total);
+    // The marker for "where the last refresh left off": the newest message held before a refresh
+    // that brought something new. A refresh that brings nothing keeps the previous marker.
+    let lastRefresh = this._cached.lastRefresh;
+    if (refresh) {
+      const arrived = before !== null && sorted.some(seq => seq > before);
+      lastRefresh = {at: this.clock.now(), boundarySeq: arrived ? before : (lastRefresh?.boundarySeq ?? null)};
+    }
+    const next = {...this._cached, identity: identity ? copy(identity) : this._cached.identity, messages, latestSeq, total, hasOlder, lastRefresh};
+    if (page.source === 'being_relay') next.source = 'being_relay'; else delete next.source;
+    const meta = JSON.stringify([this._cached.identity, this._cached.latestSeq, this._cached.total, this._cached.hasOlder, this._cached.lastRefresh, this._cached.source]) !== JSON.stringify([next.identity, latestSeq, total, hasOlder, lastRefresh, next.source]);
+    this._replace(next, changed || meta);
+    return {before, seqs, full};
+  }
+
+  // Re-derive the timeline's flags (hasOlder) without new messages.
+  _recheck() { this._merge({messages: [], latestSeq: this._cached.latestSeq ?? 0, total: this._cached.total, ...(this._cached.source ? {source: this._cached.source} : {})}, {since: Number.MAX_SAFE_INTEGER, limit: this.limit}); }
 
   _clearTimer() {
     if (this._timer !== null) this.clock.clearTimeout(this._timer);
@@ -269,6 +339,7 @@ class TownRefresh {
     const previous = this._flight;
     this._flight = null;
     previous?.controller.abort();
+    this._older?.controller.abort();
   }
 
   _identity() {
@@ -335,7 +406,8 @@ class TownRefresh {
       this._invalidate();
       this._identityKey = '';
       this._receipt = null;
-      this._replace({identity: null, messages: [], latestSeq: null});
+      this._exhausted = false;
+      this._replace(emptyTimeline());
       this._patch({lastAttemptAt: null, lastCheckedAt: null, lastSuccessAt: null, revision: null, stale: false, failureCount: 0});
       const outcome = this._failed(error);
       return Promise.reject(outcome.error);
@@ -344,7 +416,8 @@ class TownRefresh {
     if (this._identityKey && this._identityKey !== identityKey) {
       this._invalidate();
       this._receipt = null;
-      this._replace({identity: null, messages: [], latestSeq: null});
+      this._exhausted = false;
+      this._replace(emptyTimeline());
       this._patch({lastAttemptAt: null, lastCheckedAt: null, lastSuccessAt: null, revision: null, stale: false, errorCode: '', failureCount: 0});
     }
     this._identityKey = identityKey;
@@ -359,14 +432,18 @@ class TownRefresh {
       return readSnapshot({signal: flight.controller.signal, identity: copy(identity), limit: this.limit});
     }).then(value => {
       if (!this._isCurrent(flight)) throw failure('SESSION_CHANGED');
-      const next = snapshotDto(value, this.limit, identity);
+      const page = pageDto(value);
+      const identityKey = flight.identityKey;
       const receipt = this.cached
         ? explicit ? {capturedAt: this.clock.now(), revision: `manual:${++this._manualRevision}`, manual: true} : receiptDto(value)
         : null;
       const unchanged = receipt && !explicit && this._receipt && (receipt.revision === this._receipt.revision || receipt.capturedAt < this._receipt.capturedAt || this._receipt.manual && receipt.capturedAt === this._receipt.capturedAt);
       if (!unchanged) {
         this._receipt = receipt;
-        this._replace(next);
+        const merged = this._merge(page, {limit: this.limit, refresh: true, identity});
+        // A full tail page that starts past what we held means a burst outran the window: the
+        // messages in between are still on the server, so walk forward to fetch them.
+        if (this.pageable && merged.full && merged.before !== null && merged.seqs[0] > merged.before + 1) void this._fill(merged.before, merged.seqs[0], {epoch: flight.epoch, signal: flight.controller.signal, identityKey}).catch(() => {});
       }
       if (!this._isCurrent(flight)) throw failure('SESSION_CHANGED');
       const capturedAt = this._receipt?.capturedAt ?? this.clock.now();
@@ -391,5 +468,64 @@ class TownRefresh {
     return flight.promise;
   }
 }
+
+// Everything between two held sequences, oldest first; bounded so a runaway feed cannot pin us.
+TownRefresh.prototype._fill = async function fill(since, until, {epoch, signal, identityKey}) {
+  const current = () => epoch === this._epoch && !signal.aborted && JSON.stringify(this._identity()) === identityKey;
+  const identity = this._identity();
+  for (let pages = 0; pages < OLDER_PAGES && since < until - 1; pages++) {
+    if (!current()) return;
+    const page = pageDto(await this.readSnapshot({signal, identity: copy(identity), limit: this.limit, since}));
+    if (!current()) return;
+    const merged = this._merge(page, {since, limit: this.limit});
+    if (!merged.full || !merged.seqs.length) return;
+    since = merged.seqs[merged.seqs.length - 1];
+  }
+};
+
+// Walk back from the oldest held message. The SDK only pages forward (`since` = sequences above
+// it, first N), so the window before `target` is guessed as dense, then widened when it comes
+// back empty and walked forward when it comes back full short of the target. Sequences are
+// sparse — deletions in the bonfire, one counter shared by every fireside — so both happen.
+TownRefresh.prototype.loadOlder = function loadOlder() {
+  if (!this.pageable) return Promise.reject(failure('BACKGROUND_UNAVAILABLE'));
+  if (!this._running) return Promise.reject(failure('NOT_RUNNING'));
+  if (this._paused) return Promise.reject(failure('PAUSED'));
+  if (this._older) return this._older.promise;
+  let identity;
+  try { identity = this._identity(); if (!identity) throw failure('NOT_CONNECTED'); } catch (error) { return Promise.reject(error); }
+  const identityKey = JSON.stringify(identity);
+  if (this._identityKey && this._identityKey !== identityKey) return Promise.reject(failure('SESSION_CHANGED'));
+  const older = {epoch: this._epoch, controller: new AbortController(), promise: null};
+  const current = () => older.epoch === this._epoch && !older.controller.signal.aborted && JSON.stringify(this._identity()) === identityKey;
+  older.promise = (async () => {
+    const oldest = this._cached.messages.length ? Number(this._cached.messages[0].id) : null;
+    if (oldest === null || !this._cached.hasOlder) return this.snapshot();
+    // A walk that ran out of pages resumes where it stopped, as long as the target is the same.
+    const probe = this._probe?.oldest === oldest ? this._probe : {oldest, since: Math.max(0, oldest - 1 - this.limit), step: this.limit};
+    this._probe = probe;
+    for (let pages = 0; pages < OLDER_PAGES; pages++) {
+      if (!current()) throw failure('SESSION_CHANGED');
+      const since = probe.since;
+      const page = pageDto(await this.readSnapshot({signal: older.controller.signal, identity: copy(identity), limit: this.limit, since}));
+      if (!current()) throw failure('SESSION_CHANGED');
+      const merged = this._merge(page, {since, limit: this.limit});
+      const found = merged.seqs.some(seq => seq < oldest);
+      if (found) {
+        // Older messages landed. A full page that stopped short of the target still has a gap to
+        // close; anything else means the stretch up to the target is now known.
+        if (!merged.full || merged.seqs[merged.seqs.length - 1] >= oldest) { this._probe = null; break; }
+        probe.since = merged.seqs[merged.seqs.length - 1];
+        continue;
+      }
+      if (since === 0) { this._exhausted = true; this._probe = null; this._recheck(); break; }
+      probe.step *= 2;
+      probe.since = Math.max(0, since - probe.step);
+    }
+    return this.snapshot();
+  })().finally(() => { if (this._older === older) this._older = null; });
+  this._older = older;
+  return older.promise;
+};
 
 module.exports = {TownRefresh};

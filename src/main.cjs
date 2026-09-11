@@ -43,15 +43,16 @@ const {normalizeMode} = require('./agent-kits.cjs');
 const {createBrowserLinks} = require('./browser-links.cjs');
 const {DesktopTerminal} = require('./desktop-terminal.cjs');
 const {TownSession} = require('./town-session.cjs');
-const {BeingTownReader} = require('./being-town-reader.cjs');
+const {TownClient} = require('./town-client.cjs');
+const {TownClientStore} = require('./town-client-store.cjs');
 const {BeingTownWriter} = require('./being-town-writer.cjs');
-const {LocalTownResults} = require('./local-town-results.cjs');
-const {SbsTownResults} = require('./sbs-town-results.cjs');
 const {applyLoomTownSync,detachLoomTownSync} = require('./loom-town-sync.cjs');
 const {ChannelBeing} = require('./channel-being.cjs');
 const {TownBackground} = require('./town-background.cjs');
 const {BonfireCache} = require('./bonfire-cache.cjs');
 const {TownDataCache} = require('./town-data-cache.cjs');
+const {ChatSessions} = require('./chat-sessions.cjs');
+const {ChatCache} = require('./chat-cache.cjs');
 const {TownCachedReads} = require('./town-cached-reads.cjs');
 const {FeatureTaskHistory} = require('./feature-task-history.cjs');
 const {FeatureTaskRunner} = require('./feature-task-runner.cjs');
@@ -87,7 +88,7 @@ function boot() {
   let composerTimer=null;
   let messageQueueTimer=null;
   let menuEditingContents=null;
-  let desktopId;
+  let desktopId, chatSessions=null;
   let composerRevision=0;
   let modelConfigRevision=0;
   let townSuspended=false;
@@ -96,25 +97,28 @@ function boot() {
   const featureHistories=new WeakMap();
   const openFeatureHistories=new Set();
   const featureHistoryCache=new Map();
+  const sdkReadMethods=new Set(['requestTownRead','listScrolls','getScroll']);
   const featureMethods=new Set(['getFeatureTasks','getFeatureTask','discussFeatureTask','endFeatureTaskTracking','requestTownRead','listScrolls','getScroll','getGroveCatalog','getGroveDetail','prepareGroveInstallation','deployPortal','startPortal','stopPortal','checkPortalUpdates','beginChannelConnection','checkChannelStatus']);
   for(const name of ['installGroveKit','installEligibleGroveKits'])featureMethods.add(name);
   const taskRunner=new FeatureTaskRunner({getLedger:()=>featureHistory.ledger});
   let townRoomCache={owned:[],joined:[],cached:false};
   const townMemberCache=new Map();
-  const townMethods=new Set(['getBeingMembers','listScrolls','getScroll','listBeings','getBonfireMessages','getFiresides','getFiresideMessages','getFiresideMembers','getTownMessageSnapshot','refreshTownMessages','requestTownRead','sendBonfireMessage','beginChannelConnection','updateFeishuCredentials','checkChannelStatus']);
+  const townMethods=new Set(['chatView','chatSend','chatStop','chatReload','chatForgetSession','getBeingMembers','listScrolls','getScroll','listBeings','getBonfireMessages','getFiresides','getFiresideMessages','getFiresideMembers','getTownMessageSnapshot','refreshTownMessages','loadOlderTownMessages','requestTownRead','sendBonfireMessage','beginChannelConnection','updateFeishuCredentials','checkChannelStatus']);
   const townErrorCodes=new Set(['AUTH_REQUIRED','INVALID_REQUEST','IDENTITY_MISMATCH','NOT_CONNECTED','SESSION_CHANGED','BUSY','REQUEST_ACCEPTED','RATE_LIMITED','RESULT_UNKNOWN','NETWORK_ERROR','SERVICE_ERROR','INVALID_RESPONSE','BACKGROUND_UNAVAILABLE','NOT_RUNNING','PAUSED','INCOMPLETE_RESULT','RESULT_SOURCE_UNAVAILABLE','WAITING_SBS','SBS_NOT_CONFIGURED','TASK_LIMIT_REACHED']);
   townErrorCodes.add('READINESS_UNKNOWN');townErrorCodes.add('RESULT_UNCONFIRMED');
   townErrorCodes.add('NOT_SENT');townMethods.add('sendFiresideMessage');
+  townMethods.add('getDirectMessages');townMethods.add('sendDirectMessage');sdkReadMethods.add('getDirectMessages');
   townErrorCodes.add('TOWN_TOOL_NOT_CALLED');
   townErrorCodes.add('RESULT_SOURCE_NOT_CONFIGURED');
   townMethods.add('getTownCachedData');
+  for(const method of ['pairTownClient','forgetTownClient','prepareTownPairing'])townMethods.add(method);
   const serialized = new Set(['connect','disconnect','reconnect','selectWorkspace','selectPortalWorkspace','selectPortalExecutable','selectPortalConfig','startPortal','stopPortal','setCloseToTray','setTypography','setColors','saveModelConfig','setOnboardingStep','prepareTownFeature','prepareTownAssistance','prepareFiresideDraft','discussFeatureTask','deployPortal']);
   serialized.add('changeChatSession');
   serialized.add('renameChatSession');
   serialized.add('saveOrchestration');
   serialized.add('savePortalPermissions');
   for(const name of ['installGroveKit','installEligibleGroveKits','prepareGroveAssistance'])serialized.add(name);
-  let disk = {workspace:'', portalExecutable:'', portalConfig:'', closeToTray:true, credential:''};
+  let disk = {workspace:'', portalExecutable:'', portalConfig:'', closeToTray:true, credential:'', chatMode:'native'};
   const state = {
     version: app.getVersion(),
     machine:{hostname:os.hostname(),user:os.userInfo().username,...desktopPlatform()},
@@ -125,8 +129,10 @@ function boot() {
     portal:{status:'not_configured',health:'unknown',executable:'',configPath:'',pid:null,owned:false,detail:''},
     runtime:emptyRuntime(),
     localProxy:{status:'unknown',baseUrl:'http://127.0.0.1:8317/v1'},
-    activity:[],settings:{closeToTray:true,typography:normalizeTypography(),colors:normalizeColors()}
+    activity:[],settings:{closeToTray:true,typography:normalizeTypography(),colors:normalizeColors(),chatMode:'native'},
+    chat:null
   };
+  const normalizeChatMode=value=>value==='loom'?'loom':'native';
   const orchestration=new Orchestration({getExecutionContext:()=>({desktopId,place:desktopTools?.link.capabilities().place}),directory:path.join(app.getPath('userData'),'workers'),getWorkspace:()=>state.workspace.path,
     getSessionIds:()=>[...new Set([...chatViews.keys(),...(state.chatSessions?.items||[]).map(item=>item.id)])],
     onChange:snapshot=>{if(win&&!win.isDestroyed())win.webContents.send('being:workers',snapshot);}});
@@ -257,42 +263,32 @@ function boot() {
     broadcast();
     return snapshot;
   }
-  const localTownResults=new LocalTownResults({
-    getConfig:()=>{
-      try { return disk.localTownResults?{baseUrl:disk.localTownResults.baseUrl,key:safeStorage.decryptString(Buffer.from(disk.localTownResults.credential,'base64'))}:null; }
-      catch { return null; }
-    },fetchImpl:(url,options)=>net.fetch(url,options),
-  });
-  const sbsTownResults=new SbsTownResults({
-    getConnection:()=>!exitStarted&&state.connection.status==='connected'?connection:null,
-    getRegistrations:async()=>{
-      try {
-        const value=await fs.readFile(path.join(app.getPath('userData'),'town-sbs.json'),'utf8');
-        return value.length<=16384?JSON.parse(value):null;
-      } catch { return null; }
-    },results:localTownResults,
-  });
   let townWriter;
-  const beingTownReader=new BeingTownReader({
-    allowBonfireRelay:true,
-    fallbackFetchImpl:(url,options)=>globalThis.fetch(url,options),
-    getConnection:()=>!exitStarted&&state.connection.status==='connected'?connection:null,
-    getRuntime:()=>({activeStream:{active:channelBeing.state().status==='working'||Boolean(townWriter?.state().active)}}),
+  const townClient=new TownClient({
+    getContext:()=>({key:connection?sessionPartition(connection):'',beingId:state.connection.beingName,revision:generation,connected:!exitStarted&&state.connection.status==='connected'}),
+    store:new TownClientStore({directory:path.join(app.getPath('userData'),'town-client'),safeStorage}),
     fetchImpl:(url,options)=>net.fetch(url,options),
-    toolResults:localTownResults,
-    onRequest:record=>registerFeatureRequest(record),
+    onChange:()=>broadcast(),
+    onEvent:event=>{
+      townBackground.notifyEvent(event);
+      // The inbox is not part of background collection; the renderer re-reads it on this hint.
+      if(event?.type==='dm'&&win&&!win.isDestroyed())win.webContents.send('being:town-messages',{kind:'dm'});
+    },
   });
-  function resetTownReader() { beingTownReader.reset(); townWriter?.reset(); sbsTownResults.reset(); townRoomCache={owned:[],joined:[],cached:false};townMemberCache.clear(); }
+  function resetTownReader() { townClient.reset(); townWriter?.reset(); townRoomCache={owned:[],joined:[],cached:false};townMemberCache.clear(); }
+  // A paired profile speaks with its own client token: no Being turn, no idle wait.
+  // AUTH_REQUIRED means this profile holds no usable client credential (never paired, or the
+  // token was revoked), which is the one case that still falls back to the Being relay.
+  async function townSpeak({kind,content,firesideId='',connectionRevision,requestId,replyTo=''}) {
+    try { return await townClient.speak({kind,message:content,...(kind==='fireside'?{firesideId}:{}),...(replyTo?{replyTo}:{})}); }
+    catch(error) { if(error?.code!=='AUTH_REQUIRED') throw error; }
+    return townWriter.send({kind,content,firesideId,connectionRevision,...(requestId?{requestId}:{})});
+  }
   const townSession=new TownSession({
     getContext:()=>({configured:state.connection.configured,connected:state.connection.status==='connected',exiting:exitStarted,connectionId:generation,identityRevision,beingName:state.connection.beingName}),
-    writeImpl:request=>townWriter.send(request),
+    writeImpl:request=>townSpeak(request),
     fetchImpl:(url,options)=>net.fetch(url,{...options,credentials:'omit',referrerPolicy:'no-referrer'}),
-    readImpl:(route,options)=>{
-      const owner=taskRunner.currentTask();
-      return beingTownReader.read(route,{...options,onRequest:record=>registerFeatureRequest(record,owner),onProgress:progress=>{
-        if(owner)owner.ledger.update(owner.task.id,{status:'running',detail:`Being 已接收请求，正在检查原请求的工具结果（第 ${progress.checks} 次）；不会重复发送。`});
-      }});
-    },
+    readImpl:(route,options)=>townClient.read(route,options),
     onChange:()=>broadcast(),
   });
   const onboardingInspection=new OnboardingInspection({
@@ -317,7 +313,7 @@ function boot() {
   const bonfireCache=new BonfireCache({directory:path.join(app.getPath('userData'),'bonfire-cache'),safeStorage});
   townWriter=new BeingTownWriter({
     getContext:()=>({connection,connected:state.connection.status==='connected',exiting:exitStarted,connectionId:generation,identityRevision,beingName:state.connection.beingName}),
-    getRuntime:()=>({busy:beingTownReader.state().active||channelBeing.state().status==='working'}),
+    getRuntime:()=>({busy:channelBeing.state().status==='working'}),
     fetchImpl:(url,options)=>net.fetch(url,options),fallbackFetchImpl:(url,options)=>globalThis.fetch(url,options),
     journalPath:path.join(app.getPath('userData'),'town-send-journal.json'),
     onRequest:record=>registerFeatureRequest(record),onChange:()=>broadcast(),
@@ -328,12 +324,13 @@ function boot() {
   });
   const townBackground=new TownBackground({townSession,bonfireCache,
     getCacheKey:()=>connection?sessionPartition(connection):'',
-    readCachedSnapshot:request=>sbsTownResults.readSnapshot(request),
+    direct:true,limit:50,
     getIdentity:()=>connection ? {beingId:state.connection.beingName,connectionRevision:generation,identityRevision} : null,
     onStatus:()=>broadcast(),
     onUpdate:value=>{if(win&&!win.isDestroyed())win.webContents.send('being:town-messages',value);},
   });
   function syncTownLifecycle() {
+    townClient.lifecycle({enabled:!exitStarted&&!townSuspended&&Boolean(connection)&&state.connection.status==='connected'&&net.isOnline()});
     townBackground.lifecycle({enabled:!exitStarted&&!townSuspended&&Boolean(connection)&&state.connection.status==='connected'&&net.isOnline(),reason:townSuspended?'suspended':'offline'});
   }
   async function loadCachedFiresides() {
@@ -407,7 +404,21 @@ function boot() {
     result.scroll=access.scroll || {status:'unknown',detail:''};
     result.beings=access.beings || {status:'unknown',detail:''};
     result.sync=townBackground.metadata();
+    result.client=townClient.state();
     return result;
+  }
+  function startNativeChat() {
+    if(state.settings.chatMode!=='native'||!chatSessions||!connection||state.connection.status!=='connected')return;
+    const epoch=generation;
+    chatSessions.start(sessionPartition(connection)).catch(error=>{if(epoch===generation)activity('warning','对话记录加载失败',error.message);});
+  }
+  // In native mode the sidebar's conversation list comes from the store, not the Loom page.
+  function syncChatSessions() {
+    if(state.settings.chatMode!=='native'||!state.chat)return;
+    state.chatSessions={activeId:state.chat.active,items:state.chat.sessions.map(item=>({id:item.id,title:item.title}))};
+    const activity={};
+    for(const item of state.chat.sessions)activity[item.id]=item.busy||item.inFlight?'talking':'inactive';
+    state.chatSessionActivity=activity;
   }
   function publicState() {
     const portalState=portal.state;
@@ -465,6 +476,12 @@ function boot() {
   }
   async function restore() {
     desktopId=await loadDesktopId(app.getPath('userData'));
+    // Desktop-native conversations: the five Being endpoints called directly, no Loom page injection.
+    chatSessions=new ChatSessions({desktopId,clientVersion:app.getVersion(),cache:new ChatCache({directory:path.join(app.getPath('userData'),'chat-cache'),safeStorage}),
+      getContext:()=>({connected:!exitStarted&&Boolean(connection)&&state.connection.status==='connected',connection,revision:generation}),
+      fetchImpl:(url,options)=>net.fetch(url,options),
+      onEvent:event=>{if(win&&!win.isDestroyed())win.webContents.send('being:chat-event',event);},
+      onState:snapshot=>{state.chat=snapshot;syncChatSessions();broadcast();}});
     await fs.mkdir(groveKitsDir,{recursive:true});
     try { disk = {...disk,...JSON.parse(await fs.readFile(settingsPath(),'utf8'))}; }
     catch (error) { if (error.code !== 'ENOENT') activity('warning','设置读取失败','已保留原文件，请重新检查连接设置。'); }
@@ -489,6 +506,7 @@ function boot() {
     state.settings.closeToTray = disk.closeToTray !== false;
     state.settings.typography = normalizeTypography(disk.typography);
     state.settings.colors = normalizeColors(disk.colors);
+    state.settings.chatMode = normalizeChatMode(disk.chatMode);
     orchestration.mode=normalizeMode(disk.orchestration);
     state.workspace.path = typeof disk.workspace === 'string' ? disk.workspace : '';
     if (state.workspace.path) {
@@ -540,6 +558,7 @@ function boot() {
     ipcMain.handle(`being:${name}`,async(event,...args)=>{
       authSender(event);
       try {
+        if(sdkReadMethods.has(name))return await fn(...args);
         if(featureMethods.has(name)&&!featureHistoryCurrent())throw Object.assign(new Error('连接身份正在切换，请稍后重新选择功能。'),{code:'SESSION_CHANGED'});
         return await taskRunner.run(name,args,()=>{
           if (!serialized.has(name)) return fn(...args);
@@ -739,6 +758,7 @@ function boot() {
       state.chatSessions = sessions;
       void rememberLoomConnection({settings:disk,persist}).catch(()=>activity('warning','引导状态未保存','Loom 已连接，下次启动确认连接后将自动关闭引导。'));
       state.connection.status='connected';state.connection.error='';state.connection.updatedAt=new Date().toISOString();activity('info','Loom 已加载','已连接现有会话；身份和历史由原运行时保存。');syncTownLifecycle();refresh();
+      startNativeChat();
       mountMessageQueue(contents,epoch);
       void mountComposer(contents,epoch).catch(()=>{if(epoch===generation)activity('warning','输入补全暂不可用','重新连接后可重试加载工具与成员。');});
     });
@@ -927,16 +947,20 @@ function boot() {
     handle('desktopAction',(action,value)=>{if(exitStarted)throw new Error('桌面端正在退出。');return desktopTools.perform(action,value);});
     handle('setBrowserView',value=>desktopTools.browser.setViewport(value));
     handle('getState',()=>publicState());handle('refresh',refresh);
+    const nativeChat=()=>state.settings.chatMode==='native';
     handle('showSessionMenu',id=>{
       if(typeof id!=='string' || !state.chatSessions?.items.some(item=>item.id===id))throw new Error('会话不存在。');
       return new Promise(resolve=>{
-        const menu=Menu.buildFromTemplate([{label:'重命名',click:()=>resolve('rename')}]);
+        const template=[{label:'重命名',click:()=>resolve('rename')}];
+        if(nativeChat())template.push({type:'separator'},{label:'删除会话',click:()=>resolve('forget')});
+        const menu=Menu.buildFromTemplate(template);
         menu.popup({window:win,callback:()=>resolve(null)});
       });
     });
     handle('renameChatSession',async(id,title)=>{
-      if(typeof id!=='string' || !state.chatSessions?.items.some(item=>item.id===id) || !view)throw new Error('会话不存在。');
       if(typeof title!=='string' || !title.trim() || title.trim().length>80 || /[\x00-\x1f\x7f]/.test(title))throw new Error('会话名须为 1–80 个字符，且不能包含换行。');
+      if(nativeChat()){chatSessions.rename(id,title);return true;}
+      if(typeof id!=='string' || !state.chatSessions?.items.some(item=>item.id===id) || !view)throw new Error('会话不存在。');
       const contents=(chatViews.get(id)||view).webContents;
       await contents.executeJavaScript(`globalThis.__beingDesktopSessions.rename(${JSON.stringify(id)},${JSON.stringify(title)})`);
       state.chatSessions=await view.webContents.executeJavaScript('globalThis.__beingDesktopSessions.list()');
@@ -944,6 +968,11 @@ function boot() {
     });
     handle('changeChatSession',async(id)=>{
       if(id!==null && (typeof id!=='string' || !/^[0-9a-f-]{36}$/i.test(id)))throw new Error('会话标识无效。');
+      if(nativeChat()){
+        if(!chatSessions?.open)throw new Error('请先连接 Being。');
+        if(id===null)chatSessions.create({title:`会话 ${chatSessions.snapshot().sessions.length+1}`});else chatSessions.select(id);
+        return {ok:true};
+      }
       if(!view || state.connection.status!=='connected')throw new Error('请先连接 Loom。');
       const contents = view.webContents;
       const result = await changeLoomSession(contents,id);
@@ -969,6 +998,21 @@ function boot() {
       broadcast();
       return {ok:true};
     });
+    // Native conversations. Errors keep their codes across IPC through the Town error envelope.
+    handle('chatView',id=>chatSessions.view(id));
+    handle('chatSend',({sessionId,text,images}={})=>chatSessions.send({sessionId,text,images}));
+    handle('chatStop',({sessionId,force}={})=>chatSessions.stop({sessionId,force:force===true}));
+    handle('chatReload',()=>chatSessions.reload());
+    handle('chatForgetSession',id=>chatSessions.forget(id));
+    handle('setChatMode',async mode=>{
+      const next=normalizeChatMode(mode);
+      if(next===state.settings.chatMode)return publicState();
+      const previous=disk.chatMode;disk.chatMode=next;
+      try{await persist();}catch(error){disk.chatMode=previous;throw error;}
+      state.settings.chatMode=next;
+      if(next==='native')startNativeChat();else{chatSessions?.end();if(view&&state.connection.status==='connected')state.chatSessions=await view.webContents.executeJavaScript('globalThis.__beingDesktopSessions.list()').catch(()=>state.chatSessions);}
+      mountView();broadcast();return publicState();
+    });
     handle('getModelConfig',async()=>publishModelConfig(await modelConfig.get()));
     handle('saveModelConfig',async value=>{
       modelConfigRevision++;
@@ -986,7 +1030,7 @@ function boot() {
       const reading=task.status==='running'&&task.requestId&&task.execution==='being'&&['bonfire','fireside','scroll'].includes(task.feature);
       if(!['waiting','needs_input'].includes(task.status)&&!reading)throw new Error('只能结束读取、等待中或待处理任务的本地跟踪。');
       const result=featureHistory.ledger.cancel(id,{detail:'本地跟踪已结束；这不会取消 Being 端的执行。'});
-      beingTownReader.stopTracking(task.requestId);
+      // Legacy read records remain viewable; SDK reads do not create Being tasks.
       return result;
     });
     handle('discussFeatureTask',id=>discussFeatureTask(id,{getLedger:()=>featureHistory.ledger,getContext:()=>({connection,generation,revision:viewRevision,view,configured:state.connection.configured,status:state.connection.status,exiting:exitStarted})}));
@@ -994,6 +1038,9 @@ function boot() {
     handle('prepareTownFeature',(id)=>prepareTownFeature(id,()=>({connection,generation,revision:viewRevision,view,configured:state.connection.configured,status:state.connection.status,exiting:exitStarted})));
     handle('prepareTownAssistance',(value)=>prepareTownAssistance(value,()=>({connection,generation,revision:viewRevision,view,configured:state.connection.configured,status:state.connection.status,exiting:exitStarted})));
     handle('prepareFiresideDraft',(value)=>prepareFiresideDraft(value,()=>({connection,generation,revision:viewRevision,view,configured:state.connection.configured,status:state.connection.status,exiting:exitStarted})));
+    handle('pairTownClient',async value=>{const result=await townClient.pair(value);townSession.reset();syncTownLifecycle();void townBackground.notifyEvent({type:'hello'});return result;});
+    handle('forgetTownClient',()=>townClient.forget());
+    handle('prepareTownPairing',()=>prepareLoomDraft('请为当前 Being 的 Being Desktop 生成一次性 Town 配对码：使用原生 http POST https://beings.town/api/client/pair。只返回六位配对码和有效期，不输出任何长期 token 或凭据。',()=>({connection,generation,revision:viewRevision,view,configured:state.connection.configured,status:state.connection.status,exiting:exitStarted})));
     handle('getTownAppState',()=>townState());
     handle('refreshTownApp',async()=>{await town.refresh();return townState();});
     handle('getTownCachedData',value=>townCachedReads.snapshot(value));
@@ -1001,9 +1048,10 @@ function boot() {
     handle('listScrolls',value=>townCachedReads.read('listScrolls',value,query=>townSession.listScrolls(query)));
     handle('getScroll',value=>townCachedReads.read('getScroll',value,query=>townSession.getScroll(query)));
     handle('listBeings',value=>townCachedReads.read('listBeings',value,query=>townSession.listBeings(query)));
-    handle('getBonfireMessages',value=>sbsTownResults.readSnapshot({kind:'bonfire',limit:value?.limit||10}));
+    handle('getBonfireMessages',value=>townSession.getBonfireMessages(value));
     handle('getTownMessageSnapshot',async value=>{if(value?.kind==='fireside')await loadCachedFiresides();return townBackground.cachedSnapshot(value);});
     handle('refreshTownMessages',value=>townBackground.refresh(value));
+    handle('loadOlderTownMessages',value=>townBackground.loadOlder(value));
     handle('requestTownRead',async value=>{
       if(!value||Object.getPrototypeOf(value)!==Object.prototype||!['bonfire','fireside'].includes(value.kind)||Object.keys(value).some(key=>!['kind','firesideId','selectionRevision','includeRooms'].includes(key)))throw Object.assign(new Error('请选择有效的消息来源。'),{code:'INVALID_REQUEST'});
       if(Object.hasOwn(value,'selectionRevision')&&(value.kind!=='fireside'||!Number.isSafeInteger(value.selectionRevision)||value.selectionRevision<0))throw Object.assign(new Error('请选择有效的消息来源。'),{code:'INVALID_REQUEST'});
@@ -1056,12 +1104,17 @@ function boot() {
       const prompt=await groveActions.assistance(value);
       return prepareLoomDraft(prompt,()=>({connection,generation,revision:viewRevision,view,configured:state.connection.configured,status:state.connection.status,exiting:exitStarted}));
     });
-    handle('getFiresides',()=>loadCachedFiresides());
-    handle('getFiresideMessages',value=>sbsTownResults.readSnapshot({kind:'fireside',firesideId:value?.firesideId,limit:value?.limit||10}));
-    handle('getFiresideMembers',value=>loadCachedFiresideMembers(value));
+    handle('getFiresides',async()=>{const rooms=await townCachedReads.read('getFiresides',undefined,()=>townSession.getFiresides());townRoomCache={...rooms,cached:true,lastSuccessAt:Date.now()};townBackground.reconcileRooms(rooms);return structuredClone(townRoomCache);});
+    handle('getDirectMessages',()=>townSession.getDirectMessages());
+    handle('sendDirectMessage',value=>{
+      if(!value||Object.getPrototypeOf(value)!==Object.prototype||Object.keys(value).some(key=>!['recipient','content','replyTo'].includes(key)))throw Object.assign(new Error('私信参数无效。'),{code:'INVALID_REQUEST'});
+      return townClient.sendDirectMessage(value);
+    });
+    handle('getFiresideMessages',value=>townSession.getFiresideMessages(value));
+    handle('getFiresideMembers',value=>townCachedReads.read('getFiresideMembers',value,id=>townSession.getFiresideMembers(id)));
     handle('sendFiresideMessage',value=>{
-      if(!value||Object.getPrototypeOf(value)!==Object.prototype||Object.keys(value).some(key=>!['firesideId','message','connectionRevision','requestId'].includes(key)))throw Object.assign(new Error('围炉发送参数无效。'),{code:'INVALID_REQUEST'});
-      return townWriter.send({kind:'fireside',content:value.message,firesideId:value.firesideId,connectionRevision:value.connectionRevision,requestId:value.requestId});
+      if(!value||Object.getPrototypeOf(value)!==Object.prototype||Object.keys(value).some(key=>!['firesideId','message','connectionRevision','requestId','replyTo'].includes(key)))throw Object.assign(new Error('围炉发送参数无效。'),{code:'INVALID_REQUEST'});
+      return townSpeak({kind:'fireside',content:value.message,firesideId:value.firesideId,connectionRevision:value.connectionRevision,requestId:value.requestId,replyTo:value.replyTo});
     });
     for(const name of ['createFireside','joinFireside']) handle(name,requireTownIdentity);
     handle('getPortalPermissions',async()=>{
@@ -1117,9 +1170,9 @@ function boot() {
       if(!state.onboarding.completed)disk.onboarding={step:'loom',completed:false};
       try{await persist();}catch(error){Object.assign(disk,previous);throw error;}
       state.onboarding={...disk.onboarding};
-      desktopTools?.disconnectLink();await orchestration.selectOwner('');onboardingInspection.reset();channelBeing.reset();resetTownReader();generation++;identityRevision++;connection=null;discardView();await loadFeatureHistory();state.connection={configured:false,displayUrl:'',beingName:'',status:'disconnected',error:'',updatedAt:null};state.runtime=emptyRuntime();townSession.reset();syncTownLifecycle();activity('info','已断开桌面连接','Portal 与 Being 的后台运行状态未改变。');return publicState();
+      desktopTools?.disconnectLink();await orchestration.selectOwner('');onboardingInspection.reset();channelBeing.reset();resetTownReader();chatSessions?.end();generation++;identityRevision++;connection=null;discardView();await loadFeatureHistory();state.connection={configured:false,displayUrl:'',beingName:'',status:'disconnected',error:'',updatedAt:null};state.runtime=emptyRuntime();townSession.reset();syncTownLifecycle();activity('info','已断开桌面连接','Portal 与 Being 的后台运行状态未改变。');return publicState();
     });
-    handle('reconnect',()=>{if(!connection)throw new Error('请先配置 Loom 连接。');onboardingInspection.reset();channelBeing.reset();resetTownReader();generation++;state.connection.status='connecting';state.connection.error='';syncTownLifecycle();createLoom();broadcast();refresh();return publicState();});
+    handle('reconnect',()=>{if(!connection)throw new Error('请先配置 Loom 连接。');onboardingInspection.reset();channelBeing.reset();resetTownReader();chatSessions?.end();generation++;state.connection.status='connecting';state.connection.error='';syncTownLifecycle();createLoom();broadcast();refresh();return publicState();});
     handle('selectWorkspace',async()=>{
       const result=await dialog.showOpenDialog(win,{title:'选择本地工作区',properties:['openDirectory']});
       if(result.canceled)return publicState();
@@ -1201,7 +1254,8 @@ function boot() {
   async function shutdown() {
     if(exitStarted)return;exitStarted=true;
     portalWatchdog?.stop();
-    onboardingInspection.reset();channelBeing.reset();resetTownReader();
+    onboardingInspection.reset();channelBeing.reset();resetTownReader();chatSessions?.end();
+    townClient.reset();
     townBackground.stop();
     clearInterval(refreshTimer);
     portalUpdates.stop();

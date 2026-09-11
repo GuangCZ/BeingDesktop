@@ -37,6 +37,20 @@ test('configuration exposes only display fields and the runtime preset catalog',
   assert.deepEqual(modelConfigDto({...config, presets: undefined}, 7).models, []);
   assert.match(modelConfigDto({...config, presets: undefined}, 7).modelsError, /自定义模型/);
   assert.equal(modelConfigDto({...config, provider: 'custom-provider'}, 7).providers[0].id, 'custom-provider');
+  assert.deepEqual(result.providers.filter(provider => provider.keyless !== false).map(provider => provider.id), ['self-hosted']);
+});
+
+test('self-hosted presets mirror Loom: a keyless provider with a default address that a preset address overrides', () => {
+  const selfHosted = {id: 'self-hosted-glm', label: 'GLM 5.3 Flash', model: 'glm-5.3-flash', provider: 'self-hosted'};
+  const result = modelConfigDto({...config, presets: [...config.presets, selfHosted]}, 7, 'now');
+  assert.deepEqual(result.models[2], {id: 'glm-5.3-flash', presetId: 'self-hosted-glm', name: 'GLM 5.3 Flash', provider: 'self-hosted', hasApiKey: null, baseUrl: ''});
+  assert.deepEqual(result.providers.find(provider => provider.id === 'self-hosted'), {id: 'self-hosted', name: '自部署', baseUrl: 'http://115.190.110.33:7860/v1', keyless: true});
+  assert.equal(result.providers.find(provider => provider.id === 'glm').name, 'GLM');
+  const explicit = modelConfigDto({...config, presets: [{...selfHosted, base_url: 'http://10.0.0.2:7860/v1?key=private'}]}, 7, 'now');
+  assert.equal(explicit.models[0].baseUrl, 'http://10.0.0.2:7860/v1');
+  assert.doesNotMatch(JSON.stringify(explicit), /private/);
+  assert.deepEqual(validateModelPatch({connectionId: 7, model: 'glm-5.3-flash', provider: 'self-hosted', baseUrl: 'http://115.190.110.33:7860/v1'}),
+    {model: 'glm-5.3-flash', provider: 'self-hosted', base_url: 'http://115.190.110.33:7860/v1'});
 });
 
 test('patch accepts custom models, preserves a blank key and rejects hidden write fields', () => {

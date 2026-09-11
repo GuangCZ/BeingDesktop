@@ -1,7 +1,7 @@
 'use strict';
 
 // Contracts: https://beings.town/api/{bonfire,fireside,beings,scrolls,channels}/help (2026-09-07).
-// Town uses IP Trust. A Loom token is never a Town credential.
+// Production protected reads use the Town client SDK. A Loom token is never a Town credential.
 const {scrollId, libraryRoute, scrollListDto, scrollDto, beingsDto} = require('./town-library-contract.cjs');
 const {relaySource} = require('./town-result-source.cjs');
 const TOWN_ORIGIN = 'https://beings.town';
@@ -54,6 +54,15 @@ function membersDto(value) {
     .map(member => ({id: member.being_id, name: text(member.display_name, 100) || member.being_id, description: text(member.about, 500)}));
 }
 
+// Town reports who actually spoke ("being" or "client:<name>"). Carried only when present,
+// so fixtures and cached payloads without it keep their existing shape.
+const viaField = item => { const via = text(item.via, 120); return via ? {via} : {}; };
+// Reply metadata as reported by Town. Carried only when a parent exists, so plain
+// messages keep their existing shape in fixtures and caches.
+const replyField = item => sequence(item.reply_to)
+  ? {replyTo: {id: String(item.reply_to), beingId: validId(item.reply_to_being) ? item.reply_to_being : '', preview: text(item.reply_to_preview, 200)}}
+  : {};
+
 function messagesDto(value, members = []) {
   if (!record(value) || value.ok !== true || !Array.isArray(value.messages) || !sequence(value.global_latest_seq)) throw failure('INVALID_RESPONSE', '篝火消息格式发生变化，请稍后重试。');
   const seen = new Set();
@@ -62,11 +71,32 @@ function messagesDto(value, members = []) {
       const byName = members.filter(member => member.name === item.being);
       const byId = members.find(member => member.id === item.being);
       // Duplicate display names are intentionally not attributed to one member.
-      const beingId = validId(item.being_id) ? item.being_id : byId?.id || (byName.length === 1 ? byName[0].id : '');
-      return {id: String(item.seq), beingId, beingName: text(item.being, 100), content: text(item.message, 4000), createdAt: text(item.at, 64), revisedAt: text(item.revised_at, 64), mentions: []};
+      // The SDK guide documents `being` as the being_id, but observed responses have also carried a
+      // display name there. The member directory therefore still wins; `being` is only trusted when
+      // the directory cannot resolve the sender, which previously left the id empty.
+      const beingId = validId(item.being_id) ? item.being_id : byId?.id || (byName.length === 1 ? byName[0].id : '') || (validId(item.being) ? item.being : '');
+      return {id: String(item.seq), beingId, beingName: text(item.speaker_name, 100) || text(item.being, 100), content: text(item.message, 4000), createdAt: text(item.at, 64), revisedAt: text(item.revised_at, 64), mentions: [], ...viaField(item), ...replyField(item)};
     })
     .sort((left, right) => Number(left.id) - Number(right.id));
-  return {messages, latestSeq: value.global_latest_seq, ...relaySource(value)};
+  return {messages, latestSeq: value.global_latest_seq, ...(sequence(value.total_count) ? {total: value.total_count} : {}), ...relaySource(value)};
+}
+
+function directMessagesDto(value) {
+  if (!record(value) || !Array.isArray(value.messages)) throw failure('INVALID_RESPONSE', '私信格式发生变化，请稍后重试。');
+  const seen = new Set();
+  // Town returns the inbox newest first, capped at 100. That order is preserved for display.
+  const messages = value.messages.slice(0, 100)
+    .filter(item => record(item) && typeof item.id === 'string' && item.id && typeof item.content === 'string' && !seen.has(item.id) && seen.add(item.id))
+    .map(item => {
+      const senderId = validId(item.sender) ? item.sender : validId(item.sender_being_id) ? item.sender_being_id : '';
+      const reply = typeof item.reply_to === 'string' && item.reply_to
+        ? {replyTo: {id: text(item.reply_to, 200), beingId: validId(item.reply_to_sender) ? item.reply_to_sender : '', preview: text(item.reply_to_preview, 200)}}
+        : {};
+      return {id: text(item.id, 200), senderId, senderName: text(item.sender_name, 100) || senderId || '未知',
+        content: text(item.content, 32000), createdAt: text(item.created_at, 64) || text(item.at, 64),
+        ...viaField(item), ...reply};
+    });
+  return {messages};
 }
 
 function firesidesDto(value) {
@@ -90,9 +120,9 @@ function firesideMessagesDto(value, expected) {
   if (!Array.isArray(value.messages) || !sequence(value.latest_seq) || value.messages.some(item => record(item) && item.truncated === true)) throw failure('INVALID_RESPONSE', '围炉消息格式发生变化，请稍后重试。');
   const seen = new Set();
   const messages = value.messages.slice(0, 200).filter(item => record(item) && sequence(item.seq) && validId(item.being) && typeof item.message === 'string' && !seen.has(item.seq) && seen.add(item.seq))
-    .map(item => ({id: String(item.seq), beingId: item.being, beingName: text(item.speaker_name, 100) || item.being, content: text(item.message, 32000), createdAt: text(item.at, 64), revisedAt: text(item.revised_at, 64), mentions: Array.isArray(item.mentions) ? [...new Set(item.mentions.filter(validId))].slice(0, 20) : []}))
+    .map(item => ({id: String(item.seq), beingId: item.being, beingName: text(item.speaker_name, 100) || item.being, content: text(item.message, 32000), createdAt: text(item.at, 64), revisedAt: text(item.revised_at, 64), mentions: Array.isArray(item.mentions) ? [...new Set(item.mentions.filter(validId))].slice(0, 20) : [], ...viaField(item), ...replyField(item)}))
     .sort((left, right) => Number(left.id) - Number(right.id));
-  return {messages, latestSeq: value.latest_seq};
+  return {messages, latestSeq: value.latest_seq, ...(sequence(value.total_count) ? {total: value.total_count} : {})};
 }
 
 function channelDto(value, channel) {
@@ -289,6 +319,12 @@ class TownSession {
     }, {signal});
   }
 
+  async getDirectMessages(value = {}, {signal} = {}) {
+    plainRequest(value, [], []);
+    const expected = this._context();
+    return this._read('inbox', expected, async request => directMessagesDto(await request('/api/messages')), {signal});
+  }
+
   async getFiresides(value = {}, {signal} = {}) {
     plainRequest(value, [], []);
     const expected = this._context();
@@ -334,9 +370,9 @@ class TownSession {
 
   async _read(area, expected, callback, {signal} = {}) {
     try {
-      const throughBeing = Boolean(this.readImpl && ['bonfire', 'fireside', 'scroll', 'beings'].includes(area));
-      // The Being reader verifies the native HTTP tool result and identity.
-      // Desktop IP authorization is unrelated to this execution context.
+      const throughBeing = Boolean(this.readImpl && ['bonfire', 'fireside', 'scroll', 'beings', 'inbox'].includes(area));
+      // The injected transport verifies the authenticated Town identity.
+      // Production uses a separately paired client token.
       if (!throughBeing) await this._authorized(area, expected, {signal});
       checkAborted(signal);
       const request = (route, options = {}) => throughBeing
@@ -361,7 +397,7 @@ class TownSession {
   }
 
   async sendBonfireMessage(value) {
-    plainRequest(value, ['content', 'mentions', 'connectionRevision', 'requestId'], ['content', 'mentions', 'connectionRevision']);
+    plainRequest(value, ['content', 'mentions', 'connectionRevision', 'requestId', 'replyTo'], ['content', 'mentions', 'connectionRevision']);
     if (typeof value.content !== 'string' || !value.content.trim() || value.content.length > 4000 || /[\x00]/.test(value.content) || !Array.isArray(value.mentions) || value.mentions.length > 20 || value.mentions.some(id => typeof id !== 'string' || !ID.test(id)) || !sequence(value.connectionRevision)) throw failure('INVALID_REQUEST', '请输入 1–4000 字的篝火消息，并选择有效成员。');
     const expected = this._context(undefined, value.connectionRevision);
     if (this.writeImpl) {
@@ -372,7 +408,7 @@ class TownSession {
       if (mentions.some(id => !members.some(member => member.id === id))) throw failure('INVALID_REQUEST', '所选 Being 已不在成员目录，请重新选择。');
       const missing = mentions.filter(id => !new RegExp(`(^|\\s)@${id}(?=$|[^A-Za-z0-9_-])`).test(value.content));
       const content = (missing.length ? missing.map(id => `@${id}`).join(' ') + '\n' : '') + value.content;
-      const result = await this.writeImpl({kind: 'bonfire', content, connectionRevision: value.connectionRevision, ...(value.requestId ? {requestId: value.requestId} : {})});
+      const result = await this.writeImpl({kind: 'bonfire', content, connectionRevision: value.connectionRevision, ...(value.requestId ? {requestId: value.requestId} : {}), ...(value.replyTo ? {replyTo: value.replyTo} : {})});
       this._context(expected);
       return result;
     }
@@ -458,4 +494,4 @@ class TownSession {
   }
 }
 
-module.exports = {TownSession, TOWN_AUTH_DETAIL, messagesDto, firesideMessagesDto};
+module.exports = {TownSession, TOWN_AUTH_DETAIL, messagesDto, firesideMessagesDto, directMessagesDto};

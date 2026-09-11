@@ -38,14 +38,16 @@ if (!process.versions.electron) {
   const toolsState = {browser: {tabs: [], activeTabId: null}, console: {jobs: []}, link: {status: 'disconnected'}, requests: [], workspace: ''};
   const initialConfig = {model: 'fixture-model-a', provider: 'openai', baseUrl: 'https://model.fixture.invalid/v1', hasApiKey: true};
   const providers = [
-    {id: 'openai', name: 'OpenAI compatible', baseUrl: 'https://default-openai.fixture.invalid/v1'},
-    {id: 'anthropic', name: 'Anthropic', baseUrl: 'https://anthropic.fixture.invalid/v1'},
+    {id: 'openai', name: 'OpenAI compatible', baseUrl: 'https://default-openai.fixture.invalid/v1', keyless: false},
+    {id: 'anthropic', name: 'Anthropic', baseUrl: 'https://anthropic.fixture.invalid/v1', keyless: false},
+    {id: 'self-hosted', name: '自部署', baseUrl: 'http://self-hosted.fixture.invalid:7860/v1', keyless: true},
   ];
   const models = [
     {id: 'fixture-model-a', presetId: 'fixture-a', name: 'Fixture A', provider: 'openai', baseUrl: '', hasApiKey: true},
     {id: 'fixture-model-b', presetId: 'fixture-b', name: 'Fixture B', provider: 'openai', baseUrl: '', hasApiKey: true},
     {id: 'fixture-model-b', presetId: 'fixture-b', name: 'Anthropic B', provider: 'anthropic', baseUrl: '', hasApiKey: true},
     {id: 'fixture-endpoint-model', name: 'Endpoint Needed', provider: 'unknown-provider', baseUrl: '', hasApiKey: false},
+    {id: 'fixture-self-hosted', presetId: 'self-hosted-fixture', name: 'Self Hosted', provider: 'self-hosted', baseUrl: '', hasApiKey: null},
   ];
   let configResult = {config: {...initialConfig}, models, providers, connectionId: 1, modelsError: ''};
   let loadMode = 'ready';
@@ -217,7 +219,8 @@ if (!process.versions.electron) {
     await click('#model-config-refresh');
     await domWait("document.getElementById('model-select').selectedOptions[0]?.textContent.startsWith('Fixture A ·')", 'supported models loaded');
     check('list-retry-loads-through-preload', calls('getModelConfig').length === 2);
-    check('supported-list-and-custom-option', await execute("(()=>{const options=[...document.getElementById('model-select').options];return options.length===5&&new Set(options.map(option=>option.value)).size===5&&options.some(option=>option.value==='__custom__')})()"));
+    check('supported-list-and-custom-option', await execute("(()=>{const options=[...document.getElementById('model-select').options];return options.length===6&&new Set(options.map(option=>option.value)).size===6&&options.some(option=>option.value==='__custom__')})()"));
+    check('self-hosted-group-is-listed-first-with-provider-names', await execute("(()=>{const groups=[...document.querySelectorAll('#model-select optgroup')];return groups.map(group=>group.label).join('|')==='自部署|OpenAI compatible|Anthropic|unknown-provider'&&groups[0].firstElementChild.textContent==='Self Hosted · fixture-self-hosted · 自部署'&&groups[1].children.length===2})()"));
     check('existing-key-is-never-filled', await execute("document.getElementById('model-api-key').type==='password'&&document.getElementById('model-api-key').value===''"));
     await capture('01-supported-list-1440');
 
@@ -229,9 +232,19 @@ if (!process.versions.electron) {
     await waitFor(() => calls('saveModelConfig').length === 1, 'supported-model save');
     const savedSupported = calls('saveModelConfig')[0].args[0];
     check('supported-model-save-omits-blank-key', savedSupported.model === 'fixture-model-b' && savedSupported.provider === 'openai' && savedSupported.baseUrl === initialConfig.baseUrl && savedSupported.connectionId === 1 && !Object.hasOwn(savedSupported, 'apiKey'));
+    await domWait("document.getElementById('model-config-status').textContent.includes('已保存')");
+
+    await selectModel('Self Hosted');
+    check('self-hosted-model-fills-default-endpoint-with-key-optional', await execute("document.getElementById('model-provider').value==='self-hosted'&&document.getElementById('model-base-url').value==='http://self-hosted.fixture.invalid:7860/v1'&&document.getElementById('model-service-settings').open&&document.getElementById('model-key-note').textContent.startsWith('自部署服务通常不填 API Key')&&!document.getElementById('model-config-save').disabled"));
+    await click('#model-config-save');
+    await waitFor(() => calls('saveModelConfig').length === 2, 'self-hosted save');
+    const savedSelfHosted = calls('saveModelConfig')[1].args[0];
+    check('self-hosted-save-sends-default-endpoint-without-key', savedSelfHosted.model === 'fixture-self-hosted' && savedSelfHosted.provider === 'self-hosted' && savedSelfHosted.baseUrl === 'http://self-hosted.fixture.invalid:7860/v1' && !Object.hasOwn(savedSelfHosted, 'apiKey'));
+    await domWait("document.getElementById('model-config-status').textContent.includes('已保存')");
+    check('saved-self-hosted-model-stays-selected', await execute("document.getElementById('model-select').selectedOptions[0].textContent.startsWith('Self Hosted ·')&&document.getElementById('model-config-save').disabled"));
 
     await selectModel('Endpoint Needed');
-    check('provider-without-default-clears-previous-endpoint', await execute("document.getElementById('model-provider').value==='unknown-provider'&&document.getElementById('model-base-url').value===''&&document.getElementById('model-service-settings').open"));
+    check('provider-without-default-clears-previous-endpoint', await execute("document.getElementById('model-provider').value==='unknown-provider'&&document.getElementById('model-base-url').value===''&&document.getElementById('model-service-settings').open&&!document.getElementById('model-key-note').textContent.includes('通常不填')"));
     await selectModel('Anthropic B');
     check('duplicate-model-and-preset-ids-select-correct-provider', await execute("document.getElementById('model-provider').value==='anthropic'&&document.getElementById('model-base-url').value==='https://anthropic.fixture.invalid/v1'&&document.getElementById('model-service-settings').open"));
     await edit('model-select', '__custom__', 'change');
@@ -254,8 +267,8 @@ if (!process.versions.electron) {
     check('pending-save-disables-submit', await execute("document.getElementById('model-config-save').disabled"));
     await execute("document.getElementById('model-config-form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))");
     await settle();
-    check('duplicate-submit-does-not-duplicate-save', calls('saveModelConfig').length === 2);
-    const savedCustom = calls('saveModelConfig')[1].args[0];
+    check('duplicate-submit-does-not-duplicate-save', calls('saveModelConfig').length === 3);
+    const savedCustom = calls('saveModelConfig')[2].args[0];
     check('custom-save-sends-config-and-new-key', savedCustom.model === 'custom/fixture-model:latest' && savedCustom.provider === 'anthropic' && savedCustom.baseUrl === 'https://custom.fixture.invalid/v1' && savedCustom.apiKey === 'fixture-only-key');
     configResult = {...configResult, config: {...savedCustom, hasApiKey: true}};
     delete configResult.config.apiKey;

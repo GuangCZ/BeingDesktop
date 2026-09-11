@@ -154,12 +154,12 @@ if (!process.versions.electron) {
     const html = source.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, '')
       .replace('<head>', `<head><base href="${pathToFileURL(renderer + path.sep).href}">`)
       .replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '')
-      .replace('</head>', '<script src="theme-colors.js" defer></script><script src="theme-settings.js" defer></script><script src="app.js" defer></script></head>');
+      .replace('</head>', '<script src="theme-colors.js" defer></script><script src="theme-settings.js" defer></script><script src="town-app.js" defer></script><script src="app.js" defer></script></head>');
     await fs.writeFile(fixture, html);
     await fs.writeFile(preload, `'use strict';
       const {contextBridge,ipcRenderer}=require('electron');
       const bridge={};
-      for(const method of ['getState','refresh','getTownCatalog','setColors','setView','getWindowState','minimize','maximize','close'])
+      for(const method of ['getTownAppState','getState','refresh','getTownCatalog','setColors','setView','getWindowState','minimize','maximize','close'])
         bridge[method]=value=>ipcRenderer.invoke('theme-fixture:call',method,value);
       for(const [name,channel] of [['onState','state'],['onWindowState','window-state'],['onCommand','command']])
         bridge[name]=callback=>{const listener=(_event,value)=>callback(value);ipcRenderer.on('theme-fixture:'+channel,listener);return()=>ipcRenderer.removeListener('theme-fixture:'+channel,listener);};
@@ -168,6 +168,7 @@ if (!process.versions.electron) {
     ipcMain.handle('theme-fixture:call', (_event, method, value) => {
       calls.push({ method, value });
       if (method === 'getState' || method === 'refresh') return structuredClone(fixtureState);
+      if (method === 'getTownAppState') return {client: {status: 'connected', paired: true}};
       if (method === 'getTownCatalog') return require('../src/town.cjs').getTownCatalog();
       if (method === 'getWindowState') return { maximized: false, fullscreen: false };
       if (method === 'setColors') {
@@ -210,6 +211,9 @@ if (!process.versions.electron) {
     check('search-empty-result-is-announced', await execute("document.querySelector('.settings-search-empty').checkVisibility()"));
     await execute("document.querySelector('#settings-search').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
     check('escape-clears-search-without-closing-settings', await execute("document.body.dataset.page==='settings'&&document.querySelector('#settings-search').value===''&&[...document.querySelectorAll('[data-settings-section]')].every(button=>!button.hidden)"));
+    await click('[data-settings-section="connection"]');
+    check('town-connection-controls-live-in-connection-settings', await execute("document.querySelector('#settings-panel-connection #town-connection-settings .ta-town-pair').checkVisibility()&&!document.querySelector('#page-town-app .ta-town-pair')"));
+    await capture('connection-1440x940');
     await click('[data-settings-section="general"]');
     await execute("document.querySelector('[data-settings-section=general]').dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true,cancelable:true}))");
     check('navigation-end-focuses-last-category', await execute("document.activeElement.dataset.settingsSection==='about'"));

@@ -5,12 +5,17 @@ const {endpoint, publicModelUrl} = require('./security.cjs');
 // Loom's public loadLlmConfig/llmApply contract: GET returns presets;
 // PATCH accepts model/provider/base_url/api_key and reports needs_key/rolled_back.
 const MAX_RESPONSE_BYTES = 1024 * 1024;
+// Mirrors Loom's providerNames and inferBaseUrl tables (loom.html 1.8.0) plus
+// OpenRouter. A preset's own base_url still takes precedence over these defaults.
 const PROVIDERS = {
   anthropic: {name: 'Anthropic', baseUrl: 'https://api.anthropic.com'},
   'openai-responses': {name: 'OpenAI Responses', baseUrl: 'https://api.openai.com/v1'},
   deepseek: {name: 'DeepSeek', baseUrl: 'https://api.deepseek.com'},
   kimi: {name: 'Kimi', baseUrl: 'https://api.moonshot.cn/v1'},
   google: {name: 'Google', baseUrl: 'https://generativelanguage.googleapis.com'},
+  glm: {name: 'GLM', baseUrl: ''},
+  // Loom 1.8.0 lists self-hosted presets first and applies them in one step without an API key.
+  'self-hosted': {name: '自部署', baseUrl: 'http://115.190.110.33:7860/v1', keyless: true},
   openrouter: {name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1'},
 };
 const MESSAGES = {
@@ -29,7 +34,9 @@ function record(value) { return value !== null && typeof value === 'object' && !
 function plainText(value, limit) {
   return typeof value === 'string' ? value.replace(/[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]/g, '').slice(0, limit) : '';
 }
-function providerDetails(id) { return {id, name: PROVIDERS[id]?.name || id, baseUrl: PROVIDERS[id]?.baseUrl || ''}; }
+function providerDetails(id) {
+  return {id, name: PROVIDERS[id]?.name || id, baseUrl: PROVIDERS[id]?.baseUrl || '', keyless: PROVIDERS[id]?.keyless === true};
+}
 function modelConfigDto(value, connectionId, checkedAt = new Date().toISOString()) {
   if (!record(value) || typeof value.model !== 'string' || typeof value.provider !== 'string') throw failure('INVALID_RESPONSE');
   const config = {

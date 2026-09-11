@@ -1,47 +1,20 @@
 'use strict';
 
+// Encrypted single-file store for one Being's conversation transcripts, in the BonfireCache shape.
+// Validation belongs to ChatStore's snapshot: this file only guards the envelope and the disk.
+
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const {createHash, randomUUID} = require('node:crypto');
+const {snapshot} = require('./chat-store.cjs');
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const plain = value => value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype;
-const sequence = value => Number.isSafeInteger(value) && value >= 0;
 const validKey = value => typeof value === 'string' && value.length > 0 && value.length <= 256 && !/[\x00-\x1f\x7f]/.test(value);
 
-function snapshot(value) {
-  if (!plain(value) || !Array.isArray(value.messages) || value.messages.length > 500 || !sequence(value.latestSeq)
-    || !sequence(value.capturedAt) || value.capturedAt > 8640000000000000 || typeof value.manual !== 'boolean'
-    || typeof value.revision !== 'string' || !/^[\x21-\x7e]{1,128}$/.test(value.revision)) return null;
-  const messages = [];
-  for (const entry of value.messages) {
-    if (!plain(entry) || typeof entry.content !== 'string' || entry.content.length > 32000) return null;
-    const id = typeof entry.id === 'string' && /^(0|[1-9]\d*)$/.test(entry.id) ? Number(entry.id) : entry.id;
-    if (!sequence(id) || id > value.latestSeq) return null;
-    const message = {id: String(id), content: entry.content};
-    for (const [field, limit] of [['beingId', 100], ['beingName', 100], ['createdAt', 64], ['revisedAt', 64], ['via', 120]]) {
-      if (entry[field] !== undefined && (typeof entry[field] !== 'string' || entry[field].length > limit)) return null;
-      if (entry[field] !== undefined) message[field] = entry[field];
-    }
-    if (entry.mentions !== undefined) {
-      if (!Array.isArray(entry.mentions) || entry.mentions.length > 20 || entry.mentions.some(item => typeof item !== 'string' || item.length > 100)) return null;
-      message.mentions = [...entry.mentions];
-    }
-    if (entry.replyTo !== undefined) {
-      const parent = entry.replyTo;
-      if (!plain(parent) || typeof parent.id !== 'string' || !parent.id || parent.id.length > 200 || typeof parent.beingId !== 'string' || parent.beingId.length > 100 || typeof parent.preview !== 'string' || parent.preview.length > 200) return null;
-      message.replyTo = {id: parent.id, beingId: parent.beingId, preview: parent.preview};
-    }
-    messages.push(message);
-  }
-  return {messages, latestSeq: value.latestSeq, capturedAt: value.capturedAt, revision: value.revision, manual: value.manual, ...(value.source === 'being_relay' ? {source: 'being_relay'} : {})};
-}
-
-// This store contains only validated message snapshots. Connection revisions
-// belong to the running session and are rebound by the refresh coordinator.
-class BonfireCache {
+class ChatCache {
   constructor({directory, safeStorage} = {}) {
-    if (typeof directory !== 'string' || !directory) throw new TypeError('Invalid Bonfire cache directory');
+    if (typeof directory !== 'string' || !directory) throw new TypeError('Invalid chat cache directory');
     this.directory = path.resolve(directory);
     this.safeStorage = safeStorage;
     this._writes = new Map();
@@ -70,7 +43,7 @@ class BonfireCache {
       if (typeof decoded !== 'string' || Buffer.byteLength(decoded, 'utf8') > MAX_FILE_BYTES) return null;
       const payload = JSON.parse(decoded);
       if (!plain(payload) || payload.version !== 1 || payload.identityKey !== identityKey) return null;
-      return snapshot(payload.snapshot);
+      return snapshot(payload.state);
     } catch { return null; }
   }
 
@@ -80,7 +53,7 @@ class BonfireCache {
     try {
       const next = snapshot(value);
       if (!next) return false;
-      payload = JSON.stringify({version: 1, identityKey, snapshot: next});
+      payload = JSON.stringify({version: 1, identityKey, state: next});
       if (Buffer.byteLength(payload, 'utf8') > MAX_FILE_BYTES) return false;
     } catch { return false; }
     const previous = this._writes.get(identityKey) || Promise.resolve();
@@ -94,9 +67,9 @@ class BonfireCache {
   async _write(identityKey, payload) {
     let temporary;
     try {
-      if (!this._available()) throw new Error('Bonfire cache encryption unavailable');
+      if (!this._available()) throw new Error('Chat cache encryption unavailable');
       const ciphertext = this.safeStorage.encryptString(payload);
-      if (!Buffer.isBuffer(ciphertext) || !ciphertext.length || ciphertext.length > MAX_FILE_BYTES) throw new Error('Invalid encrypted Bonfire cache');
+      if (!Buffer.isBuffer(ciphertext) || !ciphertext.length || ciphertext.length > MAX_FILE_BYTES) throw new Error('Invalid encrypted chat cache');
       await fs.mkdir(this.directory, {recursive: true});
       const file = this._file(identityKey);
       temporary = `${file}.${randomUUID()}.tmp`;
@@ -113,10 +86,16 @@ class BonfireCache {
     }
   }
 
+  async remove(identityKey) {
+    if (!validKey(identityKey)) return false;
+    try { await fs.unlink(this._file(identityKey)); return true; }
+    catch (error) { return error.code === 'ENOENT'; }
+  }
+
   async flush() {
     while (this._writes.size) await Promise.all(this._writes.values());
     return this._failed.size === 0;
   }
 }
 
-module.exports = {BonfireCache};
+module.exports = {ChatCache};
