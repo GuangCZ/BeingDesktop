@@ -12,7 +12,7 @@ test('client token store encrypts, isolates connection identities, persists rest
   await store.save('key-a', 'alice', token);
   const file = path.join(directory, (await fs.readdir(directory))[0]), wire = await fs.readFile(file, 'utf8');
   assert.equal(wire.includes(token), false); assert.equal(wire.includes('alice'), false);
-  assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
   assert.equal(await new TownClientStore({directory, safeStorage}).load('key-a', 'alice'), token);
   assert.equal(await store.load('key-a', 'bob'), null); assert.equal(await store.load('key-b', 'alice'), null);
   await fs.copyFile(file, store._file('key-b')); assert.equal(await store.load('key-b', 'alice'), null);

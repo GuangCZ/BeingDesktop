@@ -44,7 +44,8 @@ test('changing the saved launcher invalidates an already discovered adapter',asy
 test('unknown arbitrary scripts remain observable but cannot be controlled',async t=>{
   const f=await fixture(t);await fs.writeFile(f.wrapper,'#!/bin/zsh\nrun-something-else\n');
   assert.equal(await discoverLaunchAgent(f.options),null);
-  assert.equal(await launchBinding({ProgramArguments:['/usr/bin/env','heart-portal']}),null);
+  const interpreter=path.join(f.home,'env');await fs.writeFile(interpreter,'unrecognized interpreter fixture');
+  assert.equal(await launchBinding({ProgramArguments:[interpreter,'heart-portal']}),null);
 });
 test('supervision marker preserves every existing plist field and can be rolled back byte for byte',async t=>{
   const f=await fixture(t),adapter=await discoverLaunchAgent(f.options);const before=await fs.readFile(f.plist);
