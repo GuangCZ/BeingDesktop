@@ -44,7 +44,9 @@ async function fixture(t, mutate, options = {}) {
     fs.cpSync(root, packagedRoot, { recursive: true });
     options.packageTransform(packagedRoot);
   }
-  await asar.createPackageWithOptions(packagedRoot, archive, options.packNative ? {} : { unpackDir: 'node_modules/node-pty' });
+  const output = await asar.createPackageWithOptions(packagedRoot, archive, options.packNative ? {} : { unpackDir: 'node_modules/node-pty' });
+  // This asar version resolves with the output stream before pending writes finish.
+  await require('node:stream/promises').finished(output);
   return { root, archive };
 }
 

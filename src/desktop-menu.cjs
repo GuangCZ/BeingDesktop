@@ -24,10 +24,15 @@ function commandForInput(input, platform = process.platform) {
   if (!(platform === 'darwin' ? input.meta : input.control) || input.alt) return null;
   switch (key) {
     case 'b': return 'toggle-sidebar';
-    case '1': return 'chat';
-    case '2': return 'workspace';
+    case 'n': return 'new-task';
+    case 'k': return 'search-tasks';
+    case 'o': return 'select-workspace';
+    case '[': return 'navigate-back';
+    case ']': return 'navigate-forward';
+    case 'j': return 'toggle-console';
+    case 't': return 'open-browser';
     case ',': return 'settings';
-    default: return null;
+    default: return /^[1-9]$/.test(key) ? `task-${key}` : null;
   }
 }
 
@@ -55,9 +60,10 @@ function createDesktopMenuTemplate(name, {sendCommand, closeWindow, editTarget},
   } : {label, role};
   switch (name) {
     case 'file': return [
-      command('对话', 'chat', 'Ctrl+1'),
-      command('工作区', 'workspace', 'Ctrl+2'),
-      command('选择工作区…', 'select-workspace'),
+      command('新会话', 'new-task', 'Ctrl+N'),
+      command('搜索会话…', 'search-tasks', 'Ctrl+K'),
+      command('添加项目…', 'select-workspace', 'Ctrl+O'),
+      command('浏览项目文件', 'workspace'),
       separator(),
       command('连接与设置…', 'settings', 'Ctrl+,'),
       separator(),
@@ -74,15 +80,15 @@ function createDesktopMenuTemplate(name, {sendCommand, closeWindow, editTarget},
       edit('全选', 'selectAll', 'Ctrl+A'),
     ];
     case 'view': return [
-      command('后退', 'navigate-back', 'Alt+Left'),
-      command('前进', 'navigate-forward', 'Alt+Right'),
+      command('后退', 'navigate-back', 'Ctrl+['),
+      command('前进', 'navigate-forward', 'Ctrl+]'),
       separator(),
       command('切换侧栏', 'toggle-sidebar', 'Ctrl+B'),
       command('切换详情面板', 'toggle-inspector'),
       separator(),
       command('刷新状态', 'refresh'),
-      command('打开浏览器', 'open-browser'),
-      command('打开控制台', 'open-console'),
+      command('打开浏览器', 'open-browser', 'Ctrl+T'),
+      command('切换控制台', 'toggle-console', 'Ctrl+J'),
     ];
     case 'help': return [command('关于 Being Desktop', 'about')];
     default: throw new Error('请选择有效的应用菜单。');

@@ -15,6 +15,8 @@
 const {BeingChat, sceneId, imageBytes, IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_IMAGES} = require('./being-chat.cjs');
 const {ChatStore} = require('./chat-store.cjs');
 const {BeingRecovery} = require('./being-recovery.cjs');
+const {createHash} = require('node:crypto');
+const {encode: encodeReferences} = require('../renderer/chat-references.js');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_TITLE = 80;
@@ -58,14 +60,16 @@ function splitImages(images) {
 }
 
 class ChatSessions {
-  constructor({getContext, desktopId, cache = null, clientVersion = '', fetchImpl, timers, clock = Date.now, randomUUID = require('node:crypto').randomUUID, onEvent = () => {}, onState = () => {}} = {}) {
+  constructor({getContext, desktopId, cache = null, clientVersion = '', prepareMessage, getWorkerResults = () => [], fetchImpl, timers, clock = Date.now, randomUUID = require('node:crypto').randomUUID, onEvent = () => {}, onState = () => {}} = {}) {
     if (typeof desktopId !== 'string' || !UUID.test(desktopId)) throw new TypeError('Invalid Desktop identity');
-    Object.assign(this, {getContext, desktopId, cache, clientVersion, fetchImpl, timers, clock, randomUUID, onEvent, onState});
-    this.chat = new BeingChat({getContext, desktopId, clientVersion, ...(fetchImpl ? {fetchImpl} : {})});
+    Object.assign(this, {getContext, desktopId, cache, clientVersion, getWorkerResults, fetchImpl, timers, clock, randomUUID, onEvent, onState});
+    this.chat = new BeingChat({getContext, desktopId, clientVersion, prepareMessage, ...(fetchImpl ? {fetchImpl} : {})});
     this.store = null; this.recovery = null; this.identityKey = '';
     this._transient = new Map();
     this._version = 0;
   }
+
+  workersChanged() { if (this.open) this._touch(); }
 
   get open() { return this.recovery !== null; }
 
@@ -143,6 +147,7 @@ class ChatSessions {
     const item = ({misses, ...rest}) => rest;
     return {
       sessionId, version: this._version, rows: store.rows(sessionId),
+      workerResults: this.getWorkerResults(sessionId),
       sent: slot ? slot.sent.map(item) : [],
       replied: slot ? slot.replied.map(item) : [],
       live: slot?.live ? {text: slot.live.text, think: slot.think, at: slot.live.at} : null,
@@ -165,6 +170,23 @@ class ChatSessions {
     void store.touch();
     this._touch();
     return true;
+  }
+
+  // Stable per Being and channel, including after restart. Creating a background conversation
+  // must never move the user's selection or reuse a manually named conversation.
+  ensureChannel(channel) {
+    const titles = {feishu: '飞书 · Channel', wechat: '微信 · Channel'};
+    if (!Object.hasOwn(titles, channel)) throw fail('INVALID_REQUEST', '消息渠道无效。');
+    const {store} = this._require();
+    const bytes = createHash('sha256').update(JSON.stringify(['channel-session/1', this.desktopId, this.identityKey, channel])).digest();
+    bytes[6] = (bytes[6] & 0x0f) | 0x50; bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = bytes.toString('hex').slice(0, 32);
+    const id = `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+    if (!store.summary().sessions.some(session => session.id === id)) {
+      store.ensure(id, {title: titles[channel]});
+      void store.touch(); this._touch();
+    }
+    return {sessionId: id, sceneId: sceneId(this.desktopId, id)};
   }
 
   rename(sessionId, title) {
@@ -197,12 +219,13 @@ class ChatSessions {
    * no row and the Being answers the previous text (measured 2026-09-11). History will confirm the
    * text; the previews move onto the confirming row, since history holds nothing of the images.
    */
-  async send({sessionId, text, images} = {}) {
+  async send({sessionId, text, images, references} = {}) {
     const {store, recovery} = this._require();
     const session = store.summary().sessions.find(item => item.id === sessionId);
     if (!session) throw fail('INVALID_REQUEST', '会话不存在。');
     const {blocks, previews} = splitImages(images);
     if (typeof text !== 'string' || !text.trim()) throw fail('INVALID_REQUEST', blocks.length ? '图片需要配一句话一起发送。' : '消息不能为空。');
+    try { text = encodeReferences(text, references); } catch (error) { throw fail('INVALID_REQUEST', error.message); }
     if ([...text].length > MAX_TEXT) throw fail('INVALID_REQUEST', '消息过长。');
     const slot = this._slot(sessionId);
     const item = {text, at: this._now(), after: this._lastSeq(sessionId), misses: 0, ...(previews.length ? {images: previews} : {})};
@@ -237,6 +260,17 @@ class ChatSessions {
     const result = await recovery.reconcile({full: true});
     this._touch();
     return {ok: !result.error, added: result.added, error: result.error};
+  }
+
+  // A channel can send outside the foreground chat reader. Read its history and join any
+  // remaining stream without posting again or replacing the current conversation.
+  async syncChannel() {
+    const {recovery} = this._require();
+    const result = await recovery.reconcile();
+    if (this.recovery !== recovery) return;
+    await recovery.checkActiveStream();
+    if (this.recovery === recovery) this._touch();
+    return result;
   }
 
   _onEvent(event) {

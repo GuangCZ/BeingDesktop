@@ -31,14 +31,14 @@ window.beingTools=(()=>{
     $('tools-browser-pane').hidden=mode!=='browser';$('tools-console-pane').hidden=mode!=='console';
     $('tools-browser-mode').setAttribute('aria-selected',String(mode==='browser'));
     $('tools-console-mode').setAttribute('aria-selected',String(mode==='console'));
-    $('nav-browser').classList.toggle('active',opened&&mode==='browser');$('nav-console').classList.toggle('active',opened&&mode==='console');
+    for(const [id,tool] of [['open-browser','browser'],['open-console','console']]){$(id).classList.toggle('active',opened&&mode===tool);$(id).setAttribute('aria-pressed',String(opened&&mode===tool));}
     const link=state.link.status,connected=link==='connected',connecting=link==='connecting';
     $('tools-link-status').textContent=({connected:'Being 工具已连接',connecting:'正在连接 Being…',error:'Being 工具连接失败',disconnected:'Being 工具未连接'})[link] || 'Being 工具未连接';
     $('tools-connection').title=$('tools-link-status').textContent;$('tools-connection').dataset.state=link;
     $('tools-link-dot').style.background=connected?'#64a57d':link==='error'?'#d07b72':'#777';
     $('tools-link-toggle').textContent=connected||connecting?'断开':'连接 Being 工具';$('tools-link-toggle').disabled=linkBusy;
     const activeJobs=state.console.jobs.filter(job=>['starting','running','stopping'].includes(job.status)).length;
-    $('tools-link-hint').textContent=state.link.error || (connected?`每次调用单独确认；断开连接${activeJobs?`后 ${activeJobs} 条本机命令仍会运行`:'不会停止已启动的命令'}。`:activeJobs?`Being 工具未连接；仍有 ${activeJobs} 条本机命令运行，可在控制台手动停止。`:'连接后，Being 的页面和命令调用会在这里等待你确认。');
+    $('tools-link-hint').textContent=(state.link.reconnect ? `调度工具已断线，${Math.ceil(state.link.reconnect.delayMs/1000)} 秒后自动重连。` : state.link.error) || (connected?`每次调用单独确认；断开连接${activeJobs?`后 ${activeJobs} 条本机命令仍会运行`:'不会停止已启动的命令'}。`:activeJobs?`Being 工具未连接；仍有 ${activeJobs} 条本机命令运行，可在控制台手动停止。`:'连接后，Being 的页面和命令调用会在这里等待你确认。');
     if(state.requestResult && state.requestResult.id!==lastRequestResult){lastRequestResult=state.requestResult.id;if(state.requestResult.status==='failed')fail({message:`上一次 Being 调用：${state.requestResult.message}`});}
     renderRequests();renderBrowser();renderConsole();layout();
   }
@@ -63,7 +63,7 @@ window.beingTools=(()=>{
     if(focusKey)host.querySelectorAll('button').forEach(button=>{if(button.dataset.requestAction===focusKey)button.focus({preventScroll:true});});
     const count=(state.requests || []).length,activeJobs=state.console.jobs.filter(job=>['starting','running','stopping'].includes(job.status)).length;
     $('tools-pending-count').hidden=!(count||activeJobs);$('tools-pending-count').textContent=count?String(count):`${activeJobs} 运行`;
-    $('nav-console').title=count?`${count} 个 Being 调用待确认`:`本机命令控制台${activeJobs?` · ${activeJobs} 个命令运行中`:''}`;
+    $('open-console').title=count?`${count} 个 Being 调用待确认`:`本机命令控制台${activeJobs?` · ${activeJobs} 个命令运行中`:''}`;
   }
   function renderBrowser() {
     const browser=state.browser,active=browser.tabs.find(tab=>tab.id===browser.activeTabId),host=$('browser-tabs');
@@ -95,7 +95,7 @@ window.beingTools=(()=>{
     frame=requestAnimationFrame(()=>{
       frame=null;const rect=$('browser-host').getBoundingClientRect();
       const active=state.browser.tabs.find(tab=>tab.id===state.browser.activeTabId);
-      const payload={visible:opened&&mode==='browser'&&!resizing&&!document.hidden&&Boolean(active?.url&&!active.error),bounds:{x:Math.max(0,Math.round(rect.x)),y:Math.max(0,Math.round(rect.y)),width:Math.max(0,Math.round(rect.width)),height:Math.max(0,Math.round(rect.height))}};
+      const payload={visible:opened&&mode==='browser'&&!resizing&&!document.hidden&&!$('sidebar-search-dialog')?.open&&Boolean(active?.url&&!active.error),bounds:{x:Math.max(0,Math.round(rect.x)),y:Math.max(0,Math.round(rect.y)),width:Math.max(0,Math.round(rect.width)),height:Math.max(0,Math.round(rect.height))}};
       const key=JSON.stringify(payload);if(key===lastViewport)return;lastViewport=key;
       void bridge.setBrowserView(payload).catch(error=>{lastViewport='';fail(error);});
     });
@@ -103,7 +103,7 @@ window.beingTools=(()=>{
   function init(options) {
     bridge=options.bridge;callbacks=options;if(!bridge?.getDesktopTools)return;
     window.beingTerminal?.init({bridge,host:$('terminal-host'),onSelectWorkspace:()=>callbacks.onSelectWorkspace?.(),onError:fail});
-    [['open-browser','browser'],['nav-browser','browser'],['open-console','console'],['nav-console','console'],['tools-browser-mode','browser'],['tools-console-mode','console']].forEach(([id,next])=>$(id).onclick=()=>show(next));
+    [['open-browser','browser'],['open-console','console'],['tools-browser-mode','browser'],['tools-console-mode','console']].forEach(([id,next])=>$(id).onclick=()=>opened&&mode===next&&id.startsWith('open-')?hide():show(next));
     $('tools-close').onclick=hide;
     $('tools-expand').onclick=()=>{full=!full;$('content-grid').classList.toggle('tools-full',full);$('tools-expand').setAttribute('aria-label',full?'与对话并排':'展开工具面板');layout();callbacks.onLayout?.();};
     $('browser-new').onclick=()=>void action('browser.new');

@@ -226,3 +226,9 @@ test('redirect followed by a late native response cannot deliver two callbacks',
   assert.equal(h.responses.length, 1);
   assert.equal(native.abortCount, 1);
 });
+
+test('installer cancellation aborts native I/O and ignores late headers without leaking errors',async()=>{
+  const t=transport({abortError:'sync'}),h=begin(t.adapter);h.start();const native=await t.constructed;
+  h.request.destroy();native.emit('response',incoming('late'));
+  assert.equal(native.abortCount,1);assert.deepEqual(h.errors,[]);assert.equal(h.responses.length,0);
+});

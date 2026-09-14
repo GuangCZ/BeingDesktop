@@ -38,7 +38,7 @@ async function capture(name) {
 
 async function run() {
   await fs.mkdir(output, {recursive: true});
-  await fs.writeFile(path.join(output, 'fixture.html'), `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><base href="${pathToFileURL(renderer + path.sep).href}"><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="town-app.css"><link rel="stylesheet" href="town-library.css"><style>html,body{margin:0;width:100%;height:100%}#page-town-app{height:100vh;width:100vw}[hidden]{display:none!important}</style><script src="town-library.js" defer></script><script src="town-app.js" defer></script></head><body><main id="page-town-app"></main></body></html>`);
+  await fs.writeFile(path.join(output, 'fixture.html'), `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><base href="${pathToFileURL(renderer + path.sep).href}"><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="town-app.css"><link rel="stylesheet" href="town-library.css"><style>html,body{margin:0;width:100%;height:100%}#page-town-app{height:100vh;width:100vw}[hidden]{display:none!important}</style><script src="town-library.js" defer></script><script src="town-mentions.js" defer></script><script src="town-app.js" defer></script></head><body><main id="page-town-app"></main></body></html>`);
   await app.whenReady();
   win = new BrowserWindow({show: false, width: 1160, height: 850, useContentSize: true, webPreferences: {sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, offscreen: true, partition: `library-${randomUUID()}`}});
   win.webContents.session.webRequest.onBeforeRequest((details, callback) => {

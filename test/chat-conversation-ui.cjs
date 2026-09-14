@@ -42,7 +42,7 @@ async function capture(name) {
 
 async function run() {
   await fs.mkdir(output, { recursive: true });
-  await fs.writeFile(path.join(output, 'fixture.html'), `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><base href="${pathToFileURL(renderer + path.sep).href}"><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="chat-app.css"><style>html,body{margin:0;width:100%;height:100%}.loom-panel{height:100vh;width:100vw}[hidden]{display:none!important}</style><script src="chat-app.js" defer></script></head><body><div class="loom-panel" id="loom-panel"><div id="chat-native" hidden></div></div></body></html>`);
+  await fs.writeFile(path.join(output, 'fixture.html'), `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><base href="${pathToFileURL(renderer + path.sep).href}"><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="chat-app.css"><style>html,body{margin:0;width:100%;height:100%}.loom-panel{height:100vh;width:100vw}[hidden]{display:none!important}</style><script src="chat-references.js" defer></script><script src="chat-selection.js" defer></script><script src="town-mentions.js" defer></script><script src="composer-helpers.js" defer></script><script src="chat-composer.js" defer></script><script src="chat-app.js" defer></script></head><body><div class="loom-panel" id="loom-panel"><div id="chat-native" hidden></div></div></body></html>`);
   await app.whenReady();
   win = new BrowserWindow({ show: false, width: 960, height: 720, useContentSize: true, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, offscreen: true, partition: `chat-fixture-${randomUUID()}` } });
   win.webContents.session.webRequest.onBeforeRequest((details, callback) => {
@@ -76,6 +76,7 @@ async function run() {
       chatReload:async()=>{fixture.calls.reload++;return {ok:true,added:0,error:''};},
       chatForgetSession:async id=>{fixture.calls.forget.push(id);return true;},
       onChatEvent:listener=>{fixture.emit=listener;return()=>{};},
+      onChatDetailEvent:listener=>{fixture.emitDetail=listener;return()=>{};},
     };
     window.beingDesktop=bridge;
     try{localStorage.removeItem('being-chat-notice-v1');}catch{}
@@ -185,6 +186,9 @@ async function run() {
   await check('disconnecting disables the composer', `document.querySelector('.chat-input').disabled&&document.querySelector('.chat-send').disabled&&document.querySelector('.chat-phase').textContent==='尚未连接'`);
   await execute(`fixture.current=fixture.state(7);fixture.current.settings.chatMode='loom';beingChat.setState(fixture.current)`); await settle();
   await check('loom mode hides the native view entirely', `document.getElementById('chat-native').hidden`);
+  await require('./chat-selection-ui.cjs')({execute, check, settle, capture, win});
+  await require('./chat-composer-ui.cjs')({execute, check, settle, capture, win});
+  await require('./chat-worker-results-ui.cjs')({execute, check, settle, capture, win});
   assert.equal(forbiddenRequests, 0, 'Fixture must never request remote resources');
 }
 

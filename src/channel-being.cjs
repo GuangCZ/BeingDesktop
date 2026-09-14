@@ -79,12 +79,14 @@ function prompt(operation, channel, expected) {
 }
 
 class ChannelBeing {
-  constructor({getContext, fetchImpl = globalThis.fetch, onChange = () => {}, onRequest = null} = {}) {
-    if (typeof getContext !== 'function' || typeof fetchImpl !== 'function' || onRequest !== null && typeof onRequest !== 'function') throw new Error('Being 渠道连接配置无效。');
-    Object.assign(this, {getContext, fetchImpl, onChange, onRequest});
+  constructor({getContext, getSession = null, readStatus = null, fetchImpl = globalThis.fetch, onChange = () => {}, onRequest = null} = {}) {
+    if (typeof getContext !== 'function' || typeof fetchImpl !== 'function' || onRequest !== null && typeof onRequest !== 'function' || getSession !== null && typeof getSession !== 'function' || readStatus !== null && typeof readStatus !== 'function') throw new Error('Being 渠道连接配置无效。');
+    Object.assign(this, {getContext, getSession, readStatus, fetchImpl, onChange, onRequest});
     this._epoch = 0;
     this._active = null;
     this._sessions = new Map();
+    this._sessionOwner = '';
+    this._inspections = new Set();
     this._state = {channel: '', status: 'unknown', detail: ''};
   }
 
@@ -99,7 +101,10 @@ class ChannelBeing {
     this._epoch++;
     this._active?.controller.abort();
     this._active = null;
+    for (const controller of this._inspections) controller.abort();
+    this._inspections.clear();
     this._sessions.clear();
+    this._sessionOwner = '';
     this._set('unknown');
   }
 
@@ -124,6 +129,24 @@ class ChannelBeing {
     request(value);
     const result = await this._run('status', value.channel, value.connectionRevision);
     return {...result, channels: [result]};
+  }
+
+  // Opening the page only reads the service. It must not enqueue a Being message or reconnect
+  // an already configured channel merely because this Desktop cannot read its status.
+  async inspectChannelStatus(value) {
+    request(value);
+    const {snapshot} = this._context(value.connectionRevision);
+    if (typeof this.readStatus !== 'function') throw fail('SERVICE_ERROR', '暂时无法读取渠道状态。');
+    const controller = new AbortController();
+    this._inspections.add(controller);
+    try {
+      const result = await this.readStatus({signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)])});
+      this._context(value.connectionRevision, snapshot);
+      return result;
+    } catch (error) {
+      this._context(value.connectionRevision, snapshot);
+      throw error;
+    } finally { this._inspections.delete(controller); controller.abort(); }
   }
 
   async _qrImage(url, controller, revision, snapshot) {
@@ -160,6 +183,15 @@ class ChannelBeing {
   async _run(operation, channel, revision) {
     const {context, snapshot} = this._context(revision);
     if (this._active) throw fail('BUSY', 'Being 正在处理渠道请求，请等待结果后再操作。');
+    const owner = JSON.stringify([snapshot.beingName, snapshot.url, snapshot.identityRevision]);
+    if (owner !== this._sessionOwner) { this._sessions.clear(); this._sessionOwner = owner; }
+    let session = this.getSession ? this.getSession(channel) : this._sessions.get(channel);
+    if (!session && !this.getSession) {
+      session = {sceneId: `desktop-channel-${randomUUID()}-${channel}`};
+      this._sessions.set(channel, session);
+    }
+    if (!session || typeof session.sceneId !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(session.sceneId)) throw fail('NOT_CONNECTED', '渠道会话尚未准备好，请等待 Being 连接完成。');
+    this._context(revision, snapshot);
     const controller = new AbortController();
     const active = {controller};
     this._active = active;
@@ -180,13 +212,23 @@ class ChannelBeing {
           if (controller.signal.aborted) throw fail('SESSION_CHANGED', '连接身份已变化，请在当前 Being 下重新操作。');
         }
         sent = true;
-        return this.fetchImpl(url, options);
+        // scene_id, rather than the legacy server session_id, is the durable routing key.
+        // Allocate it before the first POST, so even a queued or interrupted first request
+        // belongs to the channel instead of falling into the default Loom conversation.
+        const body = JSON.parse(options.body);
+        body.scene_id = session.sceneId;
+        body.scene_meta = {scene_label: channel === 'feishu' ? '飞书 · Channel' : '微信 · Channel'};
+        body.client_ref = expected.requestId;
+        return this.fetchImpl(url, {...options, body: JSON.stringify(body)});
       });
       let reply = '';
       let latestReply = '';
-      let sessionId;
-      const response = await client.send({message, sessionId: this._sessions.get(channel), signal: controller.signal, onEvent: event => {
+      let currentScene = '';
+      const response = await client.send({message, signal: controller.signal, onEvent: event => {
         this._context(revision, snapshot);
+        if (event.type === 'meta') { currentScene = event.data.scene_id || ''; return; }
+        const eventScene = event.data.scene_id || currentScene;
+        if (eventScene !== session.sceneId) return;
         if (event.type === 'content_block_delta' && typeof event.data.delta?.text === 'string') {
           reply += event.data.delta.text;
           if (reply.length > MAX_REPLY) { controller.abort(); throw fail('INVALID_RESPONSE', 'Being 返回的渠道结果过长，请查看原对话。'); }
@@ -194,12 +236,9 @@ class ChannelBeing {
         if (event.type === 'message_stop') {
           if (reply.trim()) latestReply = reply;
           reply = '';
-          const id = event.data.session_id;
-          if (typeof id === 'string' && id.length > 0 && id.length <= 512 && !/[\x00-\x1f\x7f]/.test(id)) sessionId = id;
         }
       }});
       this._context(revision, snapshot);
-      if (sessionId) this._sessions.set(channel, sessionId);
       const result = response.accepted
         ? {channel, status: 'pending', detail: '请求已发送给 Being；Being 正在处理其他消息，渠道结果尚未确认。稍后可手动检查状态。'}
         : outcome(latestReply, channel, secrets, expected);

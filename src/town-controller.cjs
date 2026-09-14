@@ -30,8 +30,9 @@ function confirmedDeployment(value) {
 }
 
 class TownController {
-  constructor({installer,portal,getContext,saveDeployment,startPortal,defaultWorkspace='',onChange=()=>{},platform=process.platform,arch=process.arch,configFactory=createPortalConfig}) {
+  constructor({installer,portal,getContext,saveDeployment,startPortal,defaultWorkspace='',onChange=()=>{},platform=process.platform,arch=process.arch,configFactory=createPortalConfig,inspectInstallation}) {
     Object.assign(this,{installer,portal,getContext,saveDeployment,startPortal,defaultWorkspace,onChange,platform,arch,configFactory});
+    this.inspectInstallation=inspectInstallation || (()=>installer.inspect());
     this.release = installer.release || portalRelease(platform,arch) || PORTAL_RELEASE;
     this.installation = {status:'unknown',phase:'idle',version:this.release.version,verified:false,started:false,detail:''};
     this._deploying = null;
@@ -43,7 +44,7 @@ class TownController {
     const external = this.portal.state.status === 'external' || this.portal.state.management === 'external';
     const managed = context.managedPortal?.executable === context.portalExecutable && context.managedPortal?.configPath === context.portalConfig ? context.managedPortal : null;
     return {
-      identity:{beingId:context.beingName || '',displayName:context.beingName || 'Being',sendAs:'being',connectionRevision:Number.isSafeInteger(context.connectionId) && context.connectionId>=0?context.connectionId:null,identityRevision:Number.isSafeInteger(context.identityRevision) && context.identityRevision>=0?context.identityRevision:null},
+      identity:{beingId:context.beingName || '',loomBeingId:context.beingName || '',townId:context.townId || '',displayName:context.displayName || context.beingName || 'Being',sendAs:'being',connectionRevision:Number.isSafeInteger(context.connectionId) && context.connectionId>=0?context.connectionId:null,identityRevision:Number.isSafeInteger(context.identityRevision) && context.identityRevision>=0?context.identityRevision:null},
       access:{grove:'ready',channel:context.connected?'ready':'disconnected',bonfire:context.connected?'ready':'disconnected',fireside:'auth_required',groveRegistration:'auth_required'},
       accessDetail:AUTH_MESSAGE,
       portalInstall:{...this.installation},
@@ -111,7 +112,7 @@ class TownController {
       if (managed.workspace!==configuration.capabilities.workspace) throw new Error('托管 Portal 的工作区已变化，请先在连接设置核对配置。');
       this._update({status:'installing',phase:'checking',detail:'正在核对已部署的 Portal。',recovery:null});
       try {
-        const installed=await this.installer.inspect();
+        const installed=await this.inspectInstallation(managed);
         if (!installed.verified || installed.executable!==managed.executable) throw new Error('Portal 文件校验失败，未安装。');
         const configStat=await fs.lstat(managed.configPath);
         if (!configStat.isFile() || configStat.isSymbolicLink() || await fs.readFile(managed.configPath,'utf8')!==configuration.toml) throw new Error('托管配置已改变，请在连接设置检查后启动。');

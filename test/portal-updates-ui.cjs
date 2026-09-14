@@ -31,7 +31,7 @@ if (!process.versions.electron) {
     portalUpdate: {...baseUpdate},
     townApp: {platformSupported: true, access: {}, identity: {}, portalWorkspace: {path: 'C:\\Preview\\portal-workspace', isDefault: true}, portalInstall: {status: 'idle', phase: '', detail: ''}},
   };
-  let win, pendingCheck, rejectOpen = false;
+  let win, pendingCheck, pendingAdoption, rejectOpen = false, permissionFailure = false;
   app.setPath('userData', path.join(runRoot, 'profile'));
   app.disableHardwareAcceleration();
   app.commandLine.appendSwitch('force-device-scale-factor', '1');
@@ -102,7 +102,14 @@ if (!process.versions.electron) {
       assert.equal(pendingCheck, undefined);
       return new Promise((resolve, reject) => {pendingCheck = {resolve, reject};});
     });
+    handle('getPortalPermissions',()=>{
+      if(permissionFailure)throw new Error('无法读取权限，请重试。');
+      return {permissions:{file:true,exec:true,screenshot:true,search:true,web_fetch:true,custom_tools_enabled:true},revision:'fixture-revision',configPath:'/existing/portal.toml'};
+    });
+    handle('savePortalPermissions',request=>({state:structuredClone(fixtureState),detail:'权限已保存，Portal 已通过原管理方式重启。'}));
+    handle('adoptPortal',()=>new Promise((resolve,reject)=>{pendingAdoption={resolve,reject};}));
     handle('openPortalUpdate', (...args) => {assert.deepEqual(args, []); if (rejectOpen) throw new Error('无法打开官方更新页面，请重试。'); return {opened: true};});
+    for(const method of ['downloadPortalUpdate','applyPortalUpdate','recoverPortalUpdate'])handle(method,()=>structuredClone(fixtureState));
     for (const method of ['deployPortal', 'startPortal', 'stopPortal', 'prepareTownAssistance', 'sendFiresideMessage', 'sendBonfireMessage']) handle(method, () => {throw new Error('The update fixture must not install, stop, start, or send.');});
     win = new BrowserWindow({show: false, frame: false, width: 1440, height: 980, useContentSize: true, webPreferences: {preload: path.join(root, 'src', 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, offscreen: true, partition: `portal-updates-${randomUUID()}`}});
     win.webContents.setFrameRate(30);
@@ -162,7 +169,7 @@ if (!process.versions.electron) {
     fixtureState.portal.status='external';
     await publish({status:'external',currentVersion:'',detail:'已检测到外部 Portal 进程，桌面端尚未读取其版本。请在原启动位置查看版本和管理更新。'});
     check('external-installation-is-consistent-with-process-status', await execute("document.getElementById('portal-update-version').textContent==='已有 Portal · 版本未确认'&&document.getElementById('portal-update-check').textContent==='刷新状态'&&!document.getElementById('portal-update-panel').textContent.includes('安装 Portal 后')&&!document.getElementById('portal-update-panel').textContent.includes('尚未安装')"));
-    check('external-workspace-is-not-misrepresented-as-desktop-default', await execute("document.getElementById('portal-setup-workspace').closest('.path-setting').hidden&&document.querySelector('.portal-setup-heading h4').textContent==='已有 Portal'"));
+    check('external-workspace-is-not-misrepresented-as-desktop-default', await execute("document.getElementById('portal-setup-workspace').textContent==='尚未确认，请核对原配置'&&document.getElementById('portal-setup-choose-workspace').disabled&&document.querySelector('.portal-setup-heading h4').textContent==='已有 Portal'"));
     await publish({status:'external',currentVersion:'0.8.0',checkedAt:'2026-09-09T06:00:00Z',detail:'已读取外部 Portal 程序版本 0.8.0，进程正在运行。'});
     check('external-version-and-refresh-action-are-visible',await execute("document.getElementById('portal-update-version').textContent==='0.8.0 · 外部管理'&&!document.getElementById('portal-update-check').disabled&&document.getElementById('portal-update-checked').textContent.includes('状态读取')"));
     await click('portal-update-check');
@@ -175,11 +182,14 @@ if (!process.versions.electron) {
     check('background-check-disables-manual-check', await execute("document.getElementById('portal-update-check').disabled&&document.getElementById('portal-update-status').textContent.includes('正在检查')"));
     await publish({status: 'error', detail: '无法连接版本服务。'});
     check('error-without-known-update-does-not-claim-current', !await visible('portal-update-entry') && await execute("document.getElementById('portal-update-status').textContent.includes('无法检查')&&!document.getElementById('portal-update-status').textContent.includes('已是最新')"));
+    await publish({status:'error',currentVersion:'0.8.3',latestVersion:'0.8.3',checkedAt:available.checkedAt,errorCode:'timeout',detail:'连接官方版本服务超时，请稍后重试。'});
+    check('failed-check-preserves-successful-baseline-without-claiming-current-latest',await execute("document.getElementById('portal-update-detail').textContent.includes('上次成功确认的稳定版为 0.8.3')&&document.getElementById('portal-update-detail').textContent.includes('尚未确认是否有更新')&&!document.getElementById('portal-update-status').textContent.includes('已是最新')"));
+
     await click('portal-update-check');
     await waitFor(() => pendingCheck, 'retry IPC');
     const second = pendingCheck; pendingCheck = undefined; second.reject(new Error('网络检查失败，请重试。'));
     await domWait("!document.getElementById('portal-update-check').disabled");
-    check('ipc-check-error-is-actionable-and-clean', await execute("document.getElementById('portal-update-detail').textContent==='网络检查失败，请重试。'&&document.getElementById('portal-update-check').textContent==='重试检查'"));
+    check('ipc-check-error-is-actionable-and-clean', await execute("document.getElementById('portal-update-detail').textContent.startsWith('网络检查失败，请重试。')&&!document.getElementById('portal-update-detail').textContent.includes('Error invoking')&&document.getElementById('portal-update-check').textContent==='重试检查'"));
     await publish(available);
     rejectOpen = true;
     await click('portal-update-open');
@@ -192,6 +202,49 @@ if (!process.versions.electron) {
     await domWait("document.body.dataset.page==='settings'");
     check('native-notification-command-opens-portal-settings', await execute("document.activeElement.id==='portal-settings'"));
     check('fixture-never-installs-starts-stops-or-sends', ['deployPortal', 'startPortal', 'stopPortal', 'prepareTownAssistance', 'sendFiresideMessage', 'sendBonfireMessage'].every(method => calls(method).length === 0));
+    fixtureState.portal={...fixtureState.portal,status:'external',management:'external',canAdopt:true,adopted:false,canManage:false,pid:123};
+    await publish({...available,maintenance:{supported:false,kind:'unknown',phase:'idle'}});
+    check('recognized-external-portal-has-visible-one-click-adoption',await visible('portal-adopt')&&await execute("!document.getElementById('portal-adopt').disabled&&document.getElementById('portal-adopt').textContent==='一键接管'"));
+    check('unadopted-service-controls-stay-disabled',await execute("document.getElementById('stop-portal').disabled&&document.getElementById('portal-setup-status').textContent.includes('接管不会重启')"));
+    await execute("document.querySelector('#toast-region .toast button')?.click()");
+    await capture('05-one-click-adoption-720');
+    await click('portal-adopt');await waitFor(()=>Boolean(pendingAdoption),'pending adoption');
+    check('adoption-progress-prevents-double-submission',await execute("document.getElementById('portal-adopt').disabled&&document.getElementById('portal-adopt').textContent==='接管中…'"));
+    pendingAdoption.reject(new Error('接管记录未能保存，尚未接管，请重试。'));pendingAdoption=null;
+    await domWait("!document.getElementById('portal-adopt').disabled");
+    check('failed-adoption-remains-retryable-and-unmanaged',await execute("document.getElementById('portal-adopt').textContent==='一键接管'&&document.getElementById('stop-portal').disabled"));
+    await click('portal-adopt');await waitFor(()=>Boolean(pendingAdoption),'retry adoption');
+    fixtureState.portal={...fixtureState.portal,canAdopt:false,adopted:true,canManage:true};
+    pendingAdoption.resolve(structuredClone(fixtureState));pendingAdoption=null;
+    await domWait("document.getElementById('portal-adopt').textContent==='已接管'");
+    check('adoption-success-is-visible-and-enables-original-service-controls',await execute("document.getElementById('portal-adopt').disabled&&!document.getElementById('stop-portal').disabled&&document.getElementById('settings-portal-status').textContent.includes('已接管')"));
+    check('adoption-reaches-preload-ipc-without-starting-or-stopping',calls('adoptPortal').length===2&&['startPortal','stopPortal','deployPortal'].every(method=>calls(method).length===0));
+    await publish({...available,maintenance:{supported:true,kind:'launchagent',running:true,phase:'ready',detail:'更新已就绪。'}});
+    check('adopted-portal-can-apply-staged-update',await visible('portal-update-apply') && await execute("!document.getElementById('portal-update-apply').disabled&&document.getElementById('portal-update-apply').textContent==='停止并更新'"));
+    check('restart-impact-is-visible',await execute("document.getElementById('portal-maintenance-status').checkVisibility()&&document.getElementById('portal-maintenance-status').textContent.includes('短暂断连')"));
+    await capture('05-ready-launchagent-720');
+    await click('portal-update-apply');
+    await domWait("!document.getElementById('portal-update-apply').disabled");
+    check('apply-update-reaches-main-process-once',calls('applyPortalUpdate').length===1);
+    await publish({...available,maintenance:{supported:true,kind:'desktop',running:true,phase:'verifying',busy:true,detail:'正在验证连接…'}});
+    check('update-in-progress-disables-concurrent-actions',await execute("document.getElementById('portal-update-check').disabled&&document.getElementById('portal-update-download').disabled"));
+    await publish({...available,maintenance:{supported:true,kind:'desktop',phase:'recovery_required',detail:'需要恢复旧版本。'}});
+    check('interrupted-update-offers-recovery',await visible('portal-update-recover')&&!await visible('portal-update-apply'));
+    await click('portal-update-recover');
+    check('recovery-reaches-main-process-once',calls('recoverPortalUpdate').length===1);
+    await publish({status:'current',currentVersion:'0.8.3',maintenance:{supported:true,kind:'launchagent',phase:'idle'}});
+    await execute("document.getElementById('portal-permissions').open=true");
+    await domWait("!document.getElementById('portal-permission-save').disabled");
+    check('adopted-service-permissions-are-loaded-and-editable',await execute("Array.from(document.querySelectorAll('#portal-permission-fields input')).every(input=>input.checked&&!input.disabled)&&document.getElementById('portal-permission-save').textContent==='保存并重启'"));
+    await capture('06-adopted-permissions-720');
+    await click('portal-permission-exec');await click('portal-permission-save');
+    await domWait("document.getElementById('portal-permission-status').textContent.includes('权限已保存')");
+    check('permission-save-sends-the-original-config-and-revision',calls('savePortalPermissions').length===1&&calls('savePortalPermissions')[0].args[0].configPath==='/existing/portal.toml'&&calls('savePortalPermissions')[0].args[0].revision==='fixture-revision'&&calls('savePortalPermissions')[0].args[0].permissions.exec===false);
+    permissionFailure=true;await click('portal-permission-refresh');
+    await domWait("document.getElementById('portal-permission-status').textContent==='无法读取权限，请重试。'");
+    check('permission-errors-do-not-display-electron-ipc-internals',await execute("!document.getElementById('portal-permission-status').textContent.includes('Error invoking')&&document.getElementById('portal-permission-save').disabled"));
+    permissionFailure=false;await click('portal-permission-refresh');await domWait("!document.getElementById('portal-permission-save').disabled");
+    check('permission-read-failure-can-be-retried',await execute("document.getElementById('portal-permission-exec').checked"));
     check('fixture-window-never-shown', BrowserWindow.getAllWindows().every(item => !item.isVisible()));
     check('no-network-attempts', report.blockedRequests.length === 0, report.blockedRequests);
     check('no-renderer-errors', report.errors.length === 0, report.errors);

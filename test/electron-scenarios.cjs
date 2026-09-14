@@ -649,6 +649,7 @@ async function runDesktopScenarios({app, win, getView, getState, refresh}) {
         };
         const source=await require('node:fs/promises').readFile(path.join(__dirname,'..','renderer','town-app.js'),'utf8');
         await execute(`document.body.replaceChildren(Object.assign(document.createElement('main'),{id:'page-town-app'}));`);
+        await execute(await require('node:fs/promises').readFile(path.join(__dirname,'..','renderer','town-mentions.js'),'utf8'));
         await execute(source);
         const result=await execute(`(async()=>{
           const calls={catalog:0,rooms:0,members:0,snapshots:0,refreshes:0,reads:0,send:0,deploy:0,assist:0,handoff:0,handoffRevisions:[],channel:0};

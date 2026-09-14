@@ -51,7 +51,7 @@ if (!process.versions.electron) {
     const html = await fs.readFile(path.join(renderer, 'index.html'), 'utf8');
     const icons = html.match(/<svg\b[^>]*class="icon-library"[^>]*>[\s\S]*?<\/svg>/)?.[0] || '';
     const entry = path.join(output, 'fixture.html');
-    await fs.writeFile(entry, `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><base href="${pathToFileURL(renderer + path.sep).href}"><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="town-app.css"><style>html,body{margin:0;width:100%;height:100%}#page-town-app{height:100vh;width:100vw}.town-app [hidden]{display:none!important}</style><script src="town-app.js" defer></script></head><body>${icons}<main id="page-town-app"></main></body></html>`);
+    await fs.writeFile(entry, `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><base href="${pathToFileURL(renderer + path.sep).href}"><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="town-app.css"><style>html,body{margin:0;width:100%;height:100%}#page-town-app{height:100vh;width:100vw}.town-app [hidden]{display:none!important}</style><script src="town-mentions.js" defer></script><script src="town-app.js" defer></script></head><body>${icons}<main id="page-town-app"></main></body></html>`);
     await app.whenReady();
     win = new BrowserWindow({show: false, width: 1100, height: 850, useContentSize: true, webPreferences: {sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, offscreen: true, partition: `grove-install-${randomUUID()}`}});
     win.webContents.session.webRequest.onBeforeRequest((details, callback) => {

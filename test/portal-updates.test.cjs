@@ -21,6 +21,7 @@ function release(version = '0.9.0') {
       name: 'heart-portal-windows-x86_64.exe',
       state: 'uploaded',
       size: 12_193_280,
+      digest: 'sha256:' + 'a'.repeat(64),
       browser_download_url: `https://github.com/d5z/heart-portal/releases/download/v${version}/heart-portal-windows-x86_64.exe`,
     }],
   };
@@ -49,7 +50,7 @@ function fixture(t, overrides = {}) {
   const changes = [];
   const timers = [];
   const clearedTimers = [];
-  const service = new PortalUpdates({platform:'win32',arch:'x64',
+  const service = new PortalUpdates({platform:'win32',arch:'x64',maxAttempts:1,
     getExecutable: () => executable,
     readVersion: async value => { reads.push(value); return '0.8.0'; },
     fetchImpl: async (url, options) => { requests.push({ url: String(url), options }); return response(); },
@@ -98,6 +99,7 @@ test('only the official stable release with its matching uploaded Windows asset 
   assert.equal(RELEASE_API, 'https://api.github.com/repos/d5z/heart-portal/releases/latest');
   assert.deepEqual(parsePortalRelease(release('0.10.0')), {
     version: '0.10.0', url: 'https://github.com/d5z/heart-portal/releases/tag/v0.10.0',
+    asset: {version:'0.10.0',url:release('0.10.0').assets[0].browser_download_url,size:12_193_280,sha256:'a'.repeat(64)},
   });
   const invalid = [
     null, {}, { ...release(), draft: true }, { ...release(), prerelease: true },
@@ -476,7 +478,7 @@ test('the automatic timer checks again when the successful check interval expire
 test('external Portal overrides unconfigured and stale update metadata without probing it', async t => {
   let portal = {status:'external'};
   let reads=0;
-  const {service} = fixture(t,{getPortal:()=>portal,readVersion:async()=>{reads++;return '0.8.0';}});
+  const {service} = fixture(t,{getExecutable:()=>'',getPortal:()=>portal,readVersion:async()=>{reads++;return '0.8.0';}});
   service._state={status:'available',currentVersion:'0.1.0',latestVersion:'0.8.0',available:true};
   const external=await service.check({force:true});
   assert.equal(external.status,'external');
@@ -485,4 +487,29 @@ test('external Portal overrides unconfigured and stale update metadata without p
   assert.equal(reads,0);
   portal={status:'stopped'};
   assert.notEqual(service.state().status,'external');
+});
+
+test('a transient network error is retried once within the same user check',async t=>{
+  let calls=0,waits=0;const f=fixture(t,{maxAttempts:2,waitImpl:async()=>{waits++;},fetchImpl:async()=>{if(++calls===1)throw Error('private-fixture-network');return response();}});
+  const state=await f.service.check();assert.equal(state.status,'available');assert.equal(calls,2);assert.equal(waits,1);assert.equal(f.notifications.length,1);
+  assert.ok(f.changes.some(s=>s.checking&&s.detail.includes('自动重试')));
+});
+test('request deadlines bound a transport that never resolves or observes abort',async t=>{
+  let calls=0;const signals=[];const f=fixture(t,{maxAttempts:2,requestTimeoutMs:15,waitImpl:async()=>{},fetchImpl:async(_url,options)=>{calls++;signals.push(options.signal);return new Promise(()=>{});}});
+  const state=await f.service.check();assert.equal(state.errorCode,'timeout');assert.equal(state.checking,false);assert.equal(calls,2);assert.ok(signals.every(s=>s.aborted));
+});
+test('temporary server errors retry, while invalid release metadata does not masquerade as a network error',async t=>{
+  let calls=0;const f=fixture(t,{maxAttempts:2,waitImpl:async()=>{},fetchImpl:async()=>++calls===1?response({},503):response()});
+  assert.equal((await f.service.check()).status,'available');assert.equal(calls,2);
+  const invalid=fixture(t,{maxAttempts:2,fetchImpl:async()=>{calls++;return response({...release(),assets:[]});}});
+  const state=await invalid.service.check();assert.equal(state.errorCode,'invalid_release');assert.doesNotMatch(state.detail,/检查网络/);assert.equal(calls,3);
+});
+test('GitHub rate limit honors reset headers and does not retry early even on repeated manual checks',async t=>{
+  let calls=0;const f=fixture(t,{maxAttempts:2,fetchImpl:async()=>{calls++;return new Response('{}',{status:403,headers:{'x-ratelimit-remaining':'0','retry-after':'60'}});}});
+  const state=await f.service.check();assert.equal(state.errorCode,'rate_limited');assert.equal(calls,1);assert.ok(state.retryAt);
+  await f.service.check({force:true});assert.equal(calls,1);f.advance(60*1000);await f.service.check({force:true});assert.equal(calls,2);
+});
+test('body stalls are bounded and do not remain stuck checking',async t=>{
+  const f=fixture(t,{requestTimeoutMs:15,fetchImpl:async()=>new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode('{'));}}),{status:200})});
+  const state=await f.service.check();assert.equal(state.errorCode,'timeout');assert.equal(state.checking,false);
 });

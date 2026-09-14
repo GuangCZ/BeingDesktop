@@ -1,7 +1,7 @@
 'use strict';
 
 // Electron's native vibrancy supplies the desktop material. The renderer adds
-// the Liquid Glass hierarchy; it does not pretend to expose NSGlassEffectView.
+// a restrained frosted frame; content remains a separate reading surface.
 function windowAppearance({platform = process.platform, background, reducedTransparency = false, highContrast = false} = {}) {
   if (platform !== 'darwin') return {frame: false, backgroundColor: background};
   const opaque = reducedTransparency || highContrast;
@@ -10,7 +10,7 @@ function windowAppearance({platform = process.platform, background, reducedTrans
     titleBarStyle: 'hidden',
     trafficLightPosition: {x: 20, y: 21},
     backgroundColor: opaque ? background : '#00000000',
-    vibrancy: opaque ? undefined : 'sidebar',
+    vibrancy: opaque ? undefined : 'under-window',
     visualEffectState: 'followWindow',
   };
 }

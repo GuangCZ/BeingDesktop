@@ -15,7 +15,7 @@ app.setPath('userData', path.join(path.dirname(output), 'profile'));
 const report = {checks:[],passed:false,externalRequests:0};
 let win, server;
 const data = {
-  kits:[{id:'image-kit',name:'image',description:'生成图片与插画'},{id:'browser-kit',name:'browser',description:'读取网页和查找资料'}],
+  kits:[{installed:true,id:'image-kit',name:'image',description:'生成图片与插画'},{installed:true,id:'browser-kit',name:'browser',description:'读取网页和查找资料'}],
   members:[{id:'member-ada',name:'Ada',description:'一起编程与讨论设计'},{id:'member-bo',name:'Bo',description:'音乐与故事'}]
 };
 const html = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><style>
@@ -143,7 +143,7 @@ app.whenReady().then(async () => {
     assert.equal((await takeLoomComposerIntents(win.webContents)).length,0);
   });
   await check('bundled-kit-icons-load-and-align-without-external-requests',async () => {
-    const kits = require('../design/grove-catalog-public.json').kits;
+    const kits = require('../design/grove-catalog-public.json').kits.map(kit => ({...kit,installed:true}));
     await updateLoomComposerData(win.webContents,{...data,kits});
     // Search each catalog item so icons beyond the first suggestion page are checked.
     for (const kit of kits) {
@@ -173,7 +173,7 @@ app.whenReady().then(async () => {
       assert.ok(layout.every(row=>row.iconWidth===32&&row.gap>=10&&!row.overflow));
       await fs.writeFile(path.join(path.dirname(output),`kit-icons-${width}.png`),(await win.webContents.capturePage()).toPNG());
     }
-    await updateLoomComposerData(win.webContents,{kits:[{id:'unknown-kit',name:'Unknown',icon:'https://invalid.test/icon.png'}]});
+    await updateLoomComposerData(win.webContents,{kits:[{installed:true,id:'unknown-kit',name:'Unknown',icon:'https://invalid.test/icon.png'}]});
     await draft('/Unknown');
     assert.deepEqual(await win.webContents.executeJavaScript("({images:document.querySelectorAll('.desktop-composer-icon img').length,fallback:document.querySelector('.desktop-composer-initial').textContent})"),{images:0,fallback:'U'});
   });

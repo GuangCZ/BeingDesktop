@@ -24,6 +24,7 @@ function fixture(fetchImpl) {
     end: () => stream.close(),
     push: (type, data) => stream.enqueue(new TextEncoder().encode(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`))};
 }
+const writeFixture = fetchImpl => fixture((url, options) => new URL(url).pathname === '/api/bonfire/mentions' ? json({being: 'alice', mentions: []}) : fetchImpl(url, options));
 test('SDK direct reads use only Town client bearer auth, verify identity, preserve full text', async () => {
   const f = fixture();
   const session = new TownSession({getContext: () => ({configured: true, connected: true, beingName: 'alice', connectionId: 1}), readImpl: (...args) => f.client.read(...args), fetchImpl: async () => json({community: []})});
@@ -86,10 +87,11 @@ test('SSE authenticates hello, emits only safe invalidation hints, and stops on 
   assert.equal(f.client.state().status, 'connected'); assert.equal(JSON.stringify(f.client.state()).includes(token), false);
   f.switch(); await tick(); assert.equal(f.client.state().paired, false);
 });
-test('anonymous, being-level and foreign SSE hello fail closed without reconnection loop', async () => {
-  for (const hello of [{being_id: 'alice', token_kind: 'being', anonymous: false}, {being_id: 'bob', token_kind: 'client', anonymous: false}, {anonymous: true}]) {
+test('SSE distinguishes anonymous, protocol errors and foreign identities without accepting hints', async () => {
+  for (const [hello, status] of [[{being_id: 'alice', token_kind: 'being', anonymous: false}, 'reconnecting'], [{being_id: 'bob', token_kind: 'client', anonymous: false}, 'identity_mismatch'], [{anonymous: true}, 'auth_required']]) {
     const f = fixture(); f.client.lifecycle({enabled: true}); await tick(); f.push('hello', hello); await tick();
-    assert.equal(f.client.state().status, 'identity_mismatch'); assert.equal(f.client._timer, null); assert.equal(f.events.length, 0); f.client.reset();
+    try { assert.equal(f.client.state().status, status); if (status !== 'reconnecting') assert.equal(f.client._timer, null); assert.equal(f.events.length, 0); }
+    finally { f.client.reset(); }
   }
 });
 test('SSE data before hello is rejected; network EOF reconnects and hello requests reconciliation', async () => {
@@ -120,13 +122,13 @@ test('SSE EOF reconnects once and revalidates hello before reconciling', async t
 });
 
 test('paired speak posts directly with the client token and never dispatches a Being turn', async () => {
-  const f = fixture(async (url) => new URL(url).pathname === '/api/bonfire/speak'
+  const f = writeFixture(async (url) => new URL(url).pathname === '/api/bonfire/speak'
     ? json({ok: true, seq: 892, being: 'alice', mentions: ['bob'], via: 'client:my-desktop'})
     : json(bonfire));
   const receipt = await f.client.speak({kind: 'bonfire', message: '大家好'});
   assert.deepEqual(receipt, {ok: true, id: '892', seq: 892, mentions: ['bob'], via: 'client:my-desktop'});
-  assert.equal(f.calls.length, 1);
-  const {url, options} = f.calls[0];
+  assert.equal(f.calls.length, 2);
+  const {url, options} = f.calls[1];
   assert.equal(url.href, 'https://beings.town/api/bonfire/speak');
   assert.equal(url.searchParams.has('token'), false);
   assert.equal(options.method, 'POST');
@@ -135,26 +137,26 @@ test('paired speak posts directly with the client token and never dispatches a B
 });
 
 test('fireside speak carries the ring id and reports non-membership as not sent', async () => {
-  const ok = fixture(async () => json({ok: true, seq: 6, being: 'alice', mentions: [], via: 'client:my-desktop'}));
+  const ok = writeFixture(async () => json({ok: true, seq: 6, being: 'alice', mentions: [], via: 'client:my-desktop'}));
   assert.equal((await ok.client.speak({kind: 'fireside', message: '在圈里说话', firesideId: '10'})).seq, 6);
-  assert.deepEqual(JSON.parse(ok.calls[0].options.body), {message: '在圈里说话', fireside_id: 10});
+  assert.deepEqual(JSON.parse(ok.calls[1].options.body), {message: '在圈里说话', fireside_id: 10});
 
-  const denied = fixture(async () => json({error: 'not a member'}, 403));
+  const denied = writeFixture(async () => json({error: 'not a member'}, 403));
   await assert.rejects(denied.client.speak({kind: 'fireside', message: 'hi', firesideId: '10'}), {code: 'NOT_SENT'});
 });
 
 test('speak rejects over-limit text locally instead of letting bonfire truncate it silently', async () => {
-  const f = fixture(async () => json({ok: true, seq: 1, being: 'alice', mentions: []}));
+  const f = writeFixture(async () => json({ok: true, seq: 1, being: 'alice', mentions: []}));
   await assert.rejects(f.client.speak({kind: 'bonfire', message: 'x'.repeat(4001)}), {code: 'NOT_SENT'});
   await assert.rejects(f.client.speak({kind: 'fireside', message: 'x'.repeat(32001), firesideId: '1'}), {code: 'NOT_SENT'});
   assert.equal(f.calls.length, 0);
   // The bonfire limit counts code points, so text just inside it still dispatches.
   await f.client.speak({kind: 'bonfire', message: '字'.repeat(4000)});
-  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls.length, 2);
 });
 
 test('an unconfirmed write is never reported as unsent, and an unpaired one asks for pairing', async () => {
-  const lost = fixture(async () => { throw new TypeError('network down'); });
+  const lost = writeFixture(async () => { throw new TypeError('network down'); });
   await assert.rejects(lost.client.speak({kind: 'bonfire', message: 'hi'}), {code: 'RESULT_UNKNOWN'});
 
   const unpaired = fixture(); unpaired.store.load = async () => null;
@@ -163,12 +165,12 @@ test('an unconfirmed write is never reported as unsent, and an unpaired one asks
 });
 
 test('a receipt for another being is treated as unconfirmed rather than accepted', async () => {
-  const f = fixture(async () => json({ok: true, seq: 5, being: 'mallory', mentions: []}));
+  const f = writeFixture(async () => json({ok: true, seq: 5, being: 'mallory', mentions: []}));
   await assert.rejects(f.client.speak({kind: 'bonfire', message: 'hi'}), {code: 'RESULT_UNKNOWN'});
 });
 
 test('an IP-trusted host reporting via=being is surfaced, not rejected', async () => {
-  const f = fixture(async () => json({ok: true, seq: 7, being: 'alice', mentions: [], via: 'being'}));
+  const f = writeFixture(async () => json({ok: true, seq: 7, being: 'alice', mentions: [], via: 'being'}));
   assert.equal((await f.client.speak({kind: 'bonfire', message: 'hi'})).via, 'being');
 });
 
@@ -179,7 +181,7 @@ test('bonfire shows the server display name, matching fireside, instead of the b
   const session = new TownSession({getContext: () => ({configured: true, connected: true, beingName: 'alice', connectionId: 1}), readImpl: (...a) => f.client.read(...a), fetchImpl: async () => json({community: []})});
   const {messages} = await session.getBonfireMessages({limit: 10});
   assert.equal(messages[0].beingName, 'Alice');
-  assert.equal(messages[0].beingId, 'alice');
+  assert.equal(messages[0].beingId, ''); assert.equal(messages[0].authorUnknown, true);
 });
 
 test('reply metadata is carried on reads and sent on speak, and only for a real parent', async () => {
@@ -193,9 +195,9 @@ test('reply metadata is carried on reads and sent on speak, and only for a real 
   assert.equal(messages[0].replyTo, undefined);
   assert.deepEqual(messages[1].replyTo, {id: '1', beingId: 'alice', preview: '原帖'});
 
-  const w = fixture(async () => json({ok: true, seq: 3, being: 'alice', mentions: [], via: 'client:desk', reply_to: 1}));
+  const w = writeFixture(async () => json({ok: true, seq: 3, being: 'alice', mentions: [], via: 'client:desk', reply_to: 1}));
   await w.client.speak({kind: 'bonfire', message: '我也说一句', replyTo: '1'});
-  assert.deepEqual(JSON.parse(w.calls[0].options.body), {message: '我也说一句', reply_to: 1});
+  assert.deepEqual(JSON.parse(w.calls[1].options.body), {message: '我也说一句', reply_to: 1});
   await assert.rejects(w.client.speak({kind: 'bonfire', message: 'x', replyTo: 'abc'}), {code: 'NOT_SENT'});
 });
 
@@ -215,10 +217,10 @@ test('inbox reads over the client token and keeps the order Town returned', asyn
 });
 
 test('a private message to yourself is refused locally, before any request', async () => {
-  const f = fixture(async () => json({ok: true, message_id: 'm9', recipient: 'bob', via: 'client:desk'}));
+  const f = writeFixture(async () => json({ok: true, message_id: 'm9', recipient: 'bob', via: 'client:desk'}));
   await assert.rejects(f.client.sendDirectMessage({recipient: 'alice', content: 'hi'}), {code: 'NOT_SENT'});
   assert.equal(f.calls.length, 0);
   const receipt = await f.client.sendDirectMessage({recipient: 'bob', content: 'hi'});
   assert.deepEqual(receipt, {ok: true, id: 'm9', recipient: 'bob', via: 'client:desk'});
-  assert.deepEqual(JSON.parse(f.calls[0].options.body), {recipient: 'bob', content: 'hi'});
+  assert.deepEqual(JSON.parse(f.calls[1].options.body), {recipient: 'bob', content: 'hi'});
 });

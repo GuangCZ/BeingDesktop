@@ -6,7 +6,7 @@
 })(typeof window === 'object' ? window : globalThis, function () {
   'use strict';
   const DEFAULT_COLORS = Object.freeze({
-    background: '#181818', sidebar: '#1c2030', titlebar: '#1c2030',
+    background: '#181818', sidebar: '#202020', titlebar: '#202020',
     surface: '#242424', text: '#ececec', accent: '#ececec',
   });
   const PRESETS = Object.freeze([

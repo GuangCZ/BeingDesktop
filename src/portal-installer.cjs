@@ -6,25 +6,26 @@ const https = require('node:https');
 const crypto = require('node:crypto');
 
 const PORTAL_RELEASE = Object.freeze({
-  version: '0.8.0',
-  url: 'https://github.com/d5z/heart-portal/releases/download/v0.8.0/heart-portal-windows-x86_64.exe',
-  size: 12193280,
-  sha256: '9f0fb1200d756b5c450cc3ff57752648ab4df70622b82df92033f4167426d355',
+  version: '0.8.3',
+  apiUrl:'https://api.github.com/repos/d5z/heart-portal/releases/assets/557419976',
+  url: 'https://github.com/d5z/heart-portal/releases/download/v0.8.3/heart-portal-windows-x86_64.exe',
+  size: 12004864,
+  sha256: '5aec4a09bada241ebba3d8335042cc47cc552f4ff66e831ad5f0d370bab88032',
 });
 const PORTAL_RELEASES = Object.freeze({
   'win32-x64': PORTAL_RELEASE,
-  'darwin-arm64': Object.freeze({version:'0.8.0',
-    url:'https://github.com/d5z/heart-portal/releases/download/v0.8.0/heart-portal-macos-arm64',
-    size:12930864, sha256:'eb3696c04bb3972832443311ffa84e00b50cca92ca35347fa955fb116e23074b'}),
-  'darwin-x64': Object.freeze({version:'0.8.0',
-    url:'https://github.com/d5z/heart-portal/releases/download/v0.8.0/heart-portal-macos-x86_64',
-    size:13560240, sha256:'2c74efc68e2f24fc2849e122ea450ee90d51dba850b5a92c5c2409ed8c21e622'}),
+  'darwin-arm64': Object.freeze({version:'0.8.3',apiUrl:'https://api.github.com/repos/d5z/heart-portal/releases/assets/557419975',
+    url:'https://github.com/d5z/heart-portal/releases/download/v0.8.3/heart-portal-macos-arm64',
+    size:12205520, sha256:'dad9d81b491195cc302e2552d181d8dba43b8f2c800f079922f8cb350badab42'}),
+  'darwin-x64': Object.freeze({version:'0.8.3',apiUrl:'https://api.github.com/repos/d5z/heart-portal/releases/assets/557419978',
+    url:'https://github.com/d5z/heart-portal/releases/download/v0.8.3/heart-portal-macos-x86_64',
+    size:12767152, sha256:'99e884f56ea6b755787fa99ba52bdf9f413d3bf17f64a92eba4e8aecabf39f6d'}),
 });
 function portalRelease(platform = process.platform, arch = process.arch) {
   return PORTAL_RELEASES[`${platform}-${arch}`] || null;
 }
 const DOWNLOAD_HOSTS = new Set([
-  'github.com', 'release-assets.githubusercontent.com',
+  'api.github.com', 'github.com', 'release-assets.githubusercontent.com',
   'objects.githubusercontent.com', 'github-releases.githubusercontent.com',
 ]);
 
@@ -32,8 +33,22 @@ function isAllowedPortalAssetUrl(value) {
   try {
     const url = new URL(value);
     return url.protocol === 'https:' && !url.username && !url.password
-      && (!url.port || url.port === '443') && DOWNLOAD_HOSTS.has(url.hostname);
+      && (!url.port || url.port === '443') && DOWNLOAD_HOSTS.has(url.hostname)
+      && (url.hostname !== 'api.github.com' || /^\/repos\/d5z\/heart-portal\/releases\/assets\/[1-9]\d*$/.test(url.pathname) && !url.search && !url.hash);
   } catch { return false; }
+}
+
+function validateRelease(release, platform = process.platform, arch = process.arch) {
+  const target = portalRelease(platform, arch);
+  const name = target && new URL(target.url).pathname.split('/').at(-1);
+  if (!release || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(release.version)
+      || !Number.isSafeInteger(release.size) || release.size <= 0 || release.size > 256 * 1024 * 1024
+      || !/^[a-f0-9]{64}$/.test(release.sha256)
+      || release.url !== `https://github.com/d5z/heart-portal/releases/download/v${release.version}/${name}`
+      || release.apiUrl !== undefined && !/^https:\/\/api\.github\.com\/repos\/d5z\/heart-portal\/releases\/assets\/[1-9]\d*$/.test(release.apiUrl)) {
+    throw new Error('Portal 更新包元数据无效或缺少 SHA-256 校验。');
+  }
+  return Object.freeze({version:release.version, url:release.url, size:release.size, sha256:release.sha256,...(release.apiUrl?{apiUrl:release.apiUrl}:{})});
 }
 
 function localPath(value) {
@@ -61,13 +76,14 @@ async function directoryChain(directory, createLeaf = false) {
 }
 
 class PortalInstaller {
-  constructor({ userDataDir, requestImpl = https.request, createHashImpl = crypto.createHash, platform = process.platform, arch = process.arch } = {}) {
-    this.release = portalRelease(platform, arch);
+  constructor({ userDataDir, requestImpl = https.request, createHashImpl = crypto.createHash, platform = process.platform, arch = process.arch, release, runtimeRoot } = {}) {
+    this.release = release ? validateRelease(release, platform, arch) : portalRelease(platform, arch);
     if (!this.release) throw new Error('当前平台没有已校验的 Portal 安装包。');
     this.platform = platform;
     this.arch = arch;
     this.userDataDir = localPath(userDataDir);
-    this.managedDir = path.join(this.userDataDir, 'managed-portal');
+    this.runtimeRoot = runtimeRoot ? localPath(runtimeRoot) : this.userDataDir;
+    this.managedDir = path.join(this.runtimeRoot, runtimeRoot ? 'desktop-runtime' : 'managed-portal');
     this.versionDir = path.join(this.managedDir, platform === 'win32' ? `v${this.release.version}` : `v${this.release.version}-${platform}-${arch}`);
     this.executable = path.join(this.versionDir, platform === 'win32' ? 'heart-portal.exe' : 'heart-portal');
     this.requestImpl = requestImpl;
@@ -89,7 +105,7 @@ class PortalInstaller {
   }
 
   async _directories(create = false) {
-    for (const directory of [this.userDataDir, this.managedDir, this.versionDir]) {
+    for (const directory of [this.userDataDir, this.runtimeRoot, this.managedDir, this.versionDir]) {
       await directoryChain(directory, create);
     }
   }
@@ -130,49 +146,60 @@ class PortalInstaller {
     }
   }
 
-  _response(value, redirects = 0) {
+  _response(value, redirects = 0, signal) {
     if (!isAllowedPortalAssetUrl(value) || redirects > 4) return Promise.reject(new Error('Portal 下载跳转无效。'));
     return new Promise((resolve, reject) => {
       let request;
+      const done = (error, response) => {
+        clearTimeout(deadline); signal?.removeEventListener('abort', abort);
+        error ? reject(error) : resolve(response);
+      };
+      const abort = () => { done(new Error('Portal 下载已取消。')); request?.destroy?.(); };
+      const deadline = setTimeout(() => { done(new Error('Portal 下载连接超时，请稍后重试。')); request?.destroy?.(); }, 20000);
+      deadline.unref?.();
+      if (signal?.aborted) { abort(); return; }
+      signal?.addEventListener('abort', abort, {once:true});
       try {
         request = this.requestImpl(new URL(value), {
           method: 'GET', headers: { 'User-Agent': 'Being-Desktop-Portal-Installer', Accept: 'application/octet-stream' },
         }, response => {
-          response.on('error', () => reject(new Error('Portal 下载失败，请检查网络后重试。')));
+          response.on('error', () => done(new Error('Portal 下载失败，请检查网络后重试。')));
           if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
             response.resume();
             let next;
             try { next = new URL(response.headers.location, value).toString(); }
-            catch { reject(new Error('Portal 下载跳转无效。')); return; }
+            catch { done(new Error('Portal 下载跳转无效。')); return; }
             if (!response.headers.location || !isAllowedPortalAssetUrl(next)) {
-              reject(new Error('Portal 下载跳转无效。')); return;
+              done(new Error('Portal 下载跳转无效。')); return;
             }
-            this._response(next, redirects + 1).then(resolve, reject);
+            clearTimeout(deadline); signal?.removeEventListener('abort', abort);
+            this._response(next, redirects + 1, signal).then(resolve, reject);
             return;
           }
           if (response.statusCode !== 200) {
-            response.resume(); reject(new Error('Portal 下载失败，请稍后重试。')); return;
+            response.resume(); done(new Error('Portal 下载失败，请稍后重试。')); return;
           }
           const length = response.headers['content-length'];
           if (length !== undefined && (!/^\d+$/.test(String(length)) || Number(length) !== this.release.size)) {
-            response.destroy(); reject(new Error('Portal 下载文件大小不符。')); return;
+            response.destroy(); done(new Error('Portal 下载文件大小不符。')); return;
           }
-          resolve(response);
+          done(null,response);
         });
-        request.on('error', () => reject(new Error('Portal 下载失败，请检查网络后重试。')));
+        request.on('error', () => done(new Error('Portal 下载失败，请检查网络后重试。')));
         request.end();
-      } catch { reject(new Error('Portal 下载失败，请稍后重试。')); }
+      } catch { done(new Error('Portal 下载失败，请稍后重试。')); }
     });
   }
 
-  install({ onProgress } = {}) {
+  install({ onProgress, signal } = {}) {
     if (this._installation) return this._installation;
-    this._installation = this._install(onProgress).finally(() => { this._installation = null; });
+    this._installation = this._install(onProgress, signal).finally(() => { this._installation = null; });
     return this._installation;
   }
 
-  async _install(onProgress) {
-    let temporary, temporaryOwned = false, handle, response;
+  async _install(onProgress, signal) {
+    let temporary, temporaryOwned = false, handle, response, bodyDeadline;
+    const abort = () => response?.destroy(new Error('Portal 下载已取消。'));
     try {
       await this._directories(true);
       const existing = await this.inspect();
@@ -190,7 +217,15 @@ class PortalInstaller {
       handle = await fs.open(temporary, 'wx', 0o600);
       temporaryOwned = true;
       this._progress(onProgress, 'download');
-      response = await this._response(this.release.url);
+      try { response = await this._response(this.release.url, 0, signal); }
+      catch(error) {
+        if (signal?.aborted || !this.release.apiUrl) throw error;
+        response = await this._response(this.release.apiUrl, 0, signal);
+      }
+      if (signal?.aborted) throw new Error('Portal 下载已取消。');
+      signal?.addEventListener('abort', abort, {once:true});
+      bodyDeadline = setTimeout(() => response.destroy(new Error('Portal 下载超时，请稍后重试。')), 300000);
+      bodyDeadline.unref?.();
       const hash = this.createHashImpl('sha256');
       let received = 0;
       for await (const data of response) {
@@ -214,6 +249,7 @@ class PortalInstaller {
         throw error;
       });
       if (target && (target.isSymbolicLink() || !target.isFile())) throw new Error('Portal 安装目标不是实际文件。');
+      if (signal?.aborted) throw new Error('Portal 下载已取消。');
       this._progress(onProgress, 'install', received);
       await fs.rename(temporary, this.executable);
       temporary = null;
@@ -222,12 +258,14 @@ class PortalInstaller {
       return this._state('installed');
     } catch (error) {
       const safeMessages = new Set([
+        'Portal 下载已取消。', 'Portal 下载超时，请稍后重试。', 'Portal 下载连接超时，请稍后重试。',
         'Portal 下载跳转无效。', 'Portal 下载失败，请稍后重试。', 'Portal 下载失败，请检查网络后重试。',
         'Portal 下载文件大小不符。', 'Portal 下载文件超过大小限制。', 'Portal 下载不完整。',
         'Portal 文件校验失败，未安装。', 'Portal 安装目标不是实际文件。',
       ]);
       throw new Error(safeMessages.has(error.message) ? error.message : 'Portal 安装失败，请检查本地目录和网络。');
     } finally {
+      clearTimeout(bodyDeadline);signal?.removeEventListener('abort',abort);
       response?.destroy();
       if (handle) await handle.close().catch(() => {});
       if (temporaryOwned && temporary) await fs.unlink(temporary).catch(() => {});
@@ -235,4 +273,4 @@ class PortalInstaller {
   }
 }
 
-module.exports = { PORTAL_RELEASE, PORTAL_RELEASES, portalRelease, PortalInstaller, isAllowedPortalAssetUrl };
+module.exports = { PORTAL_RELEASE, PORTAL_RELEASES, portalRelease, validateRelease, directoryChain, PortalInstaller, isAllowedPortalAssetUrl };

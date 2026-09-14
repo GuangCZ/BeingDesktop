@@ -17,6 +17,17 @@ async function discoverPortalDeployment({home = os.homedir(), settings = {}, obs
     if (managed?.configPath === configPath && managed.executable === executable) return;
     candidates.push({configPath, executable:safePath(executable) ? executable : '', source});
   };
+  // Official 0.8.3 Windows supervision saves an absolute config in a private
+  // launch record beside the executable. Extract paths only, never environment.
+  if(safePath(observedExecutable)) {
+    try {
+      const {regular}=require('./portal-launchagent.cjs');
+      const launch=JSON.parse(await regular(path.join(path.dirname(observedExecutable),'.portal-launch.json')));
+      if(launch.protocol===1 && Array.isArray(launch.arguments) && launch.arguments[0]==='--config') {
+        add(launch.arguments[1],observedExecutable,'saved_launch');
+      }
+    } catch { /* Fall back to conventional paths without exposing private data. */ }
+  }
   // Prefer the process's conventional adjacent config over unrelated Desktop selections.
   if (safePath(observedExecutable)) add(path.join(path.dirname(observedExecutable), 'portal.toml'), observedExecutable, 'process_directory');
   add(settings.portalConfig, settings.portalExecutable, 'selected_configuration');

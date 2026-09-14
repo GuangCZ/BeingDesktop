@@ -238,7 +238,7 @@ class PortalService {
     const { executable, configPath } = this._state;
     let child;
     try {
-      child = this.spawnImpl(executable, ['--config', configPath, '--connect', url.toString(), '--name', portalName], { cwd: path.dirname(configPath), windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'], ...(coworkToken ? {env:{...process.env,PORTAL_TOKEN:coworkToken}} : {}) });
+      child = this.spawnImpl(executable, ['--config', configPath, '--connect', url.toString(), '--name', portalName], { cwd: path.dirname(configPath), windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'], env:{...process.env,HEART_PORTAL_SUPERVISED:'1',...(coworkToken ? {PORTAL_TOKEN:coworkToken,PORTAL_MCP_TOKEN:coworkToken} : {})} });
     } catch {
       this._state.status = 'error';
       this._state.detail = 'Portal 启动失败。请检查可执行文件。';
@@ -343,7 +343,7 @@ class PortalService {
     if (!child) return this.state;
     this._stopping = true;
     await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { cleanup(); reject(new Error('尚未确认 Portal 已退出；请检查本机进程。')); }, 5000);
+      const timer = setTimeout(() => { cleanup(); reject(new Error('尚未确认 Portal 已退出；请检查本机进程。')); }, 15000);
       const cleanup = () => { clearTimeout(timer); child.removeListener('exit', onExit); child.removeListener('error', onError); };
       const onExit = () => { cleanup(); resolve(); };
       const onError = () => { cleanup(); reject(new Error('停止 Portal 失败。')); };

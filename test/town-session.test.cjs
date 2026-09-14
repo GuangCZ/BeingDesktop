@@ -57,7 +57,7 @@ test('IP Trust identity must match the selected Loom identity', async () => {
 test('Bonfire reads use documented since and limit and normalize full messages', async () => {
   const {session, calls} = harness();
   const result = await session.getBonfireMessages({since: 3, limit: 20});
-  assert.deepEqual(result.messages[0], {id: '4', beingId: 'echo', beingName: 'Echo', content: 'Hello', createdAt: '2026-09-07T12:00:00+08:00', revisedAt: '', mentions: []});
+  assert.deepEqual(result.messages[0], {id: '4', beingId: '', authorUnknown: true, beingName: 'Echo', content: 'Hello', createdAt: '2026-09-07T12:00:00+08:00', revisedAt: '', mentions: []});
   assert.equal(result.latestSeq, 4);
   assert.equal(calls[0].url.searchParams.get('since_id'), '9223372036854775807');
   assert.equal(calls[1].url.searchParams.get('since'), '3');
@@ -535,4 +535,15 @@ test('cancelled library reads cannot start requests or publish access state', as
   assert.equal(calls.length, 0);
   assert.equal(session.state().scroll.status, 'unknown');
   assert.equal(session.state().beings.status, 'unknown');
+});
+
+test('channel status accepts current ready booleans without mistaking missing data for an unbound channel', async () => {
+  for (const [source,status] of [[{ready:true},'connected'],[{ready:false},'registered'],[{ready:'true'},'unknown'],[{},'unknown'],[{status:'disabled',ready:true},'disabled']]) {
+    const f=harness({request:url=>url.pathname==='/api/channels/status'?json({channels:[{channel:'feishu',...source,app_secret:'PRIVATE_CHANNEL_SECRET'}]}):undefined});
+    const result=await f.session.getChannelStatus();
+    assert.equal(result.channels[0].status,status);
+    assert.equal(result.channels[1].status,'unknown');
+    assert.ok(!JSON.stringify(result).includes('PRIVATE_CHANNEL_SECRET'));
+    assert.ok(f.calls.every(call=>call.options.method==='GET'));
+  }
 });

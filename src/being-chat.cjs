@@ -32,6 +32,7 @@
 
 const {randomUUID} = require('node:crypto');
 const {parseConnection} = require('./security.cjs');
+const {wrapMessage} = require('./orchestration-message.cjs');
 
 const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_MESSAGE = 200000;
@@ -161,8 +162,8 @@ async function consumeEvents(body, onEvent) {
 }
 
 class BeingChat {
-  constructor({getContext, desktopId, fetchImpl = globalThis.fetch, onEvent = () => {}, clientVersion = ''} = {}) {
-    Object.assign(this, {getContext, desktopId, fetchImpl, onEvent, clientVersion});
+  constructor({getContext, desktopId, fetchImpl = globalThis.fetch, onEvent = () => {}, clientVersion = '', prepareMessage = null} = {}) {
+    Object.assign(this, {getContext, desktopId, fetchImpl, onEvent, clientVersion, prepareMessage});
     this._epoch = 0;
     this._requests = new Set();
     // client_ref → sessionId for sends still in flight. Routing no longer needs it — the scene
@@ -343,7 +344,8 @@ class BeingChat {
    * Send one message on behalf of a conversation, and consume the stream if we are given one.
    *
    * The body carries only what the protocol needs: human text, the scene this conversation is,
-   * a small scene declaration, and a correlation ref. No routing headers, no environment prose.
+   * a small scene declaration, and a correlation ref. A main-owned provider may add current
+   * execution context; routing continues to use scene_id alone.
    * With images the text becomes the first of the content blocks; the text is still required,
    * because a message of images alone lands no row (measured 2026-09-11).
    */
@@ -357,14 +359,19 @@ class BeingChat {
     const clientRef = `req-${randomUUID()}`;
     const ctx = this._context();
     this._pending.set(clientRef, sessionId);
-    const body = {
-      ...(blocks.length ? {content: [{type: 'text', text}, ...blocks]} : {message: text}),
-      scene_id: scene,
-      scene_meta: {client: `being-desktop/${this.clientVersion || '0'}`, ...sceneMeta},
-      client_ref: clientRef,
-    };
     let dispatched = false;
     try {
+      const prepared = this.prepareMessage ? await this.prepareMessage({sessionId}) : null;
+      this._context(ctx);
+      prepared?.assertCurrent?.();
+      const wireText = wrapMessage(text, prepared?.context);
+      if ([...wireText].length > MAX_MESSAGE) throw fail('INVALID_REQUEST');
+      const body = {
+        ...(blocks.length ? {content: [{type: 'text', text: wireText}, ...blocks]} : {message: wireText}),
+        scene_id: scene,
+        scene_meta: {client: `being-desktop/${this.clientVersion || '0'}`, ...sceneMeta},
+        client_ref: clientRef,
+      };
       const {response, controller, signal: live} = await this._request(ctx, '/api/chat/stream',
         {method: 'POST', body, accept: 'text/event-stream', signal, timeoutMs: 600000});
       dispatched = true;

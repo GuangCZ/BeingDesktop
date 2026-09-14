@@ -81,10 +81,10 @@ function createContinuationSender({getConnection,getTarget,fetchImpl=globalThis.
 }
 
 class WorkerCallbacks {
-  constructor(manager,{send=null,resume=null,ready=()=>true,report=null,now=Date.now}={}) {
-    Object.assign(this,{manager,send,resume,ready,report,now});this.pending=null;this.timer=null;this.disposed=false;
+  constructor(manager,{send=null,resume=null,ready=()=>true,toolsReady=()=>true,report=null,now=Date.now}={}) {
+    Object.assign(this,{manager,send,resume,ready,toolsReady,report,now});this.pending=null;this.timer=null;this.disposed=false;
   }
-  setTransport({send,resume,ready,report}) {Object.assign(this,{send,resume,ready,report});this.start();}
+  setTransport({send,resume,ready,toolsReady=()=>true,report}) {Object.assign(this,{send,resume,ready,toolsReady,report});this.start();}
   start() {
     if(this.disposed||this.timer||!this.send)return;
     this.timer=setInterval(()=>{void this.pump();},2000);this.timer.unref?.();void this.pump();
@@ -120,13 +120,12 @@ class WorkerCallbacks {
       w.presentation&&!w.presentation.reported&&this.report ||
       w.review?.summary&&!w.review.reported&&this.report ||
       !REVIEWED.has(w.review?.status)&&['pending','retrying'].includes(w.completion.state)&&w.completion.nextAttemptAt<=this.now() ||
-      this.resume&&w.review?.status==='pending'&&w.completion.state==='accepted'&&(!w.completion.continuation||w.completion.continuation.state==='retrying'&&w.completion.continuation.nextAttemptAt<=this.now())));
+      this.resume&&this.toolsReady()&&w.review?.status==='pending'&&w.completion.state==='accepted'&&(!w.completion.continuation||w.completion.continuation.state==='retrying'&&w.completion.continuation.nextAttemptAt<=this.now())));
     if(!worker)return;
     const controller=new AbortController(),owner=m.owner,revision=m.revision;
     this.pending={controller,workerId:worker.id};
     const current=()=>!controller.signal.aborted&&!this.disposed&&owner===m.owner&&revision===m.revision&&m.mode.enabled&&worker.review?.status!=='cancelled';
     try {
-      if(m.assertEnforced)await m.assertEnforced();
       if(!current())return;
       if(worker.review?.summary&&!worker.review.reported&&this.report) {
         await this.report(m.get(worker.id),{owner,signal:controller.signal});
@@ -139,6 +138,9 @@ class WorkerCallbacks {
         return;
       }
       if(worker.completion.state==='accepted'&&this.resume) {
+        if(!this.toolsReady())return;
+        if(m.assertEnforced)await m.assertEnforced();
+        if(!current())return;
         const result=await this.resume(m.get(worker.id),{owner,signal:controller.signal,beforeSend:async()=>{
           if(!current()||worker.review?.status!=='pending')return false;
           worker.completion.continuation={state:'sending',attempts:(worker.completion.continuation?.attempts||0)+1,startedAt:new Date(this.now()).toISOString()};

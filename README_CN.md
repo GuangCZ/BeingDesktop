@@ -10,7 +10,7 @@
 
 - 多会话、图片输入、工具选择与消息定位。
 - 本机文件浏览、内置浏览器与持续终端会话（Windows PowerShell / macOS zsh）。
-- Portal 一键配置、进程与连接状态、权限管理和更新提示。
+- Portal 一键配置、进程与连接状态、权限管理，以及原服务接管和 Desktop 独立版本更新。
 - Grove 环境检查、受支持 Kit 的单项与批量安装。
 - Town、篝火、围炉与 Channel 入口；配对后通过 Town Client SDK 直接同步消息和读取卷轴，不占用 Being 对话。
 - 分栏设置、主题颜色、阅读字号、Loom 与模型配置。
@@ -18,7 +18,7 @@
 
 ## 编排模式
 
-先选择本机工作区、安装并登录受支持的 Codex CLI、Cursor CLI 或 Grok Build CLI，再进入 **设置 → 编排模式**。Desktop 检测本机 Agent 并连接本机 Worker 工具桥。没有可用 Worker 时不会退回本机直接执行。
+先选择本机工作区、安装并登录受支持的 Codex CLI、Claude Code CLI、Cursor CLI 或 Grok Build CLI，再进入 **设置 → 编排模式**。Desktop 检测本机 Agent 并连接本机 Worker 工具桥。没有可用 Worker 时不会退回本机直接执行。
 
 每个 Desktop 配置目录有持久 ID，会话、任务与结果路由归属发起它们的 Desktop。同一个 Being 可以连接直接模式的 Mac 和编排模式的 Windows；Worker 使用所在 Desktop 的本机认证、模型地址、代理和工作区。切换模式不修改 Being 的共享模型地址。Being 身份、记忆与服务端运行时仍然共享，Desktop ID 不代表服务端上下文或安全隔离。
 
@@ -79,6 +79,6 @@ npm run dist:mac
 
 `electron-builder.mac.cjs` 复用公共打包设置，并开启 Electron 原生依赖重建。测试分发默认复用钥匙串中的固定本地签名证书，缺少证书会停止构建，不会生成新身份或退回 ad-hoc 签名。DMG 尚未经过 Apple 公证，接收者可能看到开发者验证提示；首次安装与旧版本覆盖升级的钥匙串行为不同，不能保证升级免授权。可选的 `BEING_SIGNING_MODE=developer-id` 模式支持固定 Apple 开发者团队。详见 [macOS 签名说明](docs/macos.md#stable-signing-and-keychain-access)。
 
-此分支已接入官方 macOS Portal 包（arm64 / x86_64），支持按架构校验安装、进程识别、版本更新检查、zsh 终端与控制台、Command 快捷键及 Finder 启动时的 Homebrew 路径发现。已有外部 Portal 会被保留，Desktop 不接管或重复启动它；检测到进程并不代表已验证它连接了当前 Being。
+此分支已接入官方 macOS Portal 包（arm64 / x86_64），支持按架构校验安装、进程识别、版本更新检查、zsh 终端与控制台、Command 快捷键及 Finder 启动时的 Homebrew 路径发现。已有 Portal 保留原配置、身份和启动方式；可靠识别原服务后可通过原管理器启停与更新，未知部署保持只读且不重复启动。检测到进程并不代表已验证它连接了当前 Being。详见 [Portal 管理与更新](docs/portal-existing-priority.md)。
 
 Grove 的已评估安装方案支持 macOS，但仍要求版本、包摘要、运行时和 MCP 检查全部匹配；发布内容变化时会要求重新评估，不会自动运行变化后的代码。详见 [macOS 配套说明](docs/macos.md)。Apple Silicon 版本已在真机完成原生模块、终端和应用启动验证；Intel 选择逻辑有自动化测试，尚未在 Intel Mac 上进行运行验证。

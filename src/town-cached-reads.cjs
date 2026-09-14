@@ -2,6 +2,7 @@
 
 const {scrollId} = require('./town-library-contract.cjs');
 const PUBLIC_METHODS = new Set(['listBeings', 'getBeingMembers', 'getGroveCatalog', 'getGroveDetail']);
+const MEMBER_METHODS = new Set(['getBeingMembers', 'listBeings', 'getFiresideMembers']);
 const NO_ARGS = new Set(['listBeings', 'getBeingMembers', 'getFiresides']);
 const miss = () => ({cached: false, data: null, lastSuccessAt: null});
 const invalid = () => Object.assign(new Error('Town 缓存读取参数无效。'), {code: 'INVALID_REQUEST'});
@@ -47,20 +48,20 @@ function resource(method, value) {
 // Only successful, already sanitized read DTOs enter this cache. Mutations and
 // live connection/installation status never use it.
 class TownCachedReads {
-  constructor({cache, getContext}) {
-    Object.assign(this, {cache, getContext});
+  constructor({cache, getContext, now = Date.now, membersTtlMs = 60000}) {
+    Object.assign(this, {cache, getContext, now, membersTtlMs});
     this._requests = new Map();
-    this._serial = 0;
+    this._serial = 0; this._membersRevision = 0; this._membersInvalidatedAt = -Infinity;
   }
 
   _context(request) {
     const context = this.getContext();
     const identityKey = request.public ? 'public-town-v1' : context.connected && context.identityKey;
-    return {identityKey, revision: context.revision, identityRevision: context.identityRevision};
+    return {identityKey, revision: context.revision, identityRevision: context.identityRevision, ...(MEMBER_METHODS.has(request.method) ? {membersRevision: this._membersRevision} : {})};
   }
 
   _current(request, context) {
-    return request.public || JSON.stringify(this._context(request)) === JSON.stringify(context);
+    return (!MEMBER_METHODS.has(request.method) || context.membersRevision === this._membersRevision) && (request.public || JSON.stringify(this._context(request)) === JSON.stringify(context));
   }
 
   async snapshot(value) {
@@ -70,8 +71,14 @@ class TownCachedReads {
     if (!context.identityKey) return miss();
     const result = await this.cache.load(context.identityKey, request.key);
     if (!this._current(request, context)) throw changed();
+    if (MEMBER_METHODS.has(request.method) && result.cached) {
+      const at = typeof result.lastSuccessAt === 'number' ? result.lastSuccessAt : Date.parse(result.lastSuccessAt);
+      if (!Number.isFinite(at) || at <= this._membersInvalidatedAt || this.now() - at >= this.membersTtlMs) return miss();
+    }
     return result;
   }
+
+  invalidateMembers() { this._membersRevision++; this._membersInvalidatedAt = this.now(); }
 
   async read(method, value, read) {
     const request = resource(method, value);

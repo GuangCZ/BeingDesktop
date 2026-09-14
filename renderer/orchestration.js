@@ -6,7 +6,7 @@ window.beingOrchestration=(()=>{
   const reviews={pending:'待验收',processing:'Being 验收中',passed:'验收通过',failed:'验收未通过',needs_verification:'待补充验证',cancelled:'接续已停止'};
   const deliveries={pending:'待通知',sending:'正在通知',retrying:'通知重试中',accepted:'Heart 已接收',failed:'通知失败',suppressed:'通知已停止'};
   const active=worker=>['starting','running','queued','stopping'].includes(worker.status);
-  let bridge,onOpen,onBack,onUpdate,snapshot={mode:{enabled:false,defaultAgent:'codex',paths:{}},agents:[],workers:[]},selected='',revision=0,busy=false,dirty=false,refreshTimer;
+  let bridge,onOpen,onBack,onUpdate,snapshot={mode:{enabled:false,defaultAgent:'codex',paths:{}},agents:[],workers:[]},selected='',revision=0,busy=false,dirty=false,refreshTimer,failedMode=null;
   const collapsed=new Set(),paths=new Map();
   const collapsedStorageKey='being.workerGroups.collapsed';
   try {
@@ -19,8 +19,8 @@ window.beingOrchestration=(()=>{
     $('orchestration-settings').dataset.modeDisabled=String(!enabled);
     $('orchestration-enabled').disabled=busy;
     for(const id of ['orchestration-default','agent-kit-detect','worker-reconnect'])$(id).disabled=busy||!enabled;
-    // Saving must remain possible when switching off a previously enabled mode.
-    $('orchestration-save').disabled=busy||(!enabled&&!snapshot.mode.enabled);
+    $('orchestration-retry').hidden=!failedMode;
+    $('orchestration-retry').disabled=busy;
     for(const input of paths.values())input.disabled=busy||!enabled;
   }
   async function perform(action) {
@@ -37,19 +37,24 @@ window.beingOrchestration=(()=>{
       text.title=agent?.path||'';
     }
   }
+  function showModeStatus(value) {
+    if(!value.mode.enabled){say('编排模式已关闭。开启时会自动检测并保存配置。');return;}
+    const status=value.enforcement?.status;
+    say(status==='enforced'?'编排已开启，配置已自动保存，调度工具已就绪。':status==='blocked'?'配置已自动保存，但调度工具暂不可用；本机执行暂停，对话可继续。':'编排已开启，配置已自动保存，正在连接 Worker 调度工具…',status==='blocked'?'error':'info');
+  }
   function setState(value) {
     if(!value?.mode)return;snapshot=value;
     if(!dirty&&paths.size) {
       $('orchestration-enabled').checked=value.mode.enabled;
       $('orchestration-default').value=value.mode.defaultAgent;
       for(const [id,input] of paths)input.value=value.mode.paths?.[id]||'';
-      if(!busy)say(value.mode.enabled?'本机编排模式已开启，Being 通过本机工具桥调度 Worker。':'本机为直接模式。开启编排时会检测本机 Agent 与工具绑定。');
+      if(!busy)showModeStatus(value);
     }
     if(paths.size){renderAgents();controls();}
     if(value.enforcement?.detail && $('orchestration-policy-status'))$('orchestration-policy-status').textContent=value.enforcement.detail;
     if(selected&&!snapshot.workers.some(worker=>worker.id===selected)) {selected='';revision++;$('page-workers').replaceChildren(node('p','worker-empty','当前连接下没有此 worker。'));}
     if(selected&&!refreshTimer)refreshTimer=setTimeout(()=>{refreshTimer=null;void showWorker(selected,false);},120);
-    onUpdate?.();
+    onUpdate?.(snapshot);
   }
   function appendSession(parent,sessionId) {
     const workers=(snapshot.workers||[]).filter(worker=>worker.sessionId===sessionId);
@@ -113,6 +118,7 @@ window.beingOrchestration=(()=>{
       if(worker.completion) {
         const review=node('section','worker-review');
         review.append(node('h3','','结果通知与验收'),node('p','',`${deliveries[worker.completion.state]||worker.completion.state} · ${reviews[worker.review?.status]||'待验收'}`),node('p','field-help',worker.completion.detail));
+        if(snapshot.mode.enabled && snapshot.enforcement?.status==='blocked' && ['pending','processing'].includes(worker.review?.status))review.append(node('p','field-help','调度工具当前不可用，等待连接恢复后由 Being 验收；Worker 不会重新执行。'));
         if(worker.completion.continuation)review.append(node('p','field-help',({sending:'正在唤醒 Being 接续验收。',accepted:'自动接续已提交。',retrying:'模型服务暂时出错，等待重试验收。',failed:'验收接续失败，可重新接续。',uncertain:'自动接续状态未确认，请检查原会话；不会重复执行 Worker。'})[worker.completion.continuation.state]||''));
         if(worker.review?.summary)review.append(node('pre','worker-result',worker.review.summary),node('p','field-help','验收依据'),node('pre','worker-result',worker.review.evidence));
         root.insertBefore(review,result.previousSibling);
@@ -123,24 +129,25 @@ window.beingOrchestration=(()=>{
   }
   function init(options) {
     ({bridge,onOpen,onBack,onUpdate}=options);if(!bridge?.getOrchestration)return;
-    for(const [id,name] of [['codex','Codex CLI'],['cursor','Cursor CLI'],['grok','Grok Build CLI']]) {
+    for(const [id,name] of [['codex','Codex CLI'],['claude','Claude Code CLI'],['cursor','Cursor CLI'],['grok','Grok Build CLI']]) {
       const row=node('div','agent-kit-row'),label=node('label','',name),input=node('input');input.id='agent-path-'+id;input.placeholder='自动从 PATH 检测，或填写程序绝对路径';input.type='text';label.htmlFor=input.id;
-      const status=node('p','field-help','尚未检测');status.id='agent-state-'+id;paths.set(id,input);input.addEventListener('input',()=>{dirty=true;});row.append(label,input,status);$('agent-kit-list').append(row);
+      const status=node('p','field-help','尚未检测');status.id='agent-state-'+id;paths.set(id,input);input.addEventListener('input',()=>{dirty=true;});input.addEventListener('change',()=>{dirty=true;setTimeout(()=>{if(dirty&&!busy)void saveMode();},0);});input.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();input.blur();}});row.append(label,input,status);$('agent-kit-list').append(row);
     }
-    $('orchestration-default').addEventListener('change',()=>{dirty=true;controls();say('默认 Agent 尚未保存。');});
-    async function saveMode(toggle=false) {
+    $('orchestration-default').addEventListener('change',()=>{dirty=true;void saveMode();});
+    async function saveMode(toggle=false,request=null) {
+      const next=request||draft();
       await perform(async()=>{
         say('正在检测本机 Agent 并确认 Desktop 工具绑定…');
-        try{const result=await bridge.saveOrchestration(draft());dirty=false;setState(result);say(result.mode.enabled?'本机编排模式已开启，Being 通过本机工具桥调度 Worker。':'编排模式已关闭。');}
-        catch(error){if(toggle)$('orchestration-enabled').checked=snapshot.mode.enabled;controls();throw error;}
+        try{const result=await bridge.saveOrchestration(next);failedMode=null;dirty=false;setState(result);showModeStatus(result);}
+        catch(error){failedMode=next;if(toggle)$('orchestration-enabled').checked=snapshot.mode.enabled;controls();throw error;}
       });
     }
     $('orchestration-enabled').addEventListener('change',()=>{dirty=true;void saveMode(true);});
     $('agent-kit-detect').addEventListener('click',()=>{void perform(async()=>{say('正在检测程序与执行接口…');snapshot.agents=await bridge.inspectAgents(draft().paths);renderAgents();say('检测完成。可执行不代表任务必定成功；登录和权限错误会显示在 worker 事件中。');});});
-    $('orchestration-save').addEventListener('click',()=>{void saveMode();});
+    $('orchestration-retry').addEventListener('click',()=>{if(failedMode)void saveMode(true,failedMode);});
     $('worker-reconnect').addEventListener('click',()=>{void perform(async()=>{const result=await bridge.reconnectWorkers();say(result.status==='connected'?'调度工具已连接。':'调度工具未连接，请确认 Being 连接和编排模式。');});});
     bridge.onWorkers?.(setState);
-    bridge.onToolsState?.(value=>{$('worker-link-status').textContent='调度连接：'+({connected:'已连接',connecting:'连接中',disconnected:'未连接',error:'连接失败'}[value.link?.status]||'未知');});
+    bridge.onToolsState?.(value=>{$('worker-link-status').textContent=value.link?.reconnect?`调度连接：${Math.ceil(value.link.reconnect.delayMs/1000)} 秒后自动重连`:'调度连接：'+({connected:'已连接',connecting:'连接中',disconnected:'未连接',error:'连接失败'}[value.link?.status]||'未知');});
     controls();
     void bridge.getOrchestration().then(setState).catch(()=>{});
   }

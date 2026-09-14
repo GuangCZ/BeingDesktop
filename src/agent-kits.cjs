@@ -5,8 +5,19 @@ const os = require('node:os');
 const {desktopEnvironment} = require('./platform.cjs');
 const {launchAgent} = require('./agent-process.cjs');
 
+// Claude Code runs with the same boundary Codex's workspace-write sandbox gives: edits and
+// commands inside the workspace are accepted without prompts, while its own sandbox refuses
+// writes elsewhere and outbound network (measured 2026-09-11 on 2.1.245: `touch /tmp/x` →
+// "Operation not permitted", curl → "deny network-outbound"). Commands are only auto-allowed
+// where that sandbox exists (macOS, Linux); elsewhere they are refused as needing approval.
+const CLAUDE_SANDBOX = JSON.stringify({sandbox:{enabled:true,autoAllowBashIfSandboxed:true}});
+// `auth` is a login probe whose exit code alone is trusted (0 = signed in); `authHint` is what to
+// tell the user when it fails.
 const AGENTS = Object.freeze([
-  {id:'codex',name:'Codex CLI',commands:['codex'],help:['exec','--help'],features:['--json','--sandbox','--skip-git-repo-check'],args:['exec','--json','--sandbox','workspace-write','--skip-git-repo-check','--color','never','-']},
+  {id:'codex',name:'Codex CLI',commands:['codex'],help:['exec','--help'],features:['--json','--sandbox','--skip-git-repo-check'],args:['exec','--json','--sandbox','workspace-write','--skip-git-repo-check','--color','never','-'],
+    auth:['login','status'],authHint:'请先在终端完成 codex login，再重新检测。'},
+  {id:'claude',name:'Claude Code CLI',commands:['claude'],help:['--help'],features:['--output-format','--print','--permission-mode','--settings'],args:['-p','--output-format','stream-json','--verbose','--permission-mode','acceptEdits','--settings',CLAUDE_SANDBOX],
+    auth:['auth','status'],authHint:'请先在终端完成 claude auth login，再重新检测。'},
   {id:'cursor',name:'Cursor CLI',commands:['cursor-agent','agent'],help:['--help'],features:['--output-format','--print'],args:['--print','--output-format','stream-json']},
   {id:'grok',name:'Grok Build CLI',commands:['grok'],help:['--help'],features:['--output-format','--prompt-file'],args:['--output-format','streaming-json']},
 ]);
@@ -39,9 +50,9 @@ async function detectAgents(paths = {}, {find=executable,run=probe} = {}) {
       base.path=file;
       const help=await run(file,agent.help);
       if(help.code!==0 || help.overflow || !agent.features.every(flag=>help.output.includes(flag)))return {...base,status:'incompatible',detail:'程序无法运行或不支持所需的事件输出接口。'};
-      if(agent.id==='codex') {
-        const auth=await run(file,['login','status']);
-        if(auth.code!==0)return {...base,status:'needs_auth',auth:'required',detail:'请先在终端完成 codex login，再重新检测。'};
+      if(agent.auth) {
+        const auth=await run(file,agent.auth);
+        if(auth.code!==0)return {...base,status:'needs_auth',auth:'required',detail:agent.authHint};
         return {...base,status:'ready',auth:'configured',detail:'执行接口与本机登录状态已确认。'};
       }
       return {...base,status:'ready',detail:'执行接口可用；登录状态将在执行时确认，沿用 CLI 权限配置。'};

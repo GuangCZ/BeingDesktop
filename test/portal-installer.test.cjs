@@ -42,14 +42,14 @@ async function fixture(t, options = {}) {
     assert.ok(path.basename(root).startsWith('being-portal-install-test-'));
     return fs.rm(root, { recursive: true, force: true });
   });
-  const installer = new PortalInstaller({ userDataDir: root, platform:'win32', arch:'x64', ...options });
+  const installer = new PortalInstaller({ userDataDir: root, platform:'win32', arch:'x64', release:{...PORTAL_RELEASE,apiUrl:undefined}, ...options });
   return { root, installer };
 }
 
-test('release is fixed to the verified official Windows v0.8.0 asset', () => {
-  assert.equal(PORTAL_RELEASE.url, 'https://github.com/d5z/heart-portal/releases/download/v0.8.0/heart-portal-windows-x86_64.exe');
-  assert.equal(PORTAL_RELEASE.size, 12193280);
-  assert.equal(PORTAL_RELEASE.sha256, '9f0fb1200d756b5c450cc3ff57752648ab4df70622b82df92033f4167426d355');
+test('release is fixed to the verified official Windows v0.8.3 asset', () => {
+  assert.equal(PORTAL_RELEASE.url, 'https://github.com/d5z/heart-portal/releases/download/v0.8.3/heart-portal-windows-x86_64.exe');
+  assert.equal(PORTAL_RELEASE.size, 12004864);
+  assert.equal(PORTAL_RELEASE.sha256, '5aec4a09bada241ebba3d8335042cc47cc552f4ff66e831ad5f0d370bab88032');
   assert.equal(Object.isFrozen(PORTAL_RELEASE), true);
 });
 
@@ -81,7 +81,7 @@ test('verified download publishes atomically, reports safe phases, and is idempo
   assert.equal(result.status, 'installed');
   assert.equal(result.verified, true);
   assert.equal(result.started, false);
-  assert.equal(result.executable, path.join(root, 'managed-portal', 'v0.8.0', 'heart-portal.exe'));
+  assert.equal(result.executable, path.join(root, 'managed-portal', 'v0.8.3', 'heart-portal.exe'));
   assert.deepEqual(await fs.readFile(result.executable), body);
   assert.deepEqual([...new Set(events.map(event => event.phase))], ['download', 'hash', 'install', 'not_started']);
   for (const event of events) assert.deepEqual(Object.keys(event).sort(), ['phase', 'receivedBytes', 'totalBytes']);
@@ -193,7 +193,7 @@ test('progress observer failures do not interrupt a verified installation', asyn
 });
 
 test('cached official asset passes real SHA-256 download and repeat-inspection checks without execution', async t => {
-  const cached = path.resolve(__dirname, '../.local/portal-test/heart-portal-windows-x86_64.exe');
+  const cached = path.resolve(__dirname, '../.local/portal-test/heart-portal-v0.8.3-windows-x86_64.exe');
   let officialBody;
   try { officialBody = await fs.readFile(cached); }
   catch (error) {
@@ -206,4 +206,17 @@ test('cached official asset passes real SHA-256 download and repeat-inspection c
   assert.equal((await installer.inspect()).verified, true);
   assert.equal((await installer.install()).verified, true);
   assert.equal(transport.requests.length, 1);
+});
+
+test('official API asset endpoint is a verified fallback when the release host fails',async t=>{
+  const transport=fakeTransport([{error:'unreachable'},{body}]);
+  const {installer}=await fixture(t,{...transport,release:PORTAL_RELEASE,createHashImpl:acceptedHash});
+  assert.equal((await installer.install()).verified,true);
+  assert.deepEqual(transport.requests.map(item=>item.url),[PORTAL_RELEASE.url,PORTAL_RELEASE.apiUrl]);
+});
+test('cancelled download removes staging bytes and does not try another endpoint',async t=>{
+  const transport=fakeTransport([{body}]),controller=new AbortController();controller.abort();
+  const {installer}=await fixture(t,{...transport,release:PORTAL_RELEASE});
+  await assert.rejects(installer.install({signal:controller.signal}),/取消/);
+  assert.equal(transport.requests.length,0);assert.deepEqual(await fs.readdir(installer.versionDir),[]);
 });

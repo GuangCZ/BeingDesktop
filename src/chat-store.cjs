@@ -20,6 +20,7 @@
 //      truth. With encryption unavailable the store still works in memory and each launch re-reads.
 
 const {sessionFromScene} = require('./being-chat.cjs');
+const {unwrapMessage} = require('./orchestration-message.cjs');
 
 const MAX_SESSIONS = 100;
 const MAX_ROWS = 300;
@@ -43,7 +44,7 @@ const copyRow = row => (row.images ? {...row, images: row.images.map(image => ({
 
 function storedRow(value) {
   if (!plain(value) || !seq(value.seq) || typeof value.content !== 'string') return null;
-  const row = {seq: value.seq, role: value.role === 'user' ? 'user' : 'being', content: value.content.slice(0, MAX_CONTENT), at: text(value.at, 64)};
+  const row = {seq: value.seq, role: value.role === 'user' ? 'user' : 'being', content: (value.role === 'user' ? unwrapMessage(value.content) : value.content).slice(0, MAX_CONTENT), at: text(value.at, 64)};
   if (typeof value.from === 'string') row.from = value.from.slice(0, 64);
   const images = rowImages(value.images);
   if (images.length) row.images = images;
@@ -129,7 +130,8 @@ class ChatStore {
     return {
       cursor: this._state.cursor, seeded: this._state.seeded, active: this._state.active, degraded: this._failed,
       sessions: this._state.sessions.map(session => ({
-        id: session.id, title: session.title, createdAt: session.createdAt, truncated: session.truncated,
+        id: session.id, title: session.title, createdAt: session.createdAt,
+        updatedAt: session.rows.at(-1)?.at || session.createdAt, truncated: session.truncated,
         count: session.rows.length, lastSeq: session.rows.length ? session.rows[session.rows.length - 1].seq : 0,
       })),
     };

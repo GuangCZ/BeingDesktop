@@ -123,7 +123,9 @@ test('starts only selected Portal with fixed argv and no shell; concurrent start
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], paths.executable);
   assert.deepEqual(calls[0][1], ['--config', paths.configPath, '--connect', new URL(LOOM).toString(), '--name', 'being-desktop']);
-  assert.deepEqual(calls[0][2], { cwd: paths.directory, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
+  assert.equal(calls[0][2].env.HEART_PORTAL_SUPERVISED, '1');
+  const {env:childEnvironment,...spawnOptions}=calls[0][2];
+  assert.deepEqual(spawnOptions, { cwd: paths.directory, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
   assert.equal(service.state.status, 'running');
   assert.equal(service.state.owned, true);
   assert.equal(service.state.health, 'unknown');

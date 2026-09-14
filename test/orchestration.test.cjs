@@ -144,8 +144,60 @@ test('Codex, Cursor and Grok events preserve call IDs and redact credential-shap
   assert.equal(normalizeEvent('codex',{type:'future.event'}),null);
 });
 test('detection distinguishes missing, incompatible and unauthenticated agents',async()=>{
-  const result=await detectAgents({}, {find:async commands=>commands[0]==='grok'?'':commands[0],run:async(file,args)=>file==='codex'?args[0]==='exec'?{code:0,output:'--json --sandbox --skip-git-repo-check'}:{code:1,output:'Login required'}:{code:0,output:'unrelated executable'}});
-  assert.deepEqual(result.map(agent=>agent.status),['needs_auth','incompatible','missing']);
+  const result=await detectAgents({}, {find:async commands=>commands[0]==='grok'?'':commands[0],run:async(file,args)=>file==='codex'?args[0]==='exec'?{code:0,output:'--json --sandbox --skip-git-repo-check'}:{code:1,output:'Login required'}
+    :file==='claude'?args[0]==='--help'?{code:0,output:'--output-format --print --permission-mode --settings'}:{code:0,output:'{"loggedIn":true}'}:{code:0,output:'unrelated executable'}});
+  assert.deepEqual(result.map(agent=>agent.status),['needs_auth','ready','incompatible','missing']);
+  assert.equal(result[1].auth,'configured');
+  // `claude auth status` exits 1 when signed out (measured 2026-09-11): that is the only signal trusted.
+  const signedOut=await detectAgents({}, {find:async commands=>commands[0]==='claude'?'claude':'',run:async(file,args)=>args[0]==='--help'?{code:0,output:'--output-format --print --permission-mode --settings'}:{code:1,output:'{"loggedIn":false}'}});
+  assert.equal(signedOut[1].status,'needs_auth');assert.ok(signedOut[1].detail.includes('claude auth login'));
+});
+test('Claude Code events map sessions, tool calls, refusals and failed results',()=>{
+  assert.deepEqual(normalizeEvent('claude',{type:'system',subtype:'init',session_id:'s1',tools:['Bash']}),{kind:'session',sessionId:'s1'});
+  const started=normalizeEvent('claude',{type:'assistant',message:{role:'assistant',content:[{type:'text',text:'先看一眼'},{type:'tool_use',id:'toolu_1',name:'Bash',input:{command:'ls'}}]},session_id:'s1'});
+  assert.deepEqual(started.map(event=>[event.kind,event.callId||'',event.status||'']),[['message','',''],['tool','toolu_1','running']]);
+  assert.equal(started[0].text,'先看一眼');assert.equal(started[1].name,'Bash');assert.ok(started[1].text.includes('ls'));
+  const finished=normalizeEvent('claude',{type:'user',message:{role:'user',content:[{type:'tool_result',tool_use_id:'toolu_1',content:[{type:'text',text:'a.txt'}],is_error:false}]}});
+  assert.deepEqual(finished.map(event=>[event.kind,event.callId,event.status,event.output]),[['tool','toolu_1','completed','a.txt']]);
+  const refused=normalizeEvent('claude',{type:'user',message:{role:'user',content:[{type:'tool_result',tool_use_id:'toolu_2',content:'This command requires approval',is_error:true}]}});
+  assert.equal(refused[0].status,'failed');
+  assert.equal(normalizeEvent('claude',{type:'system',subtype:'permission_denied',tool_name:'Bash',message:'This command requires approval'}).kind,'status');
+  assert.equal(normalizeEvent('claude',{type:'rate_limit_event',rate_limit_info:{}}),null);
+  // A signed-out run ends with subtype success but is_error true (measured 2026-09-11).
+  const failed=normalizeEvent('claude',{type:'result',subtype:'success',is_error:true,result:'Not logged in · Please run /login',session_id:'s1'});
+  assert.equal(failed.success,false);assert.equal(failed.text,'Not logged in · Please run /login');
+  assert.equal(normalizeEvent('claude',{type:'result',subtype:'error_max_turns',is_error:true}).success,false);
+  assert.deepEqual(normalizeEvent('claude',{type:'result',subtype:'success',is_error:false,result:'完成',session_id:'s1'}),{kind:'result',success:true,text:'完成',sessionId:'s1'});
+});
+test('a Claude Code worker runs unattended inside its sandbox and recalls tool names for results',async t=>{
+  const {manager,args,children}=await fixture(t);
+  manager.detect=async()=>[{id:'codex',name:'Codex CLI',path:'fixture',status:'ready'},{id:'claude',name:'Claude Code CLI',path:'/opt/homebrew/bin/claude',status:'ready'}];
+  const worker=await manager.run({...args,agentId:'claude'});
+  const child=children[0];
+  assert.equal(child.file,'/opt/homebrew/bin/claude');
+  assert.deepEqual(child.args.slice(0,4),['-p','--output-format','stream-json','--verbose']);
+  assert.deepEqual(child.args.slice(child.args.indexOf('--permission-mode'),child.args.indexOf('--permission-mode')+2),['--permission-mode','acceptEdits']);
+  assert.deepEqual(JSON.parse(child.args[child.args.indexOf('--settings')+1]),{sandbox:{enabled:true,autoAllowBashIfSandboxed:true}});
+  assert.ok(child.input.startsWith('[Desktop execution context]'));assert.ok(child.input.endsWith(args.prompt));
+  child.onData('stdout',[
+    JSON.stringify({type:'system',subtype:'init',session_id:'s-claude'}),
+    JSON.stringify({type:'assistant',message:{content:[{type:'tool_use',id:'toolu_1',name:'Bash',input:{command:'npm test'}}]}}),
+    JSON.stringify({type:'user',message:{content:[{type:'tool_result',tool_use_id:'toolu_1',content:'ok',is_error:false}]}}),
+    JSON.stringify({type:'assistant',message:{content:[{type:'text',text:'测试通过。'}]}}),
+    JSON.stringify({type:'result',subtype:'success',is_error:false,result:'测试通过。',session_id:'s-claude'}),
+  ].join('\n')+'\n');
+  child.finish({code:0});await manager.finalizing.get(worker.id);
+  const done=manager.get(worker.id);
+  assert.equal(done.status,'completed');assert.equal(done.agentSessionId,'s-claude');assert.equal(done.result,'测试通过。');
+  assert.deepEqual(done.events.filter(event=>event.kind==='tool').map(event=>`${event.name} · ${event.status}`),['Bash · running','Bash · completed']);
+});
+test('a Claude Code run that ends in error is a failed worker even at exit code 0',async t=>{
+  const {manager,args,children}=await fixture(t);
+  manager.detect=async()=>[{id:'claude',name:'Claude Code CLI',path:'/opt/homebrew/bin/claude',status:'ready'}];
+  const worker=await manager.run({...args,agentId:'claude'});
+  children[0].onData('stdout',JSON.stringify({type:'result',subtype:'success',is_error:true,result:'Not logged in · Please run /login'})+'\n');
+  children[0].finish({code:0});await manager.finalizing.get(worker.id);
+  assert.equal(manager.get(worker.id).status,'failed');
 });
 test('desktop execution is denied in orchestrator mode and worker schemas require session binding',async()=>{
   const self={orchestration:{mode:{enabled:true},tool:async()=>({ok:true})}};
@@ -172,6 +224,20 @@ test('title generation uses an isolated CLI, ignores duplicate requests and clea
   assert.equal(await pending,'登录修复');
   assert.equal(manager.workers.length,0);
   await assert.rejects(fs.stat(child.cwd),{code:'ENOENT'});
+});
+
+test('Claude Code titles run with no tools, one turn and no saved session',async t=>{
+  const {manager,sessionId,children}=await fixture(t);
+  manager.detect=async()=>[{id:'claude',name:'Claude Code CLI',path:'/opt/homebrew/bin/claude',status:'ready'}];
+  manager.mode.defaultAgent='claude';
+  const pending=manager.generateTitle(sessionId,'把篝火时间线做成增量累积');
+  while(!children.length)await tick();
+  const child=children[0];
+  assert.deepEqual(child.args.slice(-5),['--tools','','--max-turns','1','--no-session-persistence']);
+  assert.ok(child.input.includes('把篝火时间线做成增量累积'));
+  child.onData('stdout',JSON.stringify({type:'assistant',message:{content:[{type:'text',text:'篝火时间线增量累积'}]}})+'\n'+JSON.stringify({type:'result',subtype:'success',is_error:false,result:'篝火时间线增量累积'})+'\n');
+  child.finish({code:0});
+  assert.equal(await pending,'篝火时间线增量累积');
 });
 
 test('failed CLI naming keeps the default title and disabled mode never launches',async t=>{

@@ -75,7 +75,7 @@
     "sections": [
       {
         "title": "会话与队列",
-        "html": "<p>在侧栏会话列表切换对话；点击新增会话可沿用当前语境创建会话。桌面为会话维护独立标识和消息记录。</p><p>状态面板展示当前会话的消息任务队列。已发送不等于运行时已经开始执行，其他渠道的队列不在此列表内。</p>"
+        "html": "<p>侧栏顶部新建会话或搜索已有会话，项目内的加号用于创建属于该项目的会话。会话支持置顶、重命名、移入项目及归档；已归档会话可从搜索中恢复。桌面为会话维护独立标识和消息记录。</p><p>状态面板展示当前会话的消息任务队列。已发送不等于运行时已经开始执行，其他渠道的队列不在此列表内。</p>"
       },
       {
         "title": "图片输入",
@@ -115,7 +115,7 @@
       },
       {
         "title": "支持的 Agent Kit",
-        "html": "<table><thead><tr><th>Agent</th><th>接入方式</th><th>检测与限制</th></tr></thead><tbody><tr><td>Codex CLI</td><td>JSON 事件输出，提示经标准输入发送</td><td>检测执行接口及登录状态；Worker 使用 workspace-write 沙箱，普通目录也可作为工作区。</td></tr><tr><td>Cursor CLI</td><td>stream-json；检测 cursor-agent 或 agent</td><td>目前接入 CLI，未接入 Cursor SDK；接口可用不等于登录已验证。</td></tr><tr><td>Grok Build CLI</td><td>streaming-json；临时提示文件</td><td>执行后清理提示文件；登录状态在实际执行时确认。</td></tr></tbody></table><p>优先使用设置中指定的路径，否则从 PATH 等位置检测。开启时默认 Agent 不可用但发现其他可用 Agent，会选择可用项；一个也没有则拒绝开启。实际调用仍可能因登录过期、权限、网络或提供方接口变化失败。</p>"
+        "html": "<table><thead><tr><th>Agent</th><th>接入方式</th><th>检测与限制</th></tr></thead><tbody><tr><td>Codex CLI</td><td>JSON 事件输出，提示经标准输入发送</td><td>检测执行接口及登录状态；Worker 使用 workspace-write 沙箱，普通目录也可作为工作区。</td></tr><tr><td>Claude Code CLI</td><td>stream-json，提示经标准输入发送；检测 claude</td><td>检测执行接口及 claude auth status 登录状态；acceptEdits 接受工作区内的编辑与文件命令，CLI 自带沙箱放行其他命令但拒绝工作区外写入与外网访问（Windows 无此沙箱，这类命令会被拒绝并记为需要审批）。</td></tr><tr><td>Cursor CLI</td><td>stream-json；检测 cursor-agent 或 agent</td><td>目前接入 CLI，未接入 Cursor SDK；接口可用不等于登录已验证。</td></tr><tr><td>Grok Build CLI</td><td>streaming-json；临时提示文件</td><td>执行后清理提示文件；登录状态在实际执行时确认。</td></tr></tbody></table><p>优先使用设置中指定的路径，否则从 PATH 等位置检测。开启时默认 Agent 不可用但发现其他可用 Agent，会选择可用项；一个也没有则拒绝开启。实际调用仍可能因登录过期、权限、网络或提供方接口变化失败。</p>"
       },
       {
         "title": "在会话下查看执行过程",
@@ -147,7 +147,7 @@
     "sections": [
       {
         "title": "项目文件",
-        "html": "<p>点击侧栏项目旁的加号选择本机文件夹，在文件页浏览当前工作区。远端 Loom 的连接不会把远端文件或记忆迁移到这个文件夹。</p>"
+        "html": "<p>点击侧栏项目旁的加号添加本机文件夹。点击项目行展开任务，从项目的更多菜单浏览文件；切换项目任务时沿用其项目目录。项目、置顶及任务共享一个滚动区域，折叠状态会保存。远端 Loom 的连接不会把远端文件或记忆迁移到这个文件夹。</p>"
       },
       {
         "title": "内置浏览器",
@@ -175,15 +175,15 @@
       },
       {
         "title": "启动与状态",
-        "html": "<p>点击 <strong>启动</strong> 或 <strong>停止</strong> 管理桌面启动的 Portal。进程运行中仅代表程序已启动；连接健康需要等待与当前 Being 的连接确认。</p><p>桌面只管理自己启动的 Portal 进程。切换 Being 后，若提示身份不匹配，请按界面提示重新配置。</p>"
+        "html": "<p>在 <strong>已有 Portal</strong> 卡片点击 <strong>一键接管</strong>，保存原服务的管理记录；此操作不重启 Portal。成功显示“已接管”，随后可用 <strong>启动</strong>、<strong>停止</strong> 和更新入口管理。Desktop 新建的部署直接提供管理入口。已有部署保留原配置、身份、凭据和工作区；无法确认管理方式时只读显示。</p><p>进程运行中仅代表程序已启动；连接健康需要等待握手确认。切换 Being 后，若提示身份不匹配，请按界面提示处理。</p>"
       },
       {
         "title": "工具权限",
-        "html": "<p>展开 <strong>工具权限</strong>，调整文件读写、命令执行、截图、搜索工具和自定义工具开关，再保存。Portal 运行中保存会重启并重新注册工具。</p><p>命令权限与搜索开关的实际范围见<a href=\"permissions.html\">权限与数据</a>。</p>"
+        "html": "<p>展开 <strong>工具权限</strong>，读取并调整文件读写、命令执行、截图、搜索工具和自定义工具开关。已接管的 Portal 直接使用原配置，保留其他字段和注释。</p><p>运行中点击 <strong>保存并重启</strong>，将通过原服务管理器应用权限并重新注册工具；配置变更冲突时拒绝覆盖，重启验证失败时恢复旧配置。没有改动时不会重启。命令与搜索开关的实际范围见<a href=\"permissions.html\">权限与数据</a>。</p>"
       },
       {
         "title": "已有程序与更新",
-        "html": "<p>使用自己的 Portal 时，展开 <strong>手动配置</strong> 选择程序和配置文件。配置失败可重试，或点击 <strong>请求协助</strong> 生成问题草稿。</p><p>桌面启动及运行期间每 6 小时检查 Portal 稳定版本，也可手动检查。发现新版后打开官方发布页，由你选择更新；不会自动替换程序。</p>"
+        "html": "<p>使用自己的 Portal 时，展开 <strong>手动配置</strong> 选择程序和配置文件。Desktop 优先识别原服务，不创建重复部署。新部署的程序独立保存，后续更新无需重装 Desktop。</p><p>启动及每 6 小时检查官方稳定版，兼容更新可在后台下载并校验。下载不停止 Portal；待任务结束后点击 <strong>停止并更新</strong>，由原管理器执行替换、启动和验证。失败恢复旧程序；恢复无法确认时保留备份并显示恢复入口。</p><p>0.8.3 的 kits 变更约 5 秒自动热重载，也可用 portal_kits_reload 主动刷新；主程序更新及配置修改仍需重启。更新验证包括稳定进程、版本、relay 握手和本地工具注册，不代表 Being 已完成端到端调用。</p>"
       }
     ]
   },
@@ -235,7 +235,7 @@
     "sections": [
       {
         "title": "导航与搜索",
-        "html": "<p>从侧栏底部打开设置。左侧分类支持搜索与键盘导航；按 Esc 或点击 <strong>返回应用</strong> 回到之前的页面。</p><table><thead><tr><th>分类</th><th>内容</th></tr></thead><tbody><tr><td>常规</td><td>托盘行为</td></tr><tr><td>外观</td><td>主题预设、自定义颜色与阅读字号</td></tr><tr><td>连接</td><td>Loom 地址与连接状态</td></tr><tr><td>模型</td><td>模型、提供方、服务与凭据</td></tr><tr><td><a href=\"orchestration.html\">编排模式</a></td><td>开关、默认 Worker、Agent Kit 检测与调度连接</td></tr><tr><td>本机 Portal</td><td>设备、工作区、权限与更新</td></tr><tr><td>关于</td><td>版本、诊断导出与新手引导</td></tr></tbody></table>"
+        "html": "<p>点击侧栏底部的 Being 菜单，选择设置；也可使用右上角设置按钮或 Cmd/Ctrl+,。左侧分类支持搜索与键盘导航；按 Esc 或点击 <strong>返回应用</strong> 回到之前的页面。</p><table><thead><tr><th>分类</th><th>内容</th></tr></thead><tbody><tr><td>常规</td><td>托盘行为</td></tr><tr><td>外观</td><td>主题预设、自定义颜色与阅读字号</td></tr><tr><td>连接</td><td>Loom 地址与连接状态</td></tr><tr><td>模型</td><td>模型、提供方、服务与凭据</td></tr><tr><td><a href=\"orchestration.html\">编排模式</a></td><td>开关、默认 Worker、Agent Kit 检测与调度连接</td></tr><tr><td>本机 Portal</td><td>设备、工作区、权限与更新</td></tr><tr><td>关于</td><td>版本、诊断导出与新手引导</td></tr></tbody></table>"
       },
       {
         "title": "外观与阅读",

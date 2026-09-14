@@ -5,15 +5,17 @@ const {endpoint, publicModelUrl} = require('./security.cjs');
 // Loom's public loadLlmConfig/llmApply contract: GET returns presets;
 // PATCH accepts model/provider/base_url/api_key and reports needs_key/rolled_back.
 const MAX_RESPONSE_BYTES = 1024 * 1024;
-// Mirrors Loom's providerNames and inferBaseUrl tables (loom.html 1.8.0) plus
+// Mirrors Loom's providerNames and inferBaseUrl tables (loom.html 1.8.0, deployed
+// 2026-09-12 revision; Heart keeps the same list in LlmConfig::CANONICAL_URLS) plus
 // OpenRouter. A preset's own base_url still takes precedence over these defaults.
 const PROVIDERS = {
   anthropic: {name: 'Anthropic', baseUrl: 'https://api.anthropic.com'},
   'openai-responses': {name: 'OpenAI Responses', baseUrl: 'https://api.openai.com/v1'},
+  openai: {name: 'OpenAI Chat Completions', baseUrl: 'https://api.openai.com/v1'},
   deepseek: {name: 'DeepSeek', baseUrl: 'https://api.deepseek.com'},
   kimi: {name: 'Kimi', baseUrl: 'https://api.moonshot.cn/v1'},
   google: {name: 'Google', baseUrl: 'https://generativelanguage.googleapis.com'},
-  glm: {name: 'GLM', baseUrl: ''},
+  glm: {name: 'GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4'},
   // Loom 1.8.0 lists self-hosted presets first and applies them in one step without an API key.
   'self-hosted': {name: '自部署', baseUrl: 'http://115.190.110.33:7860/v1', keyless: true},
   openrouter: {name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1'},

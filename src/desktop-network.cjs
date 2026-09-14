@@ -10,6 +10,11 @@ function portalRequestAdapter(requestImpl) {
     const fail = () => {
       if (!delivered) { delivered=true; request.emit('error', new Error('Portal download failed')); }
     };
+    request.destroy = () => {
+      // Cancel native I/O as well as the installer promise, including before headers.
+      ended=true; delivered=true; nativeRequest?.abort();
+      return request;
+    };
     request.end = () => {
       if (ended) return;
       ended=true;

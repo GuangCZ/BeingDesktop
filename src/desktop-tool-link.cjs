@@ -125,11 +125,15 @@ class DesktopToolLink {
   #handshakeTimer = null;
   #heartbeatTimer = null;
   #connecting = null;
+  #reconnectTimer = null;
+  #reconnectAttempt = 0;
+  #reconnectConnection = null;
+  #shouldReconnect;
   #portalName = `being-desktop-tools-${randomUUID().replaceAll('-','').slice(0,12)}`;
   #state = {status:'disconnected',error:'',lastCall:null,calls:0};
   #toolAllowed;
 
-  constructor({onChange = () => {}, invokeTool, portalName, toolAllowed = name=>!name.startsWith('desktop_worker_'), WebSocketImpl = WebSocket, clock = () => performance.now(), timers = globalThis} = {}) {
+  constructor({onChange = () => {}, invokeTool, portalName, toolAllowed = name=>!name.startsWith('desktop_worker_'), WebSocketImpl = WebSocket, clock = () => performance.now(), timers = globalThis, shouldReconnect = () => false} = {}) {
     if (typeof invokeTool !== 'function' || typeof onChange !== 'function') throw new Error('工具调用处理器无效。');
     this.#onChange = onChange;
     this.#invokeTool = invokeTool;
@@ -137,6 +141,7 @@ class DesktopToolLink {
     this.#WebSocket = WebSocketImpl;
     this.#clock = clock;
     this.#timers = timers;
+    this.#shouldReconnect = shouldReconnect;
     if (portalName !== undefined) {
       if (!/^[a-zA-Z0-9._-]{1,128}$/.test(portalName)) throw new Error('Invalid desktop Portal name');
       this.#portalName = portalName;
@@ -154,7 +159,7 @@ class DesktopToolLink {
 
   #changed() { try { this.#onChange(this.snapshot()); } catch { /* Observers cannot affect tool dispatch. */ } }
 
-  #end(status = 'disconnected', error = '') {
+  #end(status = 'disconnected', error = '', retryable = false) {
     const socket = this.#socket;
     this.#socket = null;
     this.#generation++;
@@ -175,6 +180,22 @@ class DesktopToolLink {
     for (const item of pending) item.controller.abort();
     try { socket?.close(status === 'error' ? 1008 : 1000,'Desktop tools disconnected'); } catch { /* The local session is already revoked. */ }
     this.#changed();
+    if (retryable) this.#scheduleReconnect();
+  }
+
+  #scheduleReconnect() {
+    if (this.#disposed || this.#reconnectTimer || !this.#reconnectConnection || !this.#shouldReconnect()) return;
+    const generation = this.#generation, connection = this.#reconnectConnection;
+    const delayMs = Math.min(60000, 2000 * 2 ** Math.min(this.#reconnectAttempt++, 5));
+    this.#state.reconnect = {attempt: this.#reconnectAttempt, delayMs};
+    this.#reconnectTimer = this.#timers.setTimeout(() => {
+      this.#reconnectTimer = null;
+      delete this.#state.reconnect;
+      if (this.#disposed || generation !== this.#generation || connection !== this.#reconnectConnection || !this.#shouldReconnect()) return;
+      void this.connect(connection).catch(() => {});
+    }, delayMs);
+    this.#reconnectTimer?.unref?.();
+    this.#changed();
   }
 
   #send(value) {
@@ -182,9 +203,9 @@ class DesktopToolLink {
     let text;
     try { text = JSON.stringify(value); } catch { return false; }
     if (Buffer.byteLength(text,'utf8') > MAX_RESPONSE_BYTES) return false;
-    if (this.#socket.bufferedAmount > MAX_BUFFERED_BYTES) { this.#end('error','工具连接发送拥塞，请重新连接。'); return false; }
+    if (this.#socket.bufferedAmount > MAX_BUFFERED_BYTES) { this.#end('error','工具连接发送拥塞，请重新连接。',true); return false; }
     try { this.#socket.send(text); return true; }
-    catch { this.#end('error','工具连接发送失败，请重新连接。'); return false; }
+    catch { this.#end('error','工具连接发送失败，请重新连接。',true); return false; }
   }
 
   #error(id, code, message) { this.#send({jsonrpc:'2.0',id,error:{code,message}}); }
@@ -200,11 +221,13 @@ class DesktopToolLink {
       beingId = loom.pathname.split('/').filter(Boolean)[0];
       if (!/^[a-zA-Z0-9_-]{1,100}$/.test(beingId || '') || !boundedText(parsed.token,1,4096) || /[\r\n]/.test(parsed.token) || connection.token !== parsed.token) throw new Error('identity');
     } catch { return Promise.reject(new Error('Loom 连接缺少有效的 Being 身份或令牌。')); }
+    this.#timers.clearTimeout(this.#reconnectTimer);this.#reconnectTimer = null;delete this.#state.reconnect;
+    this.#reconnectConnection = {url:parsed.url,token:parsed.token};
     const relay = new URL('/_relay',loom.origin);
     relay.protocol = loom.protocol === 'http:' ? 'ws:' : 'wss:';
     let socket;
     try { socket = new this.#WebSocket(relay.href); }
-    catch { this.#state.status = 'error';this.#state.error = '工具连接无法建立。';this.#changed();return Promise.reject(new Error(this.#state.error)); }
+    catch { this.#state.status = 'error';this.#state.error = '工具连接无法建立。';this.#changed();this.#scheduleReconnect();return Promise.reject(new Error(this.#state.error)); }
     this.#socket = socket;
     const generation = ++this.#generation;
     const current = () => this.#socket === socket && generation === this.#generation;
@@ -218,7 +241,7 @@ class DesktopToolLink {
     // Older relays acknowledge authentication without advertising text keepalive.
     socket.on?.('pong',() => { if (current() && !textKeepalive && this.#state.status === 'connected') lastSeen = this.#clock(); });
     const connected = new Promise((resolve,reject) => { this.#connecting = {resolve,reject}; });
-    this.#handshakeTimer = this.#timers.setTimeout(() => { if (current()) this.#end('error','工具连接握手未完成，请重新连接。'); },10000);
+    this.#handshakeTimer = this.#timers.setTimeout(() => { if (current()) this.#end('error','工具连接握手未完成，请重新连接。',true); },10000);
     this.#handshakeTimer?.unref?.();
     socket.addEventListener('open',() => {
       if (!current()) { handshake = null; return; }
@@ -246,12 +269,12 @@ class DesktopToolLink {
         this.#connecting = null;
         this.#heartbeatTimer = this.#timers.setInterval(() => {
           if (!current()) return;
-          if (this.#clock() - lastSeen > HEARTBEAT_DEADLINE_MS) { this.#end('error','工具连接已失去响应，请重新连接。');return; }
+          if (this.#clock() - lastSeen > HEARTBEAT_DEADLINE_MS) { this.#end('error','工具连接已失去响应，请重新连接。',true);return; }
           if (textKeepalive) this.#send({type:'keepalive'});
           else {
-            if (socket.bufferedAmount > MAX_BUFFERED_BYTES) { this.#end('error','工具连接发送拥塞，请重新连接。');return; }
-            try { socket.ping('bd',error => { if (error && current()) this.#end('error','工具连接发送失败，请重新连接。'); }); }
-            catch { this.#end('error','工具连接发送失败，请重新连接。'); }
+            if (socket.bufferedAmount > MAX_BUFFERED_BYTES) { this.#end('error','工具连接发送拥塞，请重新连接。',true);return; }
+            try { socket.ping('bd',error => { if (error && current()) this.#end('error','工具连接发送失败，请重新连接。',true); }); }
+            catch { this.#end('error','工具连接发送失败，请重新连接。',true); }
           }
         },HEARTBEAT_INTERVAL_MS);
         this.#heartbeatTimer?.unref?.();
@@ -263,8 +286,8 @@ class DesktopToolLink {
       if (textKeepalive && keys(message,['type']) && message.type === 'keepalive_ack') { lastSeen = this.#clock();return; }
       if (this.#message(message,generation)) lastSeen = this.#clock();
     });
-    socket.addEventListener('error',() => { handshake = null;if (current()) this.#end('error','工具连接发生网络错误，请重新连接。'); });
-    socket.addEventListener('close',() => { handshake = null;if (current()) this.#end('error','工具连接已断开，请重新连接。'); });
+    socket.addEventListener('error',() => { handshake = null;if (current()) this.#end('error','工具连接发生网络错误，请重新连接。',true); });
+    socket.addEventListener('close',() => { handshake = null;if (current()) this.#end('error','工具连接已断开，请重新连接。',true); });
     this.#changed();
     return connected;
   }
@@ -299,6 +322,8 @@ class DesktopToolLink {
     if (message.method === 'initialize') {
       if (this.#initialized || !keys(params,['protocolVersion','capabilities','clientInfo']) || !boundedText(params.protocolVersion,1,128) || !record(params.capabilities) || !keys(params.clientInfo,['name','version','title']) || !boundedText(params.clientInfo.name,1,128) || !boundedText(params.clientInfo.version,1,128) || Object.hasOwn(params.clientInfo,'title') && !boundedText(params.clientInfo.title,1,128)) { this.#error(id,-32602,'Invalid initialization parameters.');return false; }
       this.#initialized = this.#send({jsonrpc:'2.0',id,result:{protocolVersion:'2024-11-05',capabilities:{tools:{listChanged:false}},serverInfo:{name:'being-desktop-tools',version:'1.0.0'}}});
+      if (this.#initialized) this.#reconnectAttempt = 0;
+      this.#changed();
       return this.#initialized;
     }
     if (message.method === 'ping') {
@@ -360,7 +385,11 @@ class DesktopToolLink {
     }
   }
 
-  disconnect() { this.#end();return this.snapshot(); }
+  disconnect() {
+    this.#timers.clearTimeout(this.#reconnectTimer);this.#reconnectTimer = null;
+    this.#reconnectConnection = null;this.#reconnectAttempt = 0;delete this.#state.reconnect;
+    this.#end();return this.snapshot();
+  }
   dispose() { this.#disposed = true;return this.disconnect(); }
 }
 

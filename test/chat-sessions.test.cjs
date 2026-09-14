@@ -45,6 +45,29 @@ function fixture({disk = null} = {}) {
   return {sessions, events, states, calls, on, always, advance, disk: () => stored, saves};
 }
 
+test('selected text travels with the actual message and survives durable history without duplication', async () => {
+  const {encode, decode} = require('../renderer/chat-references.js');
+  const f = fixture();
+  try {
+    await f.sessions.start('identity-a');
+    const id = f.sessions.snapshot().active, scene = sceneId(DESKTOP, id);
+    const references = [{text: '完整引用\n第二行', source: 'Being'}], text = '解释一下';
+    f.on('/api/chat/stream', sse([['meta', {scene_id: scene}], ['content_block_delta', {scene_id: scene, delta: {text: '解释'}}], ['message_stop', {scene_id: scene}]]));
+    await f.sessions.send({sessionId: id, text, references});
+    await settle();
+    const sent = f.calls.find(call => call.path === '/api/chat/stream');
+    assert.deepEqual(decode(sent.body.message), {text, references});
+    f.on('/api/history', json({messages: [{seq: 1, role: 'user', content: encode(text, references), scene_id: scene}]}));
+    await f.sessions.reload();
+    assert.equal(f.sessions.view(id).sent.length, 0);
+    assert.deepEqual(decode(f.sessions.view(id).rows[0].content), {text, references});
+    assert.equal(f.disk().sessions[0].rows[0].content, encode(text, references));
+    const before = f.calls.length;
+    await assert.rejects(f.sessions.send({sessionId: id, text, references: [{text: 'x'.repeat(60001)}]}), {code: 'INVALID_REQUEST'});
+    assert.equal(f.calls.length, before);
+  } finally { f.sessions.end(); }
+});
+
 test('starting binds an identity, seeds a first conversation and reads the baseline', async () => {
   const f = fixture();
   f.on('/api/history', json({messages: [{seq: 1, role: 'user', content: '早', at: 't', scene_id: sceneId(DESKTOP, '00000001-0000-4000-8000-000000000000')}]}));
@@ -335,4 +358,63 @@ test('images need words with them and stay inside the measured envelope', async 
   await assert.rejects(f.sessions.send({sessionId: id, text: 'x', images: 'nope'}), {code: 'INVALID_REQUEST'});
   assert.equal(f.calls.some(call => call.path === '/api/chat/stream'), false);
   assert.deepEqual(f.sessions.view(id).sent, []);
+});
+
+test('channel conversations are distinct, durable across restart and never steal selection', async () => {
+  const f=fixture();
+  try {
+    await f.sessions.start('identity-a');
+    const active=f.sessions.snapshot().active;
+    const wechat=f.sessions.ensureChannel('wechat'), feishu=f.sessions.ensureChannel('feishu');
+    assert.notEqual(wechat.sessionId,feishu.sessionId);
+    assert.notEqual(wechat.sessionId,active);
+    assert.deepEqual(f.sessions.ensureChannel('wechat'),wechat);
+    assert.equal(f.sessions.snapshot().active,active);
+    f.sessions.rename(wechat.sessionId,'我的微信');
+    await settle();
+    const restored=fixture({disk:f.disk()});
+    try {
+      await restored.sessions.start('identity-a');
+      assert.deepEqual(restored.sessions.ensureChannel('wechat'),wechat);
+      assert.equal(restored.sessions.snapshot().sessions.find(s=>s.id===wechat.sessionId).title,'我的微信');
+      assert.equal(restored.sessions.snapshot().active,active);
+    } finally { restored.sessions.end(); }
+    const other=fixture();
+    try {
+      await other.sessions.start('identity-b');
+      assert.notEqual(other.sessions.ensureChannel('wechat').sessionId,wechat.sessionId);
+    } finally { other.sessions.end(); }
+    assert.throws(()=>f.sessions.ensureChannel('unknown'),{code:'INVALID_REQUEST'});
+  } finally { f.sessions.end(); }
+});
+
+test('channel history and replies stay in their own sessions and follow-up sends use the same scene', async () => {
+  const f=fixture();
+  try {
+    await f.sessions.start('identity-a');
+    const active=f.sessions.snapshot().active;
+    const wechat=f.sessions.ensureChannel('wechat'), feishu=f.sessions.ensureChannel('feishu');
+    f.on('/api/history',json({messages:[
+      {seq:1,role:'user',content:'微信消息',scene_id:wechat.sceneId},
+      {seq:2,role:'assistant',content:'飞书回复',scene_id:feishu.sceneId},
+      {seq:3,role:'assistant',content:'微信回复',scene_id:wechat.sceneId},
+      {seq:4,role:'assistant',content:'主对话回复',scene_id:sceneId(DESKTOP,active)},
+      {seq:5,role:'assistant',content:'其他客户端',scene_id:'loom-foreign'},
+    ]}));
+    await f.sessions.syncChannel();
+    assert.equal(f.sessions.snapshot().active,active);
+    assert.deepEqual(f.sessions.view(wechat.sessionId).rows.map(r=>r.content),['微信消息','微信回复']);
+    assert.deepEqual(f.sessions.view(feishu.sessionId).rows.map(r=>r.content),['飞书回复']);
+    assert.deepEqual(f.sessions.view(active).rows.map(r=>r.content),['主对话回复']);
+    f.on('/api/chat/stream',sse([
+      ['meta',{scene_id:wechat.sceneId}],['content_block_delta',{scene_id:wechat.sceneId,delta:{text:'微信继续'}}],['message_stop',{scene_id:wechat.sceneId}],
+      ['meta',{scene_id:feishu.sceneId,continuation:true}],['content_block_delta',{scene_id:feishu.sceneId,delta:{text:'飞书继续'}}],['message_stop',{scene_id:feishu.sceneId}],
+    ]));
+    await f.sessions.send({sessionId:wechat.sessionId,text:'继续'});
+    assert.equal(f.calls.find(c=>c.path==='/api/chat/stream').body.scene_id,wechat.sceneId);
+    assert.equal(f.sessions.view(active).live,null);
+    assert.ok(f.events.some(e=>e.type==='reply'&&e.sessionId===wechat.sessionId&&e.text==='微信继续'));
+    assert.ok(f.events.some(e=>e.type==='reply'&&e.sessionId===feishu.sessionId&&e.text==='飞书继续'));
+    assert.equal(f.sessions.snapshot().active,active);
+  } finally { f.sessions.end(); }
 });

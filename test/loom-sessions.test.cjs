@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const {webcrypto} = require('node:crypto');
 const {installSessions,prepareLoomSessions,changeLoomSession} = require('../src/loom-sessions.cjs');
+const {orchestrationInstructions} = require('../src/orchestration-message.cjs');
 const {desktopMessageContext} = require('../src/desktop-message-context.cjs');
 const {createSessionRouter} = require('../src/loom-session-routing.cjs');
 
@@ -18,7 +19,7 @@ function fixture(storage = new Map(), desktopId) {
     fetch:async(url,options)=>{calls.push({url:String(url),options});return reply instanceof Response ? reply : Response.json(reply);}
   });
   vm.runInContext('window=globalThis;window.top=window;', context);
-  vm.runInContext(`(${installSessions.toString()})(null,${createSessionRouter.toString()},${JSON.stringify(desktopMessageContext({platform:'win32',hostname:'CZ'}))},${JSON.stringify({enabled:false,desktopId})})`, context);
+  vm.runInContext(`(${installSessions.toString()})(null,${createSessionRouter.toString()},${JSON.stringify(desktopMessageContext({platform:'win32',hostname:'CZ'}))},${JSON.stringify({enabled:false,desktopId})},${orchestrationInstructions.toString()})`, context);
   return {context, storage, calls, api:context.__beingDesktopSessions, respond:value=>{reply=value;}};
 }
 

@@ -8,11 +8,11 @@ A Windows and macOS desktop home for your existing Being: Loom conversations, lo
 
 - Multiple conversations, image input, tool selection, and message navigation.
 - Workspace browser, embedded web browser, and persistent PowerShell tabs.
-- Local Portal setup, process status, permissions, and update notifications.
+- Local Portal setup, process status, permissions, and verified updates through the original service manager or a separate Desktop runtime.
 - Grove discovery, environment checks, and supported Kit installation.
 - Town and Channel entry points; pair with Town to sync messages and read Scrolls directly through the Client SDK without consuming Being chat turns.
 - Settings for appearance, reading, Loom connections, and model configuration.
-- Orchestrator mode: Being plans and evaluates; Codex, Cursor or Grok Build CLI workers execute, report progress beneath their conversation, and return results to that conversation.
+- Orchestrator mode: Being plans and evaluates; Codex, Claude Code, Cursor or Grok Build CLI workers execute, report progress beneath their conversation, and return results to that conversation.
 
 Current source version **0.8.22**, Windows x64. Download availability follows GitHub Releases. Requires an existing Being and Loom connection. The desktop does not host or migrate your Being's identity and memory.
 

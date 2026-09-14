@@ -238,3 +238,18 @@ test('result previews are delivered to the original chat once and merged with a 
   assert.equal(reports[1].worker.id,reports[0].worker.id);assert.equal(reports[1].worker.review.requestId,reports[0].worker.review.requestId);
   await f.manager.callbacks.pump();assert.equal(reports.length,2);assert.equal(f.children.length,1);
 });
+
+
+test('native completion delivery is independent of Worker bridge readiness; evaluation waits for its recovery',async t=>{
+  let deliveries=0,continuations=0,bridge=false;
+  const f=await fixture(t,{send:async()=>{deliveries++;return {accepted:true,inboxId:'native-receipt'};}});
+  const worker=await f.manager.run(f.args);await f.complete(worker);
+  f.manager.callbacks.toolsReady=()=>bridge;
+  f.manager.assertEnforced=async()=>{if(!bridge)throw Object.assign(new Error('bridge offline'),{code:'ORCHESTRATION_NOT_ENFORCED'});};
+  f.manager.callbacks.resume=async(value,{beforeSend})=>{assert.equal(value.id,worker.id);assert.equal(await beforeSend(),true);continuations++;return {accepted:true};};
+  f.enable();await f.manager.callbacks.pump();
+  assert.equal(deliveries,1);assert.equal(f.manager.get(worker.id).completion.state,'accepted');
+  await f.manager.callbacks.pump();assert.equal(continuations,0);
+  bridge=true;await f.manager.callbacks.pump();await f.manager.callbacks.pump();
+  assert.equal(deliveries,1);assert.equal(continuations,1);assert.equal(f.children.length,1);
+});

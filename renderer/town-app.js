@@ -1,6 +1,7 @@
 'use strict';
 
 (() => {
+  const M = window.beingTownMentions;
   const ids = new Set(['grove', 'channel', 'portal', 'fireside', 'bonfire', 'inbox', 'scroll', 'beings']);
   const libraryIds = new Set(['scroll', 'beings']);
   const names = { grove: '工具市场', channel: '消息渠道', portal: '电脑连接', fireside: '围炉', bonfire: '篝火', inbox: '私信', scroll: '卷轴', beings: '居民名录' };
@@ -39,6 +40,7 @@
   let roomRequest = 0;
   let roomSelection = 0;
   let channelRequest = 0;
+  const channelStates = new Map();
   let navigation = 0;
   let townRevision = 0;
   let lastPublicRender = '';
@@ -50,8 +52,8 @@
     grove: { kits: [], count: 0, query: '', category: '', status: 'idle', error: '', selected: '', detail: null, detailStatus: 'idle', detailError: '', checks: new Map(), operations: new Map(), operationErrors: new Map(), batch: null, batchRunning: false, expanded: new Set(), scrollTop: 0 },
     channel: { selected: 'feishu', wizard: false, status: 'unknown', detail: '', qr: '', step: 0 },
     portal: { confirm: false, status: '', detail: '', permissions: { files: true, exec: false, web: false } },
-    fireside: { rooms: [], selected: '', messages: [], members: [], status: 'idle', error: '', messageError: '', roomError: '', latestSeq: null, refresh: {}, drafts: new Map(), replies: new Map(), deliveries: [], showMembers: null, dialog: '', hasOlder: false, lastRefresh: null, loadingOlder: false, olderError: '' },
-    bonfire: { messages: [], members: [], status: 'idle', error: '', memberError: '', sendError: '', draft: '', sender: '', latestSeq: null, refresh: {}, mentionIndex: 0, mentionClosed: false, replyTo: null, hasOlder: false, lastRefresh: null, loadingOlder: false, olderError: '' },
+    fireside: { rooms: [], selected: '', messages: [], members: [], status: 'idle', error: '', messageError: '', roomError: '', latestSeq: null, refresh: {}, drafts: new Map(), replies: new Map(), receipts: new Map(), deliveries: [], showMembers: null, dialog: '', hasOlder: false, lastRefresh: null, loadingOlder: false, olderError: '' },
+    bonfire: { messages: [], members: [], membersExpiresAt: 0, receipt: null, ambiguity: null, status: 'idle', error: '', memberError: '', sendError: '', draft: '', sender: '', latestSeq: null, refresh: {}, mentionIndex: 0, mentionClosed: false, replyTo: null, hasOlder: false, lastRefresh: null, loadingOlder: false, olderError: '' },
     inbox: { messages: [], status: 'idle', error: '', sendError: '', recipient: '', draft: '', replyTo: null },
   };
 
@@ -132,7 +134,9 @@
   // so the control is not offered when replying would silently drop the parent.
   const canReply = () => record(town.client).paired === true;
   const beingName = () => string(town.identity?.displayName, string(publicState.connection?.beingName, '当前 Being'));
-  const beingId = () => string(town.identity?.beingId);
+  const loomBeingId = () => string(town.identity?.loomBeingId, string(town.identity?.beingId));
+  const townId = () => string(town.identity?.townId);
+  const isMine = sender => M.isOwnMessage(sender, town.identity);
   const sameEpoch = (value) => value === epoch;
   const activeRoute = (value) => value === navigation && !root.hidden;
   const visibleModule = (id) => root && !root.hidden && current === id;
@@ -385,7 +389,7 @@
     if (!ui.pairPanel) return;
     const client = record(town.client), paired = client.paired === true;
     const needsPair = !paired || ['auth_required', 'identity_mismatch'].includes(client.status);
-    const labels = {paused: 'Town 同步已暂停', connected: 'Town 实时连接已建立', connecting: 'Town 正在连接', reconnecting: 'Town 连接中断，正在重连', auth_required: 'Town 需要配对', identity_mismatch: 'Town 身份不一致，请重新配对'};
+    const labels = {paused: 'Town 同步已暂停', connected: 'Town 实时连接已建立', connecting: 'Town 正在连接', reconnecting: client.errorCode === 'INVALID_RESPONSE' ? 'Town 连接信息格式异常，正在重试；现有配对已保留' : 'Town 连接中断，正在重连', auth_required: 'Town 需要配对', identity_mismatch: 'Town 返回的身份与已保存配对不一致'};
     text(ui.pairStatus, labels[client.status] || '连接 Town 后直接同步消息');
     for (const control of [ui.pairCode, ui.pairSubmit, ui.pairHelp]) control.hidden = !needsPair;
     ui.pairForget.hidden = !paired;
@@ -892,8 +896,9 @@
       const card = button('', () => {
         if (model.channel.selected === id) return;
         channelRequest += 1;
-        busy.delete('channel-status'); busy.delete('channel-connect');
-        Object.assign(model.channel, { selected: id, wizard: false, qr: '', detail: '', status: 'unknown', step: 0 }); renderChannel();
+        busy.delete('channel-status'); busy.delete('channel-connect'); busy.delete('channel-inspect');
+        Object.assign(model.channel, { selected: id, wizard: false, qr: '', detail: '', readError: '', status: 'unknown', step: 0 }, channelStates.get(id)); renderChannel();
+        if (id !== 'wecom') void inspectChannel();
       }, 'ta-channel-card');
       card.dataset.channel = id;
       const logo = node('img', 'ta-channel-symbol');
@@ -912,19 +917,37 @@
 
   function renderChannel() {
     const channel = model.channel;
-    for (const card of ui.channelCards.children) { const selected = card.dataset.channel === channel.selected; card.classList.toggle('is-selected', selected); card.setAttribute('aria-pressed', String(selected)); }
+    for (const card of ui.channelCards.children) {
+      const selected = card.dataset.channel === channel.selected;
+      card.classList.toggle('is-selected', selected); card.setAttribute('aria-pressed', String(selected));
+      const status = selected ? channel.status : channelStates.get(card.dataset.channel)?.status;
+      text(card.querySelector('.ta-muted'), card.dataset.channel === 'wecom' ? '暂不支持' : status === 'connected' ? '已连接' : ['registered', 'pending', 'waiting'].includes(status) ? '已有渠道登记' : '查看绑定状态');
+    }
     ui.channelBody.replaceChildren();
     if (channel.selected === 'wecom') { ui.channelBody.append(message('暂不支持企业微信', '当前连接服务未提供企业微信接入。请选择飞书，或检查微信可用的连接方式。')); return; }
     const feishu = channel.selected === 'feishu';
-    const title = feishu ? '连接飞书' : '连接微信';
+    const name = feishu ? '飞书' : '微信';
+    const title = `${name}渠道`;
     const connected = publicState.connection?.status === 'connected';
-    const pending = busy.has('channel-status') || busy.has('channel-connect');
+    const pending = busy.has('channel-status') || busy.has('channel-connect') || busy.has('channel-inspect');
     append(ui.channelBody, append(node('div', 'ta-card-heading'), node('h3', '', title), badge(channel.status)));
+    if (channel.readError) ui.channelBody.append(node('p', 'ta-notice', channel.readError));
     if (!connected) ui.channelBody.append(node('p', 'ta-notice', '请先在连接设置中连接 Being，再完成渠道配置。'));
+    if (channel.status === 'connected') {
+      const refresh = button(busy.has('channel-inspect') ? '正在读取…' : '刷新绑定状态', () => void inspectChannel(), 'ta-secondary', 'channel-refresh');
+      refresh.disabled = !connected || pending;
+      const verify = button('请 Being 核对状态', () => void checkChannel(), 'ta-secondary', 'channel-check');
+      verify.disabled = !connected || pending;
+      append(ui.channelBody, node('p', 'ta-body-copy', `${name}已连接，无需重复绑定。`), channel.detail ? node('p', 'ta-notice', channel.detail) : null, append(node('div', 'ta-actions'), refresh, verify));
+      return;
+    }
     if (!channel.wizard) {
-      const start = button(`请 Being ${title}`, () => { channel.wizard = true; channel.step = 0; renderChannel(); void beginChannel(); }, 'ta-primary', 'channel-connect');
+      const check = button(busy.has('channel-inspect') ? '正在读取绑定状态…' : busy.has('channel-status') ? 'Being 正在核对…' : '请 Being 核对绑定状态', () => void checkChannel(), 'ta-primary', 'channel-check');
+      check.disabled = !connected || pending;
+      const start = button('配置新连接', () => { channel.wizard = true; channel.step = 0; renderChannel(); void beginChannel(); }, 'ta-secondary', 'channel-connect');
       start.disabled = !connected || pending;
-      append(ui.channelBody, node('p', 'ta-body-copy', feishu ? '将连接请求发给当前 Being，在这里查看机器人配置说明和连接状态。' : '将连接请求发给当前 Being，由 Being 在后台检查可用的接入方式，回复会显示在这里。'), start);
+      const registered = ['registered', 'pending', 'waiting'].includes(channel.status);
+      append(ui.channelBody, node('p', 'ta-body-copy', channel.detail || (registered ? `${name}已有渠道登记，可继续核对连接状态。` : '尚未确认已有绑定状态，不代表未绑定。已绑定时无需配置新连接。')), append(node('div', 'ta-actions'), check, registered ? null : start));
       return;
     }
     const steps = node('ol', 'ta-wizard-steps');
@@ -945,6 +968,7 @@
   }
 
   function applyChannelResult(result) {
+    model.channel.readError = '';
     model.channel.status = string(result.status, 'unknown');
     model.channel.detail = string(result.detail, statusNames[model.channel.status] || '连接状态待确认');
     if (model.channel.status === 'pending') model.channel.detail = `Being 已收到请求，实际连接状态仍待确认。${result.detail ? ` ${result.detail}` : ''}`;
@@ -952,26 +976,49 @@
     model.channel.qr = /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(qr) && qr.length <= 2000000 ? qr : '';
     if (['expired', 'connected', 'disconnected', 'disabled'].includes(result.status)) model.channel.qr = '';
     model.channel.step = result.status === 'connected' ? 2 : 1;
+    rememberChannel();
+  }
+
+  function rememberChannel() {
+    const {selected, ...state} = model.channel;
+    channelStates.set(selected, {...state});
   }
 
   async function channelOperation(method, payload, busyKey) {
-    if (publicState.connection?.status !== 'connected' || busy.has('channel-connect') || busy.has('channel-status')) return;
+    if (publicState.connection?.status !== 'connected' || model.channel.selected === 'wecom' || busy.has('channel-connect') || busy.has('channel-status') || busy.has('channel-inspect')) return;
     const requestEpoch = epoch;
     const selected = model.channel.selected;
     const request = ++channelRequest;
-    busy.add(busyKey); model.channel.wizard = true; model.channel.detail = ''; model.channel.qr = ''; renderChannel();
+    busy.add(busyKey);
+    if (method === 'beginChannelConnection') model.channel.wizard = true;
+    if (method !== 'inspectChannelStatus') { model.channel.detail = ''; model.channel.qr = ''; model.channel.readError = ''; }
+    renderChannel();
     try {
       const response = record(await call(method, { ...payload, connectionRevision: town.identity?.connectionRevision }));
       if (!sameEpoch(requestEpoch) || request !== channelRequest || selected !== model.channel.selected) return;
-      const candidate = method === 'checkChannelStatus' && Array.isArray(response.channels) ? record(response.channels.find((entry) => entry.channel === selected)) : response;
+      const candidate = Array.isArray(response.channels) ? record(response.channels.find((entry) => entry.channel === selected)) : response;
       const result = candidate.channel && candidate.channel !== selected ? {} : candidate;
+      if (method === 'inspectChannelStatus' && (!result.status || result.status === 'unknown') && ['connected', 'registered', 'pending', 'waiting'].includes(model.channel.status)) {
+        model.channel.readError = '当前接口未能确认最新状态，暂时保留上次确认结果。'; rememberChannel(); return;
+      }
       applyChannelResult(result);
-    } catch (error) { if (sameEpoch(requestEpoch) && request === channelRequest && selected === model.channel.selected) { model.channel.status = 'error'; model.channel.detail = errorText(error); } }
+    } catch (error) {
+      if (sameEpoch(requestEpoch) && request === channelRequest && selected === model.channel.selected) {
+        if (method === 'inspectChannelStatus') {
+          const known = ['connected', 'registered', 'pending', 'waiting'].includes(model.channel.status);
+          if (!known) model.channel.status = 'unknown';
+          const reason = error?.code === 'AUTH_REQUIRED' ? 'Desktop 暂无权限直接读取渠道状态。' : '暂时未能读取渠道状态。';
+          model.channel.readError = `${known ? '保留上次确认的状态。' : ''}${reason}这不代表未绑定，无需重复连接。可请 Being 核对绑定状态。`;
+        } else { model.channel.status = 'error'; model.channel.detail = errorText(error); }
+        rememberChannel();
+      }
+    }
     finally { if (request === channelRequest) { busy.delete(busyKey); renderChannel(); } }
   }
 
   const beginChannel = () => channelOperation('beginChannelConnection', { channel: model.channel.selected }, 'channel-connect');
   const checkChannel = () => channelOperation('checkChannelStatus', { channel: model.channel.selected }, 'channel-status');
+  const inspectChannel = () => channelOperation('inspectChannelStatus', { channel: model.channel.selected }, 'channel-inspect');
 
   function buildPortal() {
     ui.portalPage = node('section', 'ta-module ta-portal');
@@ -1100,7 +1147,8 @@
     ui.roomSendLabel = node('span', 'visually-hidden');
     ui.roomSendIcon = icon('external');
     append(ui.roomSend, ui.roomSendLabel, ui.roomSendIcon);
-    append(ui.roomComposer, append(node('div', 'ta-composer-capsule'), ui.roomDraft, ui.roomSend));
+    ui.roomReceipt = node('div', 'ta-notice'); ui.roomReceipt.id = 'fireside-receipt'; ui.roomReceipt.hidden = true; ui.roomReceipt.setAttribute('role', 'status');
+    append(ui.roomComposer, append(node('div', 'ta-composer-capsule'), ui.roomDraft, ui.roomSend), ui.roomReceipt);
     ui.roomReply = node('div', 'ta-reply-slot');
     append(ui.roomCenter, ui.roomHeading, ui.roomStatus, ui.roomNotice, ui.roomMessages, ui.roomReply, ui.roomComposer);
     ui.roomMembers = node('aside', 'ta-members'); ui.roomMembers.id = 'fireside-members'; ui.roomMembers.setAttribute('aria-label', '围炉成员');
@@ -1136,7 +1184,7 @@
     if (!fireside.members.length) { ui.roomMembers.append(node('p', 'ta-muted', '暂未取得成员列表。')); return; }
     for (const member of fireside.members) {
       const name = memberName(member);
-      append(ui.roomMembers, append(node('div', 'ta-member'), node('span', 'ta-member-avatar', name.slice(0, 1)), append(node('span', 'ta-member-copy'), node('strong', '', name), node('span', 'ta-muted', memberId(member) === beingId() ? '当前 Being' : memberId(member)))));
+      append(ui.roomMembers, append(node('div', 'ta-member'), node('span', 'ta-member-avatar', name.slice(0, 1)), append(node('span', 'ta-member-copy'), node('strong', '', name), node('span', 'ta-muted', isMine(memberId(member)) ? '当前 Being' : memberId(member)))));
     }
   }
 
@@ -1152,6 +1200,8 @@
     const pending = busy.has(`send:${fireside.selected}`);
     const canCarry = publicState.connection?.status === 'connected' && Number.isSafeInteger(town.identity?.connectionRevision);
     const carryPending = busy.has('draft-handoff');
+    const receipt = fireside.receipts.get(fireside.selected);
+    if (receipt) M.renderReceipt(ui.roomReceipt, receipt); else ui.roomReceipt.hidden = true;
     const uncertain = fireside.deliveries.some(entry => entry.room === fireside.selected && entry.message === ui.roomDraft.value && entry.status === 'uncertain');
     ui.roomSend.disabled = !ui.roomDraft.value.trim() || (canSendFireside() ? !enabled || pending : !canCarry || carryPending);
     text(ui.roomSendLabel, canSendFireside() ? pending ? '处理中…' : uncertain ? '核对发送结果' : '发送' : carryPending ? '正在准备草稿…' : '带草稿到 Loom');
@@ -1186,7 +1236,7 @@
     visible(ui.roomStatus, showStatus);
     const error = [fireside.roomError, fireside.messageError].filter(Boolean).join(' ');
     setNotice(ui.roomNotice, error, Boolean(error));
-    const messagesKey = JSON.stringify([connected(), fireside.selected, room?.name, fireside.messages, fireside.deliveries, busy.has('room'), error, fireside.refresh.status, backgroundNotConfigured(fireside), canReply(), fireside.hasOlder, fireside.loadingOlder, fireside.olderError, fireside.lastRefresh]);
+    const messagesKey = JSON.stringify([connected(), townId(), fireside.selected, room?.name, fireside.messages, fireside.deliveries, busy.has('room'), error, fireside.refresh.status, backgroundNotConfigured(fireside), canReply(), fireside.hasOlder, fireside.loadingOlder, fireside.olderError, fireside.lastRefresh]);
     if (ui.roomMessages.dataset.rendered === messagesKey) { renderComposer(); return; }
     const nearBottom = ui.roomMessages.scrollHeight - ui.roomMessages.scrollTop - ui.roomMessages.clientHeight < 80;
     const before = { scrollTop: ui.roomMessages.scrollTop, scrollHeight: ui.roomMessages.scrollHeight, firstId: ui.roomMessages.dataset.firstId };
@@ -1204,11 +1254,12 @@
     else if (!fireside.messages.length) ui.roomMessages.append(message('这里还没有消息', ''));
     for (const entry of connected() ? fireside.messages : []) {
       if (marker.node && entry.id === marker.before) ui.roomMessages.append(marker.node);
-      const mine = bonfireSender(entry) === beingId();
+      const mine = isMine(bonfireSender(entry));
       const messageNode = node('article', `ta-message${mine ? ' is-mine' : ''}`);
       const time = entry.createdAt || entry.at ? new Date(entry.createdAt || entry.at) : null;
       const timestamp = time && !Number.isNaN(time.getTime()) ? time.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-      const author = string(entry.beingName, string(entry.speaker_name, bonfireSender(entry) || 'Being'));
+      const displayName = string(entry.beingName, string(entry.speaker_name, bonfireSender(entry) || 'Being'));
+      const author = entry.authorUnknown || !bonfireSender(entry) ? `未知（${displayName}）` : displayName;
       append(messageNode,
         append(node('div', 'ta-message-meta'), node('strong', '', author), viaBadge(entry), node('span', '', `${timestamp}${entry.revisedAt || entry.revised_at ? ' · 已编辑' : ''}`),
           canSendFireside() && canReply() ? replyButton({...entry, beingName: author}, startFiresideReply) : null),
@@ -1297,6 +1348,7 @@
       if (!sameEpoch(requestEpoch)) return;
       if (result.status === 'uncertain' || result.ok !== true) delivery.status = 'uncertain';
       else {
+        delivery.confirmed = true; fireside.receipts.set(room, result);
         fireside.deliveries = fireside.deliveries.filter((entry) => entry !== delivery);
         fireside.replies.delete(room);
         if (fireside.drafts.get(room) === messageText) fireside.drafts.set(room, '');
@@ -1307,6 +1359,7 @@
       }
     } catch (error) {
       if (!sameEpoch(requestEpoch)) return;
+      if (delivery.confirmed) { if (fireside.selected === room) fireside.roomError = '消息已发布，暂时无法刷新围炉。'; return; }
       // Only an explicit pre-send rejection is safe to label as failed.
       delivery.status = ['VALIDATION', 'INVALID_REQUEST', 'AUTH_REQUIRED', 'NOT_SENT'].includes(error?.code) ? 'failed' : 'uncertain';
       if (fireside.selected === room) fireside.roomError = errorText(error);
@@ -1351,9 +1404,9 @@
     });
   }
 
-  const memberId = (member) => string(member.being_id, string(member.beingId, string(member.id)));
+  const memberId = (member) => M.memberId(member);
   const memberName = (member) => string(member.display_name, string(member.displayName, string(member.name, memberId(member))));
-  const bonfireSender = (entry) => string(entry.being, string(entry.being_id, string(entry.beingId, string(entry.speaker))));
+  const bonfireSender = (entry) => string(entry.townId, string(entry.town_id, string(entry.beingId, string(entry.being_id, string(entry.being, string(entry.speaker))))));
 
   function buildBonfire() {
     const page = ui.bonfirePage = node('section', 'ta-module ta-bonfire');
@@ -1378,7 +1431,7 @@
     ui.bonfireDraft.placeholder = '在篝火里聊聊…'; ui.bonfireDraft.setAttribute('aria-label', '篝火消息草稿');
     ui.bonfireDraft.setAttribute('aria-autocomplete', 'list'); ui.bonfireDraft.setAttribute('aria-controls', 'bonfire-mentions');
     ui.bonfireMentions = node('div', 'ta-mention-menu'); ui.bonfireMentions.id = 'bonfire-mentions'; ui.bonfireMentions.setAttribute('role', 'listbox'); ui.bonfireMentions.setAttribute('aria-label', '提及 Being'); ui.bonfireMentions.hidden = true;
-    ui.bonfireDraft.addEventListener('input', () => { model.bonfire.draft = ui.bonfireDraft.value; model.bonfire.mentionIndex = 0; model.bonfire.mentionClosed = false; renderBonfireComposer(); });
+    ui.bonfireDraft.addEventListener('input', () => { model.bonfire.draft = ui.bonfireDraft.value; model.bonfire.ambiguity = null; model.bonfire.mentionIndex = 0; model.bonfire.mentionClosed = false; renderBonfireComposer(); });
     ui.bonfireDraft.addEventListener('click', () => { model.bonfire.mentionClosed = false; renderBonfireComposer(); });
     ui.bonfireDraft.addEventListener('keydown', (event) => {
       if (event.isComposing || event.keyCode === 229) return;
@@ -1398,7 +1451,8 @@
     append(composer, append(node('div', 'ta-composer-capsule'), ui.bonfireMentions, ui.bonfireDraft, ui.bonfireSend));
     ui.bonfireFeedback = node('p', 'visually-hidden'); ui.bonfireFeedback.id = 'bonfire-send-feedback'; ui.bonfireFeedback.setAttribute('role', 'status');
     ui.bonfireSend.setAttribute('aria-describedby', ui.bonfireFeedback.id);
-    append(composer, ui.bonfireFeedback);
+    ui.bonfireReceipt = node('div', 'ta-notice'); ui.bonfireReceipt.id = 'bonfire-receipt'; ui.bonfireReceipt.hidden = true; ui.bonfireReceipt.setAttribute('role', 'status');
+    append(composer, ui.bonfireFeedback, ui.bonfireReceipt);
     ui.bonfireReply = node('div', 'ta-reply-slot');
     append(center, ui.bonfireMessages, ui.bonfireReply, composer);
     append(page, sidebar, center); ui.content.append(page);
@@ -1406,6 +1460,7 @@
 
   function mentionToken() {
     const draft = ui.bonfireDraft;
+    if (model.bonfire.ambiguity?.draft === draft.value) return model.bonfire.ambiguity;
     const match = /(?:^|\s)@([^\s@]*)$/.exec(draft.value.slice(0, draft.selectionStart));
     return match ? { query: match[1].toLocaleLowerCase(), start: draft.selectionStart - match[1].length - 1, end: draft.selectionStart } : null;
   }
@@ -1413,6 +1468,7 @@
   function bonfireSuggestions() {
     const token = mentionToken();
     if (!token || model.bonfire.mentionClosed) return [];
+    if (model.bonfire.ambiguity?.draft === ui.bonfireDraft.value) return model.bonfire.ambiguity.candidates;
     return model.bonfire.members.filter((member) => memberId(member) && [memberId(member), memberName(member)].some((value) => value.toLocaleLowerCase().includes(token.query))).slice(0, 8);
   }
 
@@ -1421,7 +1477,7 @@
     const draft = ui.bonfireDraft;
     const mention = `@${memberId(member)} `;
     draft.setRangeText(mention, token.start, token.end, 'end');
-    model.bonfire.draft = draft.value; model.bonfire.mentionClosed = true;
+    model.bonfire.draft = draft.value; model.bonfire.ambiguity = null; model.bonfire.mentionClosed = true;
     renderBonfireComposer(); draft.focus();
   }
 
@@ -1437,6 +1493,7 @@
     ui.bonfireSend.disabled = !connected || !state.draft.trim() || busy.has('bonfire-send');
     text(ui.bonfireSendLabel, busy.has('bonfire-send') ? '处理中…' : state.sendRequest?.content === state.draft && state.sendRequest.uncertain ? '核对发送结果' : '发送到篝火');
     ui.bonfireSend.setAttribute('aria-busy', String(busy.has('bonfire-send')));
+    if (state.receipt) { M.renderReceipt(ui.bonfireReceipt, state.receipt); if (state.mentionNotice) ui.bonfireReceipt.append(node('p', '', state.mentionNotice)); } else ui.bonfireReceipt.hidden = true;
     const feedback = state.sendRequest?.uncertain ? '发送结果待确认，草稿已保留。' : state.sendError;
     text(ui.bonfireFeedback, feedback || '');
     ui.bonfireSend.title = feedback || ui.bonfireSendLabel.textContent;
@@ -1447,6 +1504,7 @@
     visible(ui.bonfireMentions, showing);
     ui.bonfireDraft.setAttribute('aria-expanded', String(showing));
     ui.bonfireDraft.removeAttribute('aria-activedescendant');
+    if (showing && state.ambiguity) ui.bonfireMentions.append(node('p', 'ta-muted', '名字有歧义，请选择具体 Town ID'));
     if (showing && !suggestions.length) ui.bonfireMentions.append(node('p', 'ta-muted', state.memberError ? '成员暂时无法读取，请刷新重试。' : state.status === 'loading' ? '正在读取成员…' : '没有匹配的 Being'));
     suggestions.forEach((member, index) => {
       const item = button('', () => insertBonfireMention(member), 'ta-mention-option');
@@ -1484,7 +1542,7 @@
       if (connected && !state.members.length) ui.bonfireMembers.append(node('p', 'ta-muted', state.memberError ? '成员列表暂不可用' : '尚无成员数据'));
     }
     const shown = connected ? state.messages.filter((entry) => !state.sender || bonfireSender(entry) === state.sender) : [];
-    const messagesKey = JSON.stringify([connected, shown, state.sender, state.status === 'loading' && !state.messages.length, Boolean(state.refresh.lastSuccessAt), backgroundNotConfigured(state), state.error, state.source, canReply(), state.hasOlder, state.loadingOlder, state.olderError, state.lastRefresh]);
+    const messagesKey = JSON.stringify([connected, townId(), shown, state.sender, state.status === 'loading' && !state.messages.length, Boolean(state.refresh.lastSuccessAt), backgroundNotConfigured(state), state.error, state.source, canReply(), state.hasOlder, state.loadingOlder, state.olderError, state.lastRefresh]);
     if (ui.bonfireMessages.dataset.rendered !== messagesKey) {
       const nearBottom = ui.bonfireMessages.scrollHeight - ui.bonfireMessages.scrollTop - ui.bonfireMessages.clientHeight < 80;
       const before = { scrollTop: ui.bonfireMessages.scrollTop, scrollHeight: ui.bonfireMessages.scrollHeight, firstId: ui.bonfireMessages.dataset.firstId };
@@ -1499,10 +1557,11 @@
         if (marker.node && entry.id === marker.before) ui.bonfireMessages.append(marker.node);
         const sender = bonfireSender(entry);
         const member = state.members.find((value) => memberId(value) === sender);
-        const author = string(entry.beingName, string(entry.speaker_name, string(entry.display_name, member ? memberName(member) : sender || 'Being')));
+        const displayName = string(entry.beingName, string(entry.speaker_name, string(entry.display_name, member ? memberName(member) : sender || 'Being')));
+        const author = entry.authorUnknown || !sender ? `未知（${displayName}）` : displayName;
         const time = entry.at || entry.created_at || entry.createdAt; const date = time ? new Date(time) : null;
         const timestamp = date && !Number.isNaN(date.getTime()) ? date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-        const item = node('article', `ta-message${sender === beingId() ? ' is-mine' : ''}`);
+        const item = node('article', `ta-message${isMine(sender) ? ' is-mine' : ''}`);
         append(item,
           append(node('div', 'ta-message-meta'), node('strong', '', author), viaBadge(entry), node('span', '', `${timestamp}${entry.revisedAt || entry.revised_at ? ' · 已编辑' : ''}${state.source === 'being_relay' ? ' · Being 转交 · 原文未独立核验' : ''}`),
             canSendBonfire() && canReply() ? replyButton({...entry, beingName: author}, startBonfireReply) : null),
@@ -1516,24 +1575,27 @@
     renderBonfireComposer();
   }
 
-  async function loadBonfireMembers() {
+  async function loadBonfireMembers(force = false) {
     if (!connected()) return;
     const requestEpoch = epoch;
     const state = model.bonfire;
+    if (!force && state.members.length && Date.now() < state.membersExpiresAt) return;
+    const memberRevision = town.memberDirectory?.revision;
     try {
       if (!state.members.length) {
         const cached = await cachedData('getBeingMembers');
-        if (!sameEpoch(requestEpoch)) return;
+        if (!sameEpoch(requestEpoch) || memberRevision !== town.memberDirectory?.revision) return;
         if (cached) {
           state.members = array(cached?.members || cached?.beings || cached).filter((member) => memberId(record(member)));
           if (visibleModule('bonfire')) renderBonfire();
         }
       }
-      const result = await call('getBeingMembers');
-      if (!sameEpoch(requestEpoch)) return;
-      state.members = array(result?.members || result?.beings || result).filter((member) => memberId(record(member))); state.memberError = '';
+      const result = await call('getBeingMembers', {force});
+      if (!sameEpoch(requestEpoch) || memberRevision !== town.memberDirectory?.revision) return;
+      state.members = [...M.memberMap(result?.members || result?.beings || result).values()]; state.memberError = '';
+      state.membersExpiresAt = result?.expiresAt || Date.now() + 60000;
     } catch {
-      if (!sameEpoch(requestEpoch)) return;
+      if (!sameEpoch(requestEpoch) || memberRevision !== town.memberDirectory?.revision) return;
       state.memberError = '成员列表暂时无法读取，可点击刷新重试。';
     }
     if (visibleModule('bonfire')) renderBonfire();
@@ -1541,7 +1603,7 @@
 
   async function loadBonfire(manual = false) {
     if (!connected()) { if (visibleModule('bonfire')) renderBonfire(); return; }
-    await Promise.all([readTownMessages('bonfire', '', manual), loadBonfireMembers()]);
+    await Promise.all([readTownMessages('bonfire', '', manual), loadBonfireMembers(manual)]);
   }
 
   function replyTarget(entry, author) {
@@ -1564,14 +1626,23 @@
   }
 
   async function sendBonfire() {
-    const state = model.bonfire; const content = state.draft;
+    const state = model.bonfire; let content = state.draft;
     if (!content.trim() || publicState.connection?.status !== 'connected' || busy.has('bonfire-send')) return;
     const requestEpoch = epoch;
-    const handles = new Set(Array.from(content.matchAll(/(?:^|\s)@([A-Za-z0-9][A-Za-z0-9_-]{0,99})(?=$|[^A-Za-z0-9_-])/g), (match) => match[1]));
+    if (Date.now() >= state.membersExpiresAt && !state.memberError) {
+      await loadBonfireMembers();
+      if (!sameEpoch(requestEpoch) || state.draft !== content || busy.has('bonfire-send')) return;
+    }
+    const resolved = M.resolve(content, state.memberError ? [] : state.members);
+    if (resolved.ambiguous.length) {
+      state.ambiguity = {...resolved.ambiguous[0], draft: content}; state.mentionClosed = false; state.mentionIndex = 0;
+      ui.bonfireDraft.focus(); ui.bonfireDraft.setSelectionRange(state.ambiguity.end, state.ambiguity.end); renderBonfireComposer(); return;
+    }
+    content = resolved.text; state.draft = content; ui.bonfireDraft.value = content;
+    state.mentionNotice = resolved.unresolved.length ? `未识别提及：${resolved.unresolved.map(name => '@' + name).join('、')}；按原文发送，可能不会触发通知。` : '';
     if (state.sendRequest?.content !== content) state.sendRequest = {content, requestId: crypto.randomUUID(), uncertain: false};
-    const sendRequest = state.sendRequest;
-    const mentions = state.members.map(memberId).filter((id) => handles.has(id));
-    busy.add('bonfire-send'); state.sendError = ''; renderBonfire();
+    const sendRequest = state.sendRequest, mentions = resolved.members;
+    busy.add('bonfire-send'); state.sendError = ''; state.receipt = null; renderBonfire();
     try {
       let result;
       try {
@@ -1587,7 +1658,7 @@
       if (result.ok !== true || result.status === 'uncertain') { sendRequest.uncertain = true; state.sendError = '发送结果待确认，草稿已保留。再次提交此草稿只核对原请求，不会重发。'; return; }
       if (state.sendRequest === sendRequest) { state.sendRequest = null; state.replyTo = null; }
       if (state.draft === content) { state.draft = ''; ui.bonfireDraft.value = ''; }
-      state.sender = ''; state.mentionClosed = true;
+      state.sender = ''; state.mentionClosed = true; state.receipt = result; state.ambiguity = null;
       try { await options.onBonfireSent?.(result); }
       catch {
         // A confirmed publication must not become a send failure when progress cannot be updated.
@@ -1606,13 +1677,13 @@
     if (ui.pairNotice) setNotice(ui.pairNotice, '');
     epoch += 1; roomRequest += 1; roomSelection += 1;
     townReads.clear();
-    channelRequest += 1; busy.delete('channel-status'); busy.delete('channel-connect');
+    channelRequest += 1; busy.delete('channel-status'); busy.delete('channel-connect'); busy.delete('channel-inspect'); channelStates.clear();
     model.fireside.rooms = []; model.fireside.selected = ''; model.fireside.messages = []; model.fireside.members = [];
     if (!preserveDraft) model.fireside.drafts.clear();
     if (!preserveDraft) model.bonfire.sendRequest = null;
-    model.fireside.deliveries = []; model.fireside.error = ''; model.fireside.messageError = ''; model.fireside.roomError = ''; model.fireside.status = 'idle'; model.fireside.refresh = {}; model.fireside.latestSeq = null;
-    model.channel.status = 'unknown'; model.channel.detail = ''; model.channel.qr = ''; model.channel.wizard = false;
-    Object.assign(model.bonfire, { messages: [], members: [], status: 'idle', error: '', memberError: '', sendError: '', sender: '', latestSeq: null, refresh: {}, mentionClosed: true });
+    model.fireside.receipts.clear(); model.fireside.deliveries = []; model.fireside.error = ''; model.fireside.messageError = ''; model.fireside.roomError = ''; model.fireside.status = 'idle'; model.fireside.refresh = {}; model.fireside.latestSeq = null;
+    model.channel.status = 'unknown'; model.channel.detail = ''; model.channel.readError = ''; model.channel.qr = ''; model.channel.wizard = false;
+    Object.assign(model.bonfire, { messages: [], members: [], membersExpiresAt: 0, receipt: null, ambiguity: null, status: 'idle', error: '', memberError: '', sendError: '', sender: '', latestSeq: null, refresh: {}, mentionClosed: true });
     if (!preserveDraft) { model.bonfire.draft = ''; if (ui.bonfireDraft) ui.bonfireDraft.value = ''; }
     if (ui.roomDraft && !preserveDraft) ui.roomDraft.value = '';
     if (ui.roomDialog) { ui.roomDialog.replaceChildren(); ui.roomDialog.hidden = true; }
@@ -1624,8 +1695,8 @@
 
   function acceptTownState(next) {
     if (JSON.stringify(next) === JSON.stringify(town)) return;
-    const previousId = beingId();
-    const nextId = string(next.identity?.beingId);
+    const previousId = loomBeingId();
+    const nextId = string(next.identity?.loomBeingId, string(next.identity?.beingId));
     const nextAccess = next.access?.fireside;
     const previousRevision = town.identity?.connectionRevision;
     const nextRevision = next.identity?.connectionRevision;
@@ -1635,7 +1706,9 @@
     const changedIdentity = comparableIdentity ? previousIdentity !== nextIdentity : Boolean(previousId && nextId && nextId !== previousId);
     if (changedIdentity) clearPrivate();
     else if ((Number.isSafeInteger(previousRevision) && previousRevision !== nextRevision) || (can('fireside') && nextAccess !== 'ready' && nextAccess?.status !== 'ready')) clearPrivate({ preserveDraft: true });
+    const memberRevisionChanged = town.memberDirectory?.revision !== next.memberDirectory?.revision;
     town = next;
+    if (memberRevisionChanged) { model.bonfire.members = []; model.bonfire.membersExpiresAt = 0; model.bonfire.ambiguity = null; if (visibleModule('bonfire')) void loadBonfireMembers(); }
     townRevision += 1;
   }
 
@@ -1648,7 +1721,8 @@
       const result = record(await call('getTownAppState'));
       if (!sameEpoch(requestEpoch) || revision !== townRevision) return;
       acceptTownState(result);
-      if (channelSelectionRequest === channelRequest && result.channel?.channel === model.channel.selected) applyChannelResult(result.channel);
+      if (channelSelectionRequest === channelRequest && result.channel?.channel === model.channel.selected
+        && !(model.channel.status === 'connected' && result.channel.status !== 'connected')) applyChannelResult(result.channel);
     } catch (error) { if (sameEpoch(requestEpoch) && activeRoute(route)) setNotice(ui.notice, errorText(error), true); }
   }
 
@@ -1742,7 +1816,7 @@
       if (page === 'grove') await loadGrove();
       if (page === 'fireside') { await loadRooms(); if (activeRoute(route) && model.fireside.selected) await selectRoom(model.fireside.selected, { manual: true }); }
       if (page === 'bonfire') await loadBonfire(true);
-      if (page === 'channel') await checkChannel();
+      if (page === 'channel') await inspectChannel();
       if (page === 'inbox') await loadInbox();
     } catch (error) { if (sameEpoch(requestEpoch) && activeRoute(route)) setNotice(ui.notice, errorText(error), true); }
     finally { busy.delete('refresh'); ui.refresh.disabled = false; renderCurrent(); }
@@ -1760,9 +1834,9 @@
     const composer = node('div', 'ta-composer ta-inbox-composer');
     ui.inboxRecipient = node('input', 'ta-input ta-inbox-recipient'); ui.inboxRecipient.id = 'inbox-recipient';
     ui.inboxRecipient.type = 'text'; ui.inboxRecipient.maxLength = 100;
-    ui.inboxRecipient.placeholder = '收件人：being_id 或展示名';
+    ui.inboxRecipient.placeholder = '收件人：Town 编号（t_…）';
     ui.inboxRecipient.setAttribute('aria-label', '私信收件人');
-    ui.inboxRecipient.addEventListener('input', () => { model.inbox.recipient = ui.inboxRecipient.value; renderInboxComposer(); });
+    ui.inboxRecipient.addEventListener('input', () => { model.inbox.recipient = ui.inboxRecipient.value; model.inbox.candidates = []; renderInboxComposer(); });
 
     ui.inboxDraft = node('textarea', 'ta-input'); ui.inboxDraft.id = 'inbox-draft'; ui.inboxDraft.rows = 2; ui.inboxDraft.maxLength = 32000;
     ui.inboxDraft.placeholder = '写一条私信…'; ui.inboxDraft.setAttribute('aria-label', '私信草稿');
@@ -1820,6 +1894,12 @@
     text(ui.inboxSend, pending ? '处理中…' : '发送私信');
     ui.inboxSend.setAttribute('aria-busy', String(pending));
     setNotice(ui.inboxFeedback, state.sendError, Boolean(state.sendError));
+    if (state.candidates?.length) {
+      ui.inboxFeedback.hidden = false;
+      for (const candidate of state.candidates) ui.inboxFeedback.append(button(`${candidate.display_name} · ${candidate.town_id}`, () => {
+        state.recipient = candidate.town_id; state.candidates = []; state.sendError = ''; renderInboxComposer(); ui.inboxDraft.focus();
+      }, 'ta-secondary'));
+    }
   }
 
   async function loadInbox() {
@@ -1844,7 +1924,7 @@
     const recipient = state.recipient.trim(), content = state.draft;
     if (!recipient || !content.trim() || busy.has('inbox-send') || !connected() || !record(town.client).paired) return;
     const requestEpoch = epoch;
-    busy.add('inbox-send'); state.sendError = ''; renderInboxComposer();
+    busy.add('inbox-send'); state.sendError = ''; state.candidates = []; renderInboxComposer();
     try {
       const result = record(await call('sendDirectMessage', { recipient, content, ...(state.replyTo ? { replyTo: state.replyTo.id } : {}) }));
       if (!sameEpoch(requestEpoch)) return;
@@ -1853,6 +1933,7 @@
       await loadInbox();
     } catch (error) {
       if (!sameEpoch(requestEpoch)) return;
+      state.candidates = M.candidates(error?.candidates);
       // Only an explicit pre-send rejection is safe to describe as "not sent".
       state.sendError = ['INVALID_REQUEST', 'AUTH_REQUIRED', 'NOT_SENT'].includes(error?.code)
         ? `${errorText(error)} 草稿已保留。`
@@ -1876,14 +1957,15 @@
     if (libraryIds.has(id)) { await window.beingTownLibrary?.open(id); return; }
     renderCurrent();
     const requestEpoch = epoch;
-    const cachedMessages = id === 'bonfire' && connected() && beingId() ? readTownMessages('bonfire') : null;
-    const cachedRooms = id === 'fireside' && connected() && beingId() ? loadRooms() : null;
-    const cachedMembers = id === 'bonfire' && connected() && beingId() ? loadBonfireMembers() : null;
+    const cachedMessages = id === 'bonfire' && connected() && loomBeingId() ? readTownMessages('bonfire') : null;
+    const cachedRooms = id === 'fireside' && connected() && loomBeingId() ? loadRooms() : null;
+    const cachedMembers = id === 'bonfire' && connected() && loomBeingId() ? loadBonfireMembers() : null;
     const groveContent = id === 'grove' ? Promise.all([loadGrove(), model.grove.selected ? selectKit(model.grove.selected) : null]) : null;
     await loadTownState();
     if (!activeRoute(route) || !sameEpoch(requestEpoch)) return;
     renderCurrent();
     if (id === 'grove') await groveContent;
+    if (id === 'channel') await inspectChannel();
     if (id === 'fireside') {
       await (cachedRooms || loadRooms());
       if (!activeRoute(route) || !sameEpoch(requestEpoch)) return;
@@ -1920,6 +2002,7 @@
     build();
     for (const id of ids) if (ui[`${id}Page`]) visible(ui[`${id}Page`], false);
     if (typeof ResizeObserver === 'function') new ResizeObserver(() => { if (current === 'fireside') renderMembers(); }).observe(root);
+    bridge.onTownMembersInvalidated?.(() => { model.bonfire.members = []; model.bonfire.membersExpiresAt = 0; model.bonfire.ambiguity = null; if (visibleModule('bonfire')) void loadBonfireMembers(); });
     if (typeof bridge.onTownMessages === 'function') messageSubscription = bridge.onTownMessages(acceptTownMessages);
     window.addEventListener('pagehide', () => { messageSubscription?.(); messageSubscription = null; window.beingTownLibrary?.hide(); }, { once: true });
     if (typeof MutationObserver === 'function') new MutationObserver(() => {

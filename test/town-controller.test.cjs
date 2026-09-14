@@ -136,7 +136,7 @@ test('Mac fresh deployment persists the selected release metadata before startin
   const result=await h.controller.deploy(confirmation());
   assert.equal(result.status,'running');
   assert.ok(h.calls.indexOf('save')<h.calls.indexOf('start'));
-  assert.equal(h.controller.state().portalInstall.totalBytes,12930864);
+  assert.equal(h.controller.state().portalInstall.totalBytes,12205520);
 });
 
 test('unconfigured, disconnected, and exiting contexts cannot begin deployment', async t => {

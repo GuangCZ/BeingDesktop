@@ -1,26 +1,30 @@
-/* macOS: one glass navigation layer above quiet, opaque content.
+/* macOS: a continuous frosted frame around quiet reading surfaces.
    Keep these overrides scoped so other desktop platforms retain their chrome. */
 :root[data-platform="darwin"] {
   --titlebar-height: 60px;
   --sidebar-width: 252px;
   --workspace-toolbar-height: 44px;
-  --glass-opacity: 68%;
-  --glass-blur: blur(28px) saturate(1.35);
-  --glass-edge: rgb(255 255 255 / 14%);
-  --glass-highlight: rgb(255 255 255 / 9%);
-  --glass-shadow: 0 8px 24px rgb(0 0 0 / 12%);
-  --glass-selection: color-mix(in srgb, var(--sidebar-text) 11%, transparent);
-  --glass-stroke: color-mix(in srgb, var(--text) 12%, transparent);
-  --glass-surface: color-mix(in srgb, var(--surface) 86%, transparent);
+  --glass-opacity: 44%;
+  --glass-blur: blur(30px) saturate(1.15);
+  --glass-edge: rgb(255 255 255 / 10%);
+  --glass-highlight: rgb(255 255 255 / 4%);
+  --glass-shadow: 0 2px 12px rgb(0 0 0 / 8%);
+  --glass-selection: color-mix(in srgb, var(--sidebar-text) 10%, transparent);
+  --glass-stroke: color-mix(in srgb, var(--text) 8%, transparent);
+  --glass-surface: color-mix(in srgb, var(--surface) 84%, transparent);
+  --glass-panel: color-mix(in srgb, var(--background) 92%, transparent);
+  --glass-popup-shadow: 0 12px 38px rgb(0 0 0 / 22%), inset 0 1px 0 var(--glass-highlight);
   --glass-tint: color-mix(in srgb, var(--sidebar) var(--glass-opacity), transparent);
   --glass-chrome: color-mix(in srgb, var(--window-chrome) var(--glass-opacity), transparent);
 }
 
 :root[data-platform="darwin"][data-color-scheme="light"] {
-  --glass-edge: rgb(255 255 255 / 76%);
-  --glass-highlight: rgb(255 255 255 / 48%);
-  --glass-selection: rgb(255 255 255 / 62%);
-  --glass-shadow: 0 6px 22px rgb(28 35 48 / 7%);
+  --glass-opacity: 52%;
+  --glass-edge: rgb(255 255 255 / 60%);
+  --glass-highlight: rgb(255 255 255 / 20%);
+  --glass-selection: rgb(0 0 0 / 6%);
+  --glass-shadow: 0 2px 12px rgb(28 35 48 / 5%);
+  --glass-popup-shadow: 0 12px 38px rgb(28 35 48 / 12%), inset 0 1px 0 var(--glass-highlight);
 }
 
 :root[data-platform="darwin"] body { background: transparent; }
@@ -54,7 +58,7 @@
 :root[data-platform="darwin"] :is(.titlebar, .workspace-toolbar) .icon-button {
   width: 32px;
   height: 32px;
-  border-radius: 50%;
+  border-radius: 8px;
 }
 :root[data-platform="darwin"] :is(.titlebar, .workspace-toolbar) .icon-button:hover {
   background: color-mix(in srgb, var(--chrome-text) 10%, transparent);
@@ -62,20 +66,20 @@
 :root[data-platform="darwin"] .workspace-toolbar { color: var(--chrome-text); }
 :root[data-platform="darwin"] .workspace-toolbar :is(.icon-button, .connection-chip, .titlebar-caption, .page-context-icon) { color: var(--chrome-muted); }
 :root[data-platform="darwin"] .header-actions {
-  gap: 3px;
-  padding: 3px 5px;
-  border: 1px solid var(--glass-edge);
-  border-radius: 999px;
-  background: linear-gradient(165deg, var(--glass-highlight), transparent 65%), var(--glass-chrome);
-  box-shadow: inset 0 1px 0 var(--glass-highlight), 0 2px 8px rgb(0 0 0 / 4%);
-  backdrop-filter: var(--glass-blur);
+  gap: 4px;
+  padding: 3px 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
 }
 :root[data-platform="darwin"] .connection-chip { padding: 0 8px; font-size: 12px; }
 :root[data-platform="darwin"] .header-divider { margin: 0 3px; background: var(--glass-stroke); }
 :root[data-platform="darwin"] .top-page-context h1 { font-weight: 600; }
 
 :root[data-platform="darwin"] .sidebar {
-  padding: 0 12px 6px;
+  /* Equal side and bottom insets keep the profile hover aligned with the window corner. */
+  padding: 0 12px 12px;
   border: 0;
   background: transparent;
 }
@@ -95,9 +99,9 @@
 }
 :root[data-platform="darwin"] :is(.nav-button.active, .session-shortcut.active, .settings-nav-item[aria-current]),
 :root[data-platform="darwin"] .has-connection .primary-nav [data-page="chat"].active {
-  background: linear-gradient(145deg, var(--glass-highlight), transparent 75%), var(--glass-selection);
-  box-shadow: inset 0 0 0 1px var(--glass-edge), 0 2px 5px rgb(0 0 0 / 4%);
-  font-weight: 600;
+  background: var(--glass-selection);
+  box-shadow: none;
+  font-weight: 500;
 }
 :root[data-platform="darwin"] :is(.nav-button.active, .settings-nav-item[aria-current]) .icon { color: var(--sidebar-text); }
 :root[data-platform="darwin"] .sidebar-section-heading { padding-inline: 12px; font-size: 11px; }
@@ -111,16 +115,17 @@
 :root[data-platform="darwin"] .main-area {
   margin: 0 10px 10px 0;
   border: 1px solid var(--glass-stroke);
-  border-radius: 18px;
+  border-radius: 16px;
   background: var(--background);
   box-shadow: var(--glass-shadow);
 }
-:root[data-platform="darwin"] .page-column { border-radius: 17px; }
+:root[data-platform="darwin"] .page-column { border-radius: 15px; }
 :root[data-platform="darwin"] .inspector {
   margin: 8px;
   border: 1px solid var(--glass-stroke);
   border-radius: 14px;
-  background: var(--surface);
+  background: var(--glass-surface);
+  backdrop-filter: var(--glass-blur);
 }
 :root[data-platform="darwin"] .inspector-title { padding: 14px 16px; }
 :root[data-platform="darwin"] .inspector-footer { border-radius: 0 0 14px 14px; }
@@ -132,16 +137,16 @@
 :root[data-platform="darwin"] .button {
   min-height: 34px;
   padding: 7px 16px;
-  border-radius: 999px;
+  border-radius: 9px;
   font-weight: 500;
   transition: background-color 140ms ease, box-shadow 140ms ease;
 }
 :root[data-platform="darwin"] .button.primary { box-shadow: inset 0 1px 0 rgb(255 255 255 / 18%), 0 2px 5px rgb(0 0 0 / 10%); }
 :root[data-platform="darwin"] .button.secondary {
   border-color: var(--glass-stroke);
-  background: linear-gradient(160deg, var(--glass-highlight), transparent), var(--surface);
+  background: var(--glass-surface);
   color: var(--surface-text);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 5%);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
 }
 :root[data-platform="darwin"] :is(.secret-input, .settings-search) {
   border-radius: 12px;
@@ -169,7 +174,7 @@
   margin: 0 10px 10px 0;
   padding: 18px 4px 18px 0;
   border: 1px solid var(--glass-stroke);
-  border-radius: 18px;
+  border-radius: 16px;
   background: var(--background);
   box-shadow: var(--glass-shadow);
 }
@@ -189,14 +194,38 @@
 :root[data-platform="darwin"] #page-settings .theme-preset-swatches { border-radius: 9px; }
 :root[data-platform="darwin"] #page-settings .button { min-height: 30px; }
 
-/* Sheets and transient feedback get glass. Reading and editing surfaces don't. */
-:root[data-platform="darwin"] :is(.setup-wizard, .toast) {
-  border: 1px solid var(--glass-edge);
-  background: linear-gradient(145deg, var(--glass-highlight), transparent 55%), var(--glass-surface);
+/* Sidebar rows stay quiet on the shared native material. */
+:root[data-platform="darwin"] .sidebar .sidebar-profile:hover,
+:root[data-platform="darwin"] .sidebar .session-shortcut.active,
+:root[data-platform="darwin"] .sidebar .nav-button.active { background: var(--glass-selection); box-shadow: none; }
+:root[data-platform="darwin"] .sidebar-task-row:hover .task-more,
+:root[data-platform="darwin"] .sidebar-task-row:focus-within .task-more { background: var(--glass-surface); }
+:root[data-platform="darwin"] .sidebar-search-dialog { border-radius: 18px; }
+:root[data-platform="darwin"] .sidebar-menu { border-radius: 12px; padding: 6px; }
+:root[data-platform="darwin"] .sidebar-menu-item { border-radius: 7px; }
+:root[data-platform="darwin"] .chat-detail-card {
+  background: var(--glass-panel);
+  border-color: var(--glass-edge);
+  border-radius: 20px;
   backdrop-filter: var(--glass-blur);
-  box-shadow: inset 0 1px 0 var(--glass-highlight), 0 24px 70px rgb(0 0 0 / 24%);
+  box-shadow: var(--glass-popup-shadow);
 }
-:root[data-platform="darwin"] .setup-wizard { border-radius: 26px; }
+:root[data-platform="darwin"] .chat-detail-header { padding-bottom: 4px; }
+:root[data-platform="darwin"] .chat-composer,
+:root[data-platform="darwin"] .chat-detail-composer { border-color: var(--glass-stroke); }
+:root[data-platform="darwin"] :is(.chat-composer, .chat-detail-composer):focus-within {
+  border-color: color-mix(in srgb, var(--text) 26%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text) 4%, transparent);
+}
+
+/* Sheets and transient feedback get glass. Reading and editing surfaces don't. */
+:root[data-platform="darwin"] :is(.setup-wizard, .toast, .sidebar-menu, .sidebar-search-dialog, .chat-selection-toolbar, .chat-reference-popover, .chat-composer-menu) {
+  border: 1px solid var(--glass-edge);
+  background: var(--glass-surface);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-popup-shadow);
+}
+:root[data-platform="darwin"] .setup-wizard { border-radius: 20px; }
 :root[data-platform="darwin"] .setup-wizard::backdrop { background: rgb(0 0 0 / 24%); backdrop-filter: blur(4px); }
 :root[data-platform="darwin"] .setup-wizard .icon-button { border-radius: 50%; }
 :root[data-platform="darwin"] .toast { border-radius: 16px; }
@@ -205,9 +234,9 @@
   border-color: var(--glass-stroke);
 }
 :root[data-platform="darwin"] :is(.browser-tab, .terminal-tab) { border-radius: 10px; }
-:root[data-platform="darwin"] .desktop-tools { border-radius: 0 17px 17px 0; }
+:root[data-platform="darwin"] .desktop-tools { border-radius: 0 15px 15px 0; }
 
-:root[data-platform="darwin"][data-window-focused="false"] { --glass-opacity: 88%; }
+:root[data-platform="darwin"][data-window-focused="false"] { --glass-opacity: 70%; }
 :root[data-platform="darwin"][data-window-focused="false"] :is(.titlebar-navigation, .top-page-context, .header-actions) { opacity: .72; }
 
 /* Respect accessibility preferences both before and after the native IPC state
@@ -217,6 +246,7 @@
   --glass-opacity: 100%;
   --glass-blur: none;
   --glass-surface: var(--surface);
+  --glass-panel: var(--background);
   --glass-selection: var(--sidebar-hover);
   --glass-highlight: transparent;
 }
@@ -227,7 +257,7 @@
 :root[data-platform="darwin"][data-reduced-transparency="true"] .setup-wizard::backdrop,
 :root[data-platform="darwin"][data-high-contrast="true"] .setup-wizard::backdrop { backdrop-filter: none; }
 @media (prefers-reduced-transparency: reduce) {
-  :root[data-platform="darwin"] { --glass-opacity: 100%; --glass-blur: none; --glass-surface: var(--surface); --glass-highlight: transparent; --glass-selection: var(--sidebar-hover); }
+  :root[data-platform="darwin"] { --glass-opacity: 100%; --glass-blur: none; --glass-surface: var(--surface); --glass-panel: var(--background); --glass-highlight: transparent; --glass-selection: var(--sidebar-hover); }
   :root[data-platform="darwin"] body { background: var(--background); }
   :root[data-platform="darwin"] .setup-wizard::backdrop { backdrop-filter: none; }
 }

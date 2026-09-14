@@ -10,7 +10,7 @@ test('native glass is macOS-only and accessibility disables native transparency'
   const mac = windowAppearance({platform: 'darwin', background: '#181818'});
   assert.equal(mac.titleBarStyle, 'hidden');
   assert.equal(mac.frame, true);
-  assert.equal(mac.vibrancy, 'sidebar');
+  assert.equal(mac.vibrancy, 'under-window');
   assert.equal(mac.backgroundColor, '#00000000');
   for (const preference of ['reducedTransparency', 'highContrast']) {
     const result = windowAppearance({platform: 'darwin', background: '#abcdef', [preference]: true});
@@ -29,9 +29,9 @@ test('saving a palette retains vibrancy and runtime accessibility changes remove
   theme.prefersReducedTransparency = false;
   applyWindowAppearance(win, theme, '#222222', 'darwin');
   assert.deepEqual(calls, [
-    ['background', '#00000000'], ['vibrancy', 'sidebar'],
+    ['background', '#00000000'], ['vibrancy', 'under-window'],
     ['background', '#ffffff'], ['vibrancy', null],
-    ['background', '#00000000'], ['vibrancy', 'sidebar'],
+    ['background', '#00000000'], ['vibrancy', 'under-window'],
   ]);
   assert.deepEqual(systemAppearance({}), {reducedTransparency: false, highContrast: false});
 });

@@ -27,7 +27,7 @@ test('Loom forwards supported desktop shortcuts and leaves editing combinations 
     assert.equal(commandForInput({...keyDown, key}), null);
     assert.equal(commandForInput({...keyDown, type: 'keyUp', alt: true, key}), null);
   }
-  for (const [key, expected] of [['B', 'toggle-sidebar'], ['1', 'chat'], ['2', 'workspace'], [',', 'settings']]) {
+  for (const [key, expected] of [['B', 'toggle-sidebar'], ['1', 'task-1'], ['2', 'task-2'], ['N','new-task'], ['K','search-tasks'], ['O','select-workspace'], [',', 'settings']]) {
     assert.equal(commandForInput({...keyDown, control: true, key}), expected);
     for (const modifier of ['shift', 'alt', 'meta']) assert.equal(commandForInput({...keyDown, control: true, [modifier]: true, key}), null);
   }
@@ -46,8 +46,8 @@ test('menu actions dispatch desktop commands while close preserves the native wi
     }
   }
   assert.equal(closed, 1);
-  assert.deepEqual(commands, ['chat', 'workspace', 'select-workspace', 'settings', 'navigate-back', 'navigate-forward',
-    'toggle-sidebar', 'toggle-inspector', 'refresh', 'open-browser', 'open-console', 'about']);
+  assert.deepEqual(commands, ['new-task', 'search-tasks', 'select-workspace', 'workspace', 'settings', 'navigate-back', 'navigate-forward',
+    'toggle-sidebar', 'toggle-inspector', 'refresh', 'open-browser', 'toggle-console', 'about']);
   const editing = createDesktopMenuTemplate('edit', callbacks).filter(item => item.type !== 'separator');
   assert.deepEqual(editing.map(item => item.role), ['undo', 'redo', 'cut', 'copy', 'paste', 'selectAll']);
   assert.ok(editing.every(item => !item.click));

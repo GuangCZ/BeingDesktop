@@ -135,3 +135,5 @@ body[data-page="settings"] #content-grid { grid-template-columns: minmax(0, 1fr)
   #page-settings .theme-preset-swatches { height: 64px; }
   #page-settings .theme-footer, #page-settings .reading-option { flex-wrap: wrap; gap: 12px; }
 }
+
+#page-settings #portal-maintenance-status { margin: 0; padding: 0 16px 12px; }

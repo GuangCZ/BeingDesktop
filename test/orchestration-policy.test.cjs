@@ -52,3 +52,12 @@ test('invalid identity cannot configure mode; a disconnected Being cannot dispat
   const g=fixture();g.setIdentity('');await assert.rejects(g.gate.configure(true),/连接 Being/);
   g.mode.enabled=true;await assert.rejects(g.gate.assertEnforced(),/身份/);
 });
+test('automatic configuration follows bridge initialization and loss without a chat or manual save',async()=>{
+  const f=fixture();f.mode.enabled=true;f.bridge.status='connecting';f.bridge.tools=[];
+  await f.gate.syncBridge();assert.equal(f.gate.state.status,'pending');
+  f.bridge.status='connected';await f.gate.syncBridge();assert.equal(f.gate.state.status,'pending');assert.match(f.gate.state.detail,/初始化/);
+  f.bridge.tools=['desktop_worker_start'];await f.gate.syncBridge();assert.equal(f.gate.state.status,'enforced');
+  f.bridge.status='disconnected';await f.gate.syncBridge();assert.equal(f.gate.state.status,'blocked');
+  await assert.rejects(f.gate.assertEnforced(),{code:'ORCHESTRATION_NOT_ENFORCED'});
+  f.mode.enabled=false;await f.gate.syncBridge();assert.equal(f.gate.state.status,'disabled');
+});

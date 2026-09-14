@@ -29,6 +29,10 @@
   const TOOL_LABELS = {thinking: '在思考', remember: '在回忆', learn: '在反思', search_web: '在搜索', browse_web: '在浏览', read_file: '在阅读', write_file: '在编写', run_command: '在执行', list_files: '在查看', portal_exec: '在执行', act: '在行动'};
   const ui = {};
   const local = {mode: 'native', connected: false, beingName: 'being', chat: null, active: '', view: null, version: -1, live: null, activity: null, waiting: false, sending: false, stopping: false, pinned: true, frame: null, pending: [], reading: 0};
+  local.references = [];
+  const drafts = new Map();
+  let selectionUI, composerUI;
+  let mentionMembers = [];
 
   // The one argument worth showing for a tool call (Loom's extractKeyArg over parseToolInput).
   function keyArg(raw) {
@@ -92,6 +96,11 @@
     }
     if (code) emitCode();
     flushAll();
+    const walker = document.createTreeWalker(fragment, 4);
+    while (walker.nextNode()) {
+      const textNode = walker.currentNode;
+      if (!textNode.parentElement?.closest('code, pre, .chat-link')) textNode.nodeValue = window.beingTownMentions?.displayText(textNode.nodeValue, mentionMembers) ?? textNode.nodeValue;
+    }
     return fragment;
   }
   function inline(target, text) {
@@ -132,7 +141,7 @@
     ui.input.placeholder = '随意输入…';
     ui.input.rows = 1;
     ui.input.setAttribute('aria-label', '给 Being 发消息，Enter 发送，Shift+Enter 换行');
-    ui.input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); void send(); } });
+    ui.input.addEventListener('keydown', event => { if (composerUI?.keydown(event)) return; if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); void send(event); } });
     // The textarea grows with its content in CSS; older engines get the same by hand.
     if (!CSS.supports?.('field-sizing', 'content')) ui.input.addEventListener('input', () => { ui.input.style.height = 'auto'; ui.input.style.height = `${Math.min(ui.input.scrollHeight, 210)}px`; });
     ui.send = node('button', 'chat-send');
@@ -166,11 +175,32 @@
     ui.tray.hidden = true;
     ui.tray.setAttribute('aria-label', '待发送的图片');
     ui.composer.append(ui.attach, ui.picker, ui.input, ui.stop, ui.send);
-    ui.composer.addEventListener('submit', event => { event.preventDefault(); void send(); });
+    ui.references = node('div', 'chat-composer-references'); ui.references.hidden = true;
+    ui.composer.prepend(ui.references);
+    ui.send.addEventListener('click', event => { event.preventDefault(); void send(event); });
+    ui.composer.addEventListener('submit', event => { event.preventDefault(); void send({isTrusted: false}); });
     ui.phase = node('div', 'chat-phase');
     ui.area.append(ui.tray, ui.composer, ui.phase);
     host.append(ui.notice, ui.stream, ui.area);
+    composerUI = window.beingChatComposer?.install({input: ui.input, composer: ui.composer, area: ui.area, getBridge: bridge, getSession: () => local.active, onMembersChanged: members => { mentionMembers = members; repaint(); }});
+    selectionUI = window.beingChatSelection?.install({root: host, stream: ui.stream, input: ui.input,
+      getSession: () => local.active, isConnected: () => local.connected && !!local.active,
+      addReference: reference => {
+        const references = window.beingChatReferences.validate([...local.references, reference]);
+        local.references = references; renderReferences();
+      }, renderMarkdown, interleave, onRelease: () => repaint()});
     bridge()?.onChatEvent?.(onEvent);
+  }
+
+  function renderReferences() {
+    if (!ui.references) return;
+    ui.references.replaceChildren();
+    ui.references.hidden = !local.references.length;
+    ui.composer.classList.toggle('has-references', !!local.references.length);
+    if (local.references.length) ui.references.append(window.beingChatSelection.referenceChip(local.references, {
+      remove: () => { local.references = []; renderReferences(); ui.input.focus(); },
+      removeOne: index => { local.references.splice(index, 1); renderReferences(); ui.input.focus(); },
+    }));
   }
 
   // Add images to the next message: type and size checked here so the user hears about it before
@@ -254,11 +284,19 @@
     const active = local.chat?.open ? local.chat.active : '';
     const visible = local.mode === 'native' && appState?.connection?.configured === true;
     ui.root.hidden = !visible;
-    if (!visible) return;
+    if (!visible) { selectionUI?.sync(); composerUI?.sync(appState); return; }
     const typography = appState?.settings?.typography || {};
     ui.root.style.setProperty('--chat-font-size', `${[14, 15, 16].includes(typography.chatFontSize) ? typography.chatFontSize : 14}px`);
     ui.root.style.setProperty('--code-font-size', `${[12, 13, 14].includes(typography.codeFontSize) ? typography.codeFontSize : 12}px`);
-    if (active !== local.active) { local.active = active; local.view = null; local.live = null; local.activity = null; local.version = -1; local.pinned = true; local.pending = []; renderTray(); }
+    if (active !== local.active) {
+      if (local.active) drafts.set(local.active, {text: ui.input.value, images: local.pending, references: local.references});
+      local.active = active; local.view = null; local.live = null; local.activity = null; local.version = -1; local.pinned = true;
+      const draft = drafts.get(active);
+      ui.input.value = draft?.text || ''; ui.input.style.height = 'auto';
+      local.pending = draft?.images || []; local.references = draft?.references || [];
+      renderTray(); renderReferences();
+    }
+    selectionUI?.sync();
     const session = local.chat?.sessions.find(item => item.id === active);
     const recovery = local.chat?.recovery || {};
     const phase = recovery.phase || 'idle';
@@ -268,6 +306,7 @@
     ui.input.disabled = !local.connected || !active;
     ui.send.disabled = ui.input.disabled || local.sending;
     ui.attach.disabled = ui.input.disabled;
+    composerUI?.sync(appState);
     ui.stop.hidden = !(session && (session.busy || session.inFlight)) && !['streaming', 'replaying'].includes(phase);
     ui.stop.disabled = local.stopping;
     // Our reader is up for this conversation: show the Being at work from the moment the message
@@ -320,10 +359,40 @@
       for (const image of images) strip.append(preview(image));
       article.append(strip);
     }
+    const decoded = role === 'user' ? window.beingChatReferences?.decode(text) : null;
+    if (decoded?.references.length) article.append(window.beingChatSelection.referenceChip(decoded.references, {onClose: repaint}));
+    if (decoded) text = decoded.text;
     const body = node('div', 'chat-body');
     // Loom streams escaped text and renders markdown once the moment is whole; so do we.
     if (live) body.textContent = text; else body.append(renderMarkdown(text));
     article.append(body);
+    return article;
+  }
+
+  function workerResult(item) {
+    const article = node('article', 'chat-message is-being');
+    article.append(node('div', 'chat-meta', [local.beingName, clock(item.at)].filter(Boolean).join(' · ')));
+    const card = node('section', 'chat-worker-result');
+    card.dataset.workerId = item.workerId;
+    const labels = {passed: '已完成', failed: '未完成', needs_verification: '待补充验证', ready: '结果已就绪'};
+    card.append(node('div', 'chat-worker-status', labels[item.status] || '待补充验证'), node('h3', '', item.title), node('div', 'chat-worker-summary', item.summary));
+    if (item.preview) {
+      const open = node('button', 'chat-worker-open', '打开预览');
+      open.type = 'button';
+      open.addEventListener('click', async () => {
+        open.disabled = true;
+        try { await bridge().chatOpenWorkerResult({sessionId: item.sessionId, workerId: item.workerId}); }
+        catch (error) { ui.phase.textContent = error.message || '结果预览未能打开'; }
+        finally { open.disabled = false; }
+      });
+      card.append(open);
+    }
+    if (item.evidence) {
+      const details = node('details', 'chat-worker-evidence');
+      details.append(node('summary', '', '查看验证依据'), node('div', '', item.evidence));
+      card.append(details);
+    }
+    article.append(card);
     return article;
   }
 
@@ -344,7 +413,7 @@
   }
 
   function render() {
-    if (!ui.stream || ui.root.hidden) return;
+    if (!ui.stream || ui.root.hidden || selectionUI?.isSelecting()) return;
     const view = local.view;
     const fragment = document.createDocumentFragment();
     if (view?.rows.length && local.chat?.sessions.find(item => item.id === local.active)?.truncated) {
@@ -355,6 +424,7 @@
     }
     const rows = (view?.rows || []).map(row => ({role: row.role === 'user' ? 'user' : 'being', text: row.content, at: row.at, seq: row.seq, images: row.images}));
     const items = interleave(rows, [
+      ...(view?.workerResults || []).map(item => ({...item, role: 'being', workerResult: true})),
       ...(view?.sent || []).map(item => ({role: 'user', text: item.text, at: item.at, after: item.after, pending: true, images: item.images})),
       ...(view?.replied || []).map(item => ({role: 'being', text: item.text, at: item.at, after: item.after, pending: true, partial: item.partial === true, think: item.think})),
     ]);
@@ -364,7 +434,7 @@
       const at = epoch(item.at);
       const gap = lastAt && at ? Math.abs(at - lastAt) : 0;
       if (gap > GAP_MS) fragment.append(node('div', 'time-gap', `— ${clock(lastAt)} —`));
-      const element = bubble(item.role, item.text, item);
+      const element = item.workerResult ? workerResult(item) : bubble(item.role, item.text, item);
       if (item.role === lastRole && gap <= GROUP_MS && !item.pending && !item.live) element.classList.add('is-consecutive');
       fragment.append(element);
       lastRole = item.role; if (at) lastAt = at;
@@ -418,27 +488,32 @@
     void refresh();
   }
 
-  async function send() {
+  async function send(event) {
     const text = ui.input.value;
-    if (local.sending || !local.active || !bridge()?.chatSend) return;
+    if (local.sending || ui.input.disabled || !local.active || !bridge()?.chatSend) return;
     if (local.reading) { window.beingShell?.toast?.('图片还在读取，稍等一下再发送。'); return; }
     // Images alone land no row and get the previous message answered: the Being needs the words.
-    if (!text.trim()) { if (local.pending.length) window.beingShell?.toast?.('给图片配一句话再发送。', true); return; }
+    if (!text.trim()) { if (local.references.length) window.beingShell?.toast?.('输入想讨论的问题，再连同引用一起发送。'); else if (local.pending.length) window.beingShell?.toast?.('给图片配一句话再发送。', true); return; }
+    let plan;
+    try { plan = composerUI?.prepare(text, event) || {text}; }
+    catch (error) { window.beingShell?.toast?.(error.message, true); return; }
     local.sending = true; ui.send.disabled = true;
-    const sessionId = local.active, images = local.pending;
-    ui.input.value = ''; ui.input.style.height = 'auto';
-    local.pending = []; renderTray();
+    const sessionId = local.active, images = local.pending, references = local.references;
+    ui.input.value = ''; ui.input.style.height = 'auto'; composerUI?.refresh();
+    local.pending = []; local.references = []; renderTray(); renderReferences();
     // The Being is at work from this moment; the projection catches up a broadcast later.
     local.waiting = true; render();
     try {
-      const result = await bridge().chatSend({sessionId, text, ...(images.length ? {images: images.map(({name, media_type, data, thumb}) => ({name, media_type, data, thumb}))} : {})});
+      const result = await bridge().chatSend({sessionId, text: plan.text, ...(references.length ? {references} : {}), ...(images.length ? {images: images.map(({name, media_type, data, thumb}) => ({name, media_type, data, thumb}))} : {})});
       if (result?.spliced) window.beingShell?.toast?.('消息已送达，Being 正在处理其他会话，回复稍后到达。');
+      await composerUI?.publish(plan, result);
     } catch (error) {
-      ui.input.value = text;
-      if (local.active === sessionId) { local.pending = images; renderTray(); }
-      local.waiting = false; render();
+      const draft = local.active === sessionId ? {text: ui.input.value, images: local.pending, references: local.references} : drafts.get(sessionId);
+      const restored = {text: text + (draft?.text ? '\n' + draft.text : ''), images: [...images, ...(draft?.images || [])], references: [...references, ...(draft?.references || [])]};
+      drafts.set(sessionId, restored);
+      if (local.active === sessionId) { ui.input.value = restored.text; local.pending = restored.images; local.references = restored.references; local.waiting = false; renderTray(); renderReferences(); render(); }
       window.beingShell?.toast?.(error?.message || '发送失败', true);
-    } finally { local.sending = false; ui.send.disabled = ui.input.disabled; ui.input.focus(); }
+    } finally { local.sending = false; ui.send.disabled = ui.input.disabled; if (local.active === sessionId) { ui.input.focus(); composerUI?.refresh(); } }
   }
 
   async function stop() {

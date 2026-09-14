@@ -5,6 +5,7 @@ const path = require('node:path');
 const os = require('node:os');
 const {pathToFileURL} = require('node:url');
 const {PortalService, safeListWorkspace, sanitizeText} = require('./services.cjs');
+const {sidebarState, updateSidebar} = require('./sidebar-state.cjs');
 const {runPortalSelfTest} = require('./portal-self-test.cjs');
 const {PortalWatchdog} = require('./portal-watchdog.cjs');
 const {discoverPortalDeployment} = require('./portal-discovery.cjs');
@@ -25,17 +26,25 @@ const {normalizeAppMenuRequest,commandForInput,captureMenuEditingTarget,getDeskt
 const {getTownCatalog,townPageUrl,prepareTownFeature,prepareTownAssistance,prepareFiresideDraft,prepareLoomDraft} = require('./town.cjs');
 const {PortalInstaller} = require('./portal-installer.cjs');
 const {PortalUpdates, readPortalVersion} = require('./portal-updates.cjs');
-const {inspectPortalPermissions,savePortalPermissions} = require('./portal-permissions.cjs');
+const {PortalMaintenance} = require('./portal-maintenance.cjs');
+const {discoverLaunchAgent} = require('./portal-launchagent.cjs');
+const {discoverWindowsManager} = require('./portal-windows-manager.cjs');
+const {adoptionRecord,matchesAdoption} = require('./portal-adoption.cjs');
+const {inspectPortalPermissions,applyPortalPermissions} = require('./portal-permissions.cjs');
 const {normalizePortalPermissions} = require('./portal-config.cjs');
 const {portalRequestAdapter} = require('./desktop-network.cjs');
 const {TownController,requireTownIdentity} = require('./town-controller.cjs');
 const {getGroveCatalog} = require('./grove.cjs');
+const {candidates: townCandidates} = require('../renderer/town-mentions.js');
+const {listInstalledComposerKits} = require('./composer-kits.cjs');
 const {GroveInstaller} = require('./grove-installer.cjs');
 const {GroveActions} = require('./grove-actions.cjs');
 const {inspectGrovePortal,enableGrovePortal,verifyGrovePortalLogs,grovePortalConfigText,recoverGrovePortalMetadata} = require('./grove-portal.cjs');
 const {DesktopTools} = require('./desktop-tools.cjs');
 const {Orchestration} = require('./orchestration.cjs');
 const {WorkerPresentation}=require('./worker-presentation.cjs');
+const {nativeMessageContext}=require('./orchestration-message.cjs');
+const {nativeWorkerResults}=require('./native-worker-results.cjs');
 const {createCallbackSender,createContinuationSender}=require('./worker-callbacks.cjs');
 const {OrchestrationPolicy} = require('./orchestration-policy.cjs');
 const {loadDesktopId} = require('./desktop-identity.cjs');
@@ -57,9 +66,10 @@ const {TownCachedReads} = require('./town-cached-reads.cjs');
 const {FeatureTaskHistory} = require('./feature-task-history.cjs');
 const {FeatureTaskRunner} = require('./feature-task-runner.cjs');
 const {discussFeatureTask} = require('./feature-task-discussion.cjs');
-const {applyLoomComposer,updateLoomComposerData,takeLoomComposerIntents,reportLoomComposerResult,detachLoomComposer} = require('./loom-composer.cjs');
+const {normalizeComposerData,applyLoomComposer,updateLoomComposerData,takeLoomComposerIntents,reportLoomComposerResult,detachLoomComposer} = require('./loom-composer.cjs');
 
 const {desktopPlatform, desktopEnvironment} = require('./platform.cjs');
+const {ChatDetails} = require('./chat-details.cjs');
 const {windowAppearance, systemAppearance, applyWindowAppearance} = require('./desktop-appearance.cjs');
 
 function startDesktop({onReady = null, portalUpdateChecksEnabled = true} = {}) {
@@ -80,6 +90,7 @@ function boot() {
   const chatViews = new Map(), liveChatViews = new Set(), chatViewStatus = new WeakMap();
   let connection = null, generation = 0, identityRevision = 0, portalIdentityRevision = null, viewRevision = 0, viewWanted = false, viewport = {x:224,y:88,width:800,height:600};
   let portalBeingName = '';
+  let portalAdoptionCandidate = null;
   let portalPermissionsBusy = false;
   let portalWatchdog;
   let desktopConnectPromise=null;
@@ -88,7 +99,7 @@ function boot() {
   let composerTimer=null;
   let messageQueueTimer=null;
   let menuEditingContents=null;
-  let desktopId, chatSessions=null;
+  let desktopId, chatSessions=null, chatDetails=null;
   let composerRevision=0;
   let modelConfigRevision=0;
   let townSuspended=false;
@@ -104,19 +115,23 @@ function boot() {
   let townRoomCache={owned:[],joined:[],cached:false};
   const townMemberCache=new Map();
   const townMethods=new Set(['chatView','chatSend','chatStop','chatReload','chatForgetSession','getBeingMembers','listScrolls','getScroll','listBeings','getBonfireMessages','getFiresides','getFiresideMessages','getFiresideMembers','getTownMessageSnapshot','refreshTownMessages','loadOlderTownMessages','requestTownRead','sendBonfireMessage','beginChannelConnection','updateFeishuCredentials','checkChannelStatus']);
+  for (const name of ['chatDetailOpen','chatDetailView','chatDetailSend','chatDetailStop','chatDetailClose']) townMethods.add(name);
   const townErrorCodes=new Set(['AUTH_REQUIRED','INVALID_REQUEST','IDENTITY_MISMATCH','NOT_CONNECTED','SESSION_CHANGED','BUSY','REQUEST_ACCEPTED','RATE_LIMITED','RESULT_UNKNOWN','NETWORK_ERROR','SERVICE_ERROR','INVALID_RESPONSE','BACKGROUND_UNAVAILABLE','NOT_RUNNING','PAUSED','INCOMPLETE_RESULT','RESULT_SOURCE_UNAVAILABLE','WAITING_SBS','SBS_NOT_CONFIGURED','TASK_LIMIT_REACHED']);
   townErrorCodes.add('READINESS_UNKNOWN');townErrorCodes.add('RESULT_UNCONFIRMED');
   townErrorCodes.add('NOT_SENT');townMethods.add('sendFiresideMessage');
-  townMethods.add('getDirectMessages');townMethods.add('sendDirectMessage');sdkReadMethods.add('getDirectMessages');
+  townMethods.add('inspectChannelStatus');townMethods.add('getDirectMessages');townMethods.add('sendDirectMessage');sdkReadMethods.add('getDirectMessages');
   townErrorCodes.add('TOWN_TOOL_NOT_CALLED');
   townErrorCodes.add('RESULT_SOURCE_NOT_CONFIGURED');
-  townMethods.add('getTownCachedData');
+  townMethods.add('getTownCachedData');townMethods.add('notifyTownProfileChanged');
   for(const method of ['pairTownClient','forgetTownClient','prepareTownPairing'])townMethods.add(method);
   const serialized = new Set(['connect','disconnect','reconnect','selectWorkspace','selectPortalWorkspace','selectPortalExecutable','selectPortalConfig','startPortal','stopPortal','setCloseToTray','setTypography','setColors','saveModelConfig','setOnboardingStep','prepareTownFeature','prepareTownAssistance','prepareFiresideDraft','discussFeatureTask','deployPortal']);
   serialized.add('changeChatSession');
+  serialized.add('sidebarAction');
+  serialized.add('selectSavedProject');
   serialized.add('renameChatSession');
   serialized.add('saveOrchestration');
   serialized.add('savePortalPermissions');
+  for (const name of ['adoptPortal','applyPortalUpdate','recoverPortalUpdate']) serialized.add(name);
   for(const name of ['installGroveKit','installEligibleGroveKits','prepareGroveAssistance'])serialized.add(name);
   let disk = {workspace:'', portalExecutable:'', portalConfig:'', closeToTray:true, credential:'', chatMode:'native'};
   const state = {
@@ -135,12 +150,16 @@ function boot() {
   const normalizeChatMode=value=>value==='loom'?'loom':'native';
   const orchestration=new Orchestration({getExecutionContext:()=>({desktopId,place:desktopTools?.link.capabilities().place}),directory:path.join(app.getPath('userData'),'workers'),getWorkspace:()=>state.workspace.path,
     getSessionIds:()=>[...new Set([...chatViews.keys(),...(state.chatSessions?.items||[]).map(item=>item.id)])],
-    onChange:snapshot=>{if(win&&!win.isDestroyed())win.webContents.send('being:workers',snapshot);}});
+    onChange:snapshot=>{if(win&&!win.isDestroyed())win.webContents.send('being:workers',snapshot);chatSessions?.workersChanged();}});
   orchestration.callbacks.setTransport({send:createCallbackSender({getConnection:()=>connection,fetchImpl:(url,options)=>net.fetch(url,options)}),
     resume:createContinuationSender({getConnection:()=>connection,getTarget:()=>desktopTools?.link.capabilities().place,fetchImpl:(url,options)=>net.fetch(url,options)}),
-    ready:()=>desktopTools?.link.capabilities().tools.includes('desktop_worker_status')===true,
+    ready:()=>!exitStarted && Boolean(connection) && state.connection.status==='connected',
+    toolsReady:()=>desktopTools?.link.capabilities().tools.includes('desktop_worker_status')===true,
     report:async(worker,{owner,signal,presentationOnly=false})=>{
       if(signal.aborted||!connection||sessionPartition(connection)!==owner)throw new Error('Being identity changed');
+      if(chatSessions?.open && chatSessions.identityKey===owner && chatSessions.snapshot().sessions.some(item=>item.id===worker.sessionId)) {
+        chatSessions.workersChanged();return;
+      }
       const contents=[...liveChatViews].map(item=>item.webContents).find(item=>!item.isDestroyed());
       if(!contents)throw new Error('Conversation renderer unavailable');
       const item={sessionId:worker.sessionId,requestId:worker.review.requestId,workerId:worker.id,title:worker.title,preview:Boolean(worker.presentation),
@@ -162,7 +181,7 @@ function boot() {
     if(desktopTools.link.snapshot().status==='connected')return;
     if(desktopConnectPromise)return desktopConnectPromise;
     desktopConnectPromise=desktopTools.perform('link.connect').catch(()=>{
-      activity('warning','桌面工具连接未建立','请在桌面工具中重新连接；当前消息会如实报告工具不可用。');
+      activity('warning','桌面工具连接未建立',orchestration.mode.enabled?'网络断线会自动重连；恢复前本机执行暂停，对话可继续。':'请在桌面工具中重新连接；当前消息会如实报告工具不可用。');
     }).finally(()=>{desktopConnectPromise=null;});
     return desktopConnectPromise;
   }
@@ -191,13 +210,15 @@ function boot() {
     if (['Portal 已退出','Portal 进程错误'].includes(event.title)) portalWatchdog?.wake();
     activity(event.level, event.title, event.detail);
   }});
-  const installer = new PortalInstaller({userDataDir:app.getPath('userData'),requestImpl:portalRequestAdapter(net.request.bind(net))});
+  const portalInstallerOptions = {userDataDir:app.getPath('userData'),runtimeRoot:path.join(os.homedir(),'.heart-portal'),requestImpl:portalRequestAdapter(net.request.bind(net))};
+  const installer = new PortalInstaller(portalInstallerOptions);
   const groveKitsDir=path.join(app.getPath('userData'),'grove-kits');
   const groveInstaller=new GroveInstaller({kitsDir:groveKitsDir,fetchImpl:(url,options)=>net.fetch(url,{...options,credentials:'omit',referrerPolicy:'no-referrer'})});
   const groveActions=new GroveActions({installer:groveInstaller,fetchImpl:(url,options)=>net.fetch(url,{...options,credentials:'omit',referrerPolicy:'no-referrer'}),inspectPortal:inspectCurrentGrovePortal,activate:activateGroveKits});
   const portalUpdates = new PortalUpdates({
     getPortal:()=>portal.state,
-    getExecutable:()=>typeof disk.portalExecutable==='string'?disk.portalExecutable:'',
+    getExecutable:()=>portal.state.management === 'external'
+      ? portal.state.observedExecutable || portal.state.deployment?.executable || '' : typeof disk.portalExecutable==='string'?disk.portalExecutable:'',
     fetchImpl:(url,options)=>net.fetch(url,options),
     getNotifiedVersion:()=>disk.portalUpdateNotifiedVersion,
     onChange:()=>broadcast(),
@@ -223,12 +244,83 @@ function boot() {
         portalUpdateNotification.on('click',()=>{showDesktopWindow();sendShellCommand('portal-updates');});
         portalUpdateNotification.show();
       }
+      await portalMaintenance.refresh();
+      if (portalMaintenance.state().supported && !portalMaintenance.state().busy && update.asset) {
+        void portalMaintenance.stage(update.asset).catch(()=>{});
+      }
     },
   });
+  const portalMaintenance = new PortalMaintenance({userDataDir:app.getPath('userData'),
+    createInstaller:release=>new PortalInstaller({...portalInstallerOptions,release}),
+    resolveAdapter:resolvePortalAdapter, verify:verifyPortalUpdate,
+    getContext:()=>JSON.stringify([connection?sessionPartition(connection):'',exitStarted,townSuspended]),
+    onChange:()=>broadcast()});
+
+  async function resolvePortalAdapter(recovery, {allowUnadopted=false} = {}) {
+    await portal.inspect();
+    const current = portal.state;
+    if (current.status === 'error') {portalAdoptionCandidate=null;return null;}
+    if (current.management === 'external') {
+      const executable = current.observedExecutable || current.deployment?.executable;
+      const configPath = current.deployment?.configPath;
+      if (recovery?.previous?.kind === 'launchagent') {
+        if (recovery.previous.executable !== executable || recovery.previous.configPath !== configPath) return null;
+        // Re-discovery binds the original launcher again, including any marker
+        // added before a crash. Neither argv nor credentials enter the journal.
+      }
+      const adapter=process.platform==='darwin' ? await discoverLaunchAgent({executable,configPath})
+        : process.platform==='win32' ? await discoverWindowsManager({executable,configPath,inspectProcesses:()=>portal.inspectProcesses()}) : null;
+      if(!adapter){portalAdoptionCandidate=null;return null;}
+      portalAdoptionCandidate=adoptionRecord(adapter);
+      return allowUnadopted || recovery || matchesAdoption(disk.adoptedPortal,portalAdoptionCandidate) ? adapter : null;
+    }
+    portalAdoptionCandidate=null;
+    if (!disk.managedPortal || disk.managedPortal.executable !== disk.portalExecutable || disk.managedPortal.configPath !== disk.portalConfig) return null;
+    return {
+      kind:'desktop',
+      state:async()=>{
+        await portal.inspect();
+        if (portal.state.management === 'external' || portal.state.status === 'error') throw new Error('Portal 管理归属已变化。');
+        return {kind:'desktop',executable:disk.portalExecutable,configPath:disk.portalConfig,
+          running:portal.state.owned,pid:portal.state.pid,version:await readPortalVersion(disk.portalExecutable),release:disk.managedPortal.release || null};
+      },
+      stop:()=>portal.stop(),
+      start:()=>startCurrentPortal(true,true),
+      mark:async()=>({time:new Date().toISOString()}),
+      health:async marker=>({connected:portal.state.health==='connected',tools:portal.logs.some(event=>event.time>=marker.time && event.title==='Portal 工具已注册' && /\bportal_status\b/.test(event.detail))}),
+      activate:async(executable,version,release=null)=>{
+        const previous={portalExecutable:disk.portalExecutable,managedPortal:disk.managedPortal};
+        portal.configure({executable});
+        disk.portalExecutable=executable;
+        disk.managedPortal={...disk.managedPortal,executable,version,
+          release};
+        try { await persist(); }
+        catch { Object.assign(disk,previous);portal.configure({executable:previous.portalExecutable});throw new Error('Portal 更新路径保存失败。'); }
+      },
+    };
+  }
+  async function verifyPortalUpdate(adapter, release, marker) {
+    const {setTimeout:wait}=require('node:timers/promises');
+    let stablePid=null, samples=0;
+    for (let n=0;n<30;n++) {
+      const current=await adapter.state();
+      const health=await adapter.health(marker);
+      const passed=current.running && health.connected && health.tools;
+      if (passed && current.pid===stablePid) samples++; else samples=0;
+      stablePid=current.pid;
+      if (samples>=2 && await readPortalVersion(current.executable)===release.version) {
+        return {passed:true,version:release.version,process:true,connection:'handshake_confirmed',tools:'locally_registered',toolCall:'not_tested'};
+      }
+      await wait(2000);
+    }
+    return {passed:false};
+  }
   const town = new TownController({installer,portal,
+    inspectInstallation:managed=>managed.release ? new PortalInstaller({...portalInstallerOptions,release:managed.release}).inspect() : installer.inspect(),
     defaultWorkspace:path.join(app.getPath('userData'),'portal-workspace'),
     getContext:()=>({beingName:state.connection.beingName,configured:state.connection.configured,connected:state.connection.status==='connected',connectionId:generation,identityRevision,portalIdentityRevision,workspace:state.workspace.path,portalWorkspace:disk.portalWorkspace || '',portalExecutable:disk.portalExecutable,portalConfig:disk.portalConfig,managedPortal:disk.managedPortal,exiting:exitStarted}),
     saveDeployment:async deployment=>{
+      deployment={...deployment,release:installer.release};
       const previous={portalWorkspace:disk.portalWorkspace,portalExecutable:disk.portalExecutable,portalConfig:disk.portalConfig,managedPortal:disk.managedPortal};
       portal.configure({executable:deployment.executable,configPath:deployment.configPath});
       Object.assign(disk,{portalWorkspace:deployment.workspace,portalExecutable:deployment.executable,portalConfig:deployment.configPath,managedPortal:deployment});
@@ -243,7 +335,7 @@ function boot() {
 
   portalWatchdog = new PortalWatchdog({portal,
     startPortal:()=>startCurrentPortal(false,true),
-    getContext:()=>({identity:identityRevision,ready:Boolean(connection),allowAutomaticStart:Boolean(disk.managedPortal && disk.managedPortal.executable===disk.portalExecutable && disk.managedPortal.configPath===disk.portalConfig),blocked:exitStarted || townSuspended || portalPermissionsBusy || Boolean(town._deploying)}),
+    getContext:()=>({identity:identityRevision,ready:Boolean(connection),allowAutomaticStart:Boolean(disk.managedPortal && disk.managedPortal.executable===disk.portalExecutable && disk.managedPortal.configPath===disk.portalConfig),blocked:exitStarted || townSuspended || portalPermissionsBusy || ['stopping','replacing','verifying','rolling_back','recovery_required'].includes(portalMaintenance.state().phase) || Boolean(town._deploying)}),
     checkHealth:signal=>testPortalConnection(signal),
     serialize:fn=>{
       const operation=mutationTail.then(fn);
@@ -270,6 +362,7 @@ function boot() {
     fetchImpl:(url,options)=>net.fetch(url,options),
     onChange:()=>broadcast(),
     onEvent:event=>{
+      if(event?.type==='profile_changed'){invalidateTownMembers();return;}
       townBackground.notifyEvent(event);
       // The inbox is not part of background collection; the renderer re-reads it on this hint.
       if(event?.type==='dm'&&win&&!win.isDestroyed())win.webContents.send('being:town-messages',{kind:'dm'});
@@ -285,8 +378,9 @@ function boot() {
     return townWriter.send({kind,content,firesideId,connectionRevision,...(requestId?{requestId}:{})});
   }
   const townSession=new TownSession({
-    getContext:()=>({configured:state.connection.configured,connected:state.connection.status==='connected',exiting:exitStarted,connectionId:generation,identityRevision,beingName:state.connection.beingName}),
+    getContext:()=>({configured:state.connection.configured,connected:state.connection.status==='connected',exiting:exitStarted,connectionId:generation,identityRevision,beingName:state.connection.beingName,townId:townClient.state().townId}),
     writeImpl:request=>townSpeak(request),
+    getIdentity:options=>townClient.identity(options),
     fetchImpl:(url,options)=>net.fetch(url,{...options,credentials:'omit',referrerPolicy:'no-referrer'}),
     readImpl:(route,options)=>townClient.read(route,options),
     onChange:()=>broadcast(),
@@ -297,7 +391,8 @@ function boot() {
     getChannelStatus:({signal,beingId})=>{
       const expectedConnection=connection;
       const inspectionSession=new TownSession({
-        getContext:()=>({configured:state.connection.configured&&connection===expectedConnection,connected:state.connection.status==='connected',exiting:exitStarted,connectionId:generation,identityRevision,beingName:beingId}),
+        getContext:()=>({configured:state.connection.configured&&connection===expectedConnection,connected:state.connection.status==='connected',exiting:exitStarted,connectionId:generation,identityRevision,beingName:beingId,townId:townClient.state().townId}),
+        getIdentity:options=>townClient.identity(options),
         fetchImpl:(url,options)=>net.fetch(url,{...options,credentials:'omit',referrerPolicy:'no-referrer'}),
       });
       return inspectionSession.getChannelStatus({signal});
@@ -305,14 +400,26 @@ function boot() {
     onChange:summary=>{state.onboardingInspection=summary;broadcast();},
   });
   const channelBeing=new ChannelBeing({
+    readStatus:options=>townSession.getChannelStatus(options),
+    getSession:channel=>{
+      if (!chatSessions?.open) throw Object.assign(new Error('请等待 Being 会话加载完成。'), {code:'NOT_CONNECTED'});
+      return chatSessions.ensureChannel(channel);
+    },
     getContext:()=>({connection,configured:state.connection.configured,connected:state.connection.status==='connected',exiting:exitStarted,connectionId:generation,identityRevision,beingName:state.connection.beingName}),
     fetchImpl:(url,options)=>net.fetch(url,{...options,credentials:'omit',referrerPolicy:'no-referrer'}),
     onChange:()=>broadcast(),
     onRequest:record=>registerFeatureRequest(record),
   });
+  const runChannel=async action=>{
+    const owner=chatSessions, revision=generation;
+    try { return await action(); }
+    finally {
+      if(owner?.open && owner===chatSessions && revision===generation)void owner.syncChannel().catch(()=>{});
+    }
+  };
   const bonfireCache=new BonfireCache({directory:path.join(app.getPath('userData'),'bonfire-cache'),safeStorage});
   townWriter=new BeingTownWriter({
-    getContext:()=>({connection,connected:state.connection.status==='connected',exiting:exitStarted,connectionId:generation,identityRevision,beingName:state.connection.beingName}),
+    getContext:()=>({connection,connected:state.connection.status==='connected',exiting:exitStarted,connectionId:generation,identityRevision,beingName:state.connection.beingName,townId:townClient.state().townId}),
     getRuntime:()=>({busy:channelBeing.state().status==='working'}),
     fetchImpl:(url,options)=>net.fetch(url,options),fallbackFetchImpl:(url,options)=>globalThis.fetch(url,options),
     journalPath:path.join(app.getPath('userData'),'town-send-journal.json'),
@@ -329,6 +436,12 @@ function boot() {
     onStatus:()=>broadcast(),
     onUpdate:value=>{if(win&&!win.isDestroyed())win.webContents.send('being:town-messages',value);},
   });
+  function invalidateTownMembers() {
+    townMemberCache.clear(); townCachedReads.invalidateMembers();
+    const metadata=townSession.invalidateMembers();
+    if(win&&!win.isDestroyed())win.webContents.send('being:town-members-invalidated',metadata);
+    return metadata;
+  }
   function syncTownLifecycle() {
     townClient.lifecycle({enabled:!exitStarted&&!townSuspended&&Boolean(connection)&&state.connection.status==='connected'&&net.isOnline()});
     townBackground.lifecycle({enabled:!exitStarted&&!townSuspended&&Boolean(connection)&&state.connection.status==='connected'&&net.isOnline(),reason:townSuspended?'suspended':'offline'});
@@ -352,7 +465,8 @@ function boot() {
     const previous=townMemberCache.get(value);
     const result=await townCachedReads.snapshot({method:'getFiresideMembers',value});
     current();
-    if(!previous&&!townMemberCache.has(value)&&result.cached)townMemberCache.set(value,{...result.data,cached:true,lastSuccessAt:result.lastSuccessAt});
+    if(previous && Date.now() - (typeof previous.lastSuccessAt==='number'?previous.lastSuccessAt:Date.parse(previous.lastSuccessAt)||0)>=60000)townMemberCache.delete(value);
+    if(!townMemberCache.has(value)&&result.cached)townMemberCache.set(value,{...result.data,cached:true,lastSuccessAt:result.lastSuccessAt});
     return structuredClone(townMemberCache.get(value)||{members:[],cached:false});
   }
   async function loadFeatureHistory() {
@@ -405,24 +519,42 @@ function boot() {
     result.beings=access.beings || {status:'unknown',detail:''};
     result.sync=townBackground.metadata();
     result.client=townClient.state();
+    result.identity.loomBeingId=state.connection.beingName || '';
+    result.identity.townId=result.client.townId || '';
+    result.identity.displayName=townSession.memberDisplayName(result.identity.townId) || result.client.displayName || result.identity.displayName;
+    result.memberDirectory=townSession.memberCacheState();
     return result;
   }
   function startNativeChat() {
     if(state.settings.chatMode!=='native'||!chatSessions||!connection||state.connection.status!=='connected')return;
     const epoch=generation;
+    if(orchestration.mode.enabled)void connectOrchestration();
+    chatDetails?.reset();
     chatSessions.start(sessionPartition(connection)).catch(error=>{if(epoch===generation)activity('warning','对话记录加载失败',error.message);});
   }
   // In native mode the sidebar's conversation list comes from the store, not the Loom page.
   function syncChatSessions() {
     if(state.settings.chatMode!=='native'||!state.chat)return;
-    state.chatSessions={activeId:state.chat.active,items:state.chat.sessions.map(item=>({id:item.id,title:item.title}))};
+    state.chatSessions={activeId:state.chat.active,items:state.chat.sessions.map(item=>({id:item.id,title:item.title==='新任务'?'新会话':item.title,updatedAt:item.updatedAt,createdAt:item.createdAt}))};
     const activity={};
     for(const item of state.chat.sessions)activity[item.id]=item.busy||item.inFlight?'talking':'inactive';
     state.chatSessionActivity=activity;
   }
   function publicState() {
     const portalState=portal.state;
-    return structuredClone({...state,desktopId,onboardingAutoSuppressed:disk.onboardingLoomConnected===true,orchestration:orchestration.snapshot(),portal:{...portalState,logs:portalState.owned?portal.logs:[],watchdog:portalWatchdog?.state(),connectionBeingName:portalState.owned?portalBeingName:'',connectionCurrent:portalState.owned?portalIdentityRevision===identityRevision:null},portalUpdate:portalUpdates.state(),townApp:townState()});
+    return structuredClone({...state,desktopId,sidebar:sidebarState(disk.sidebar,connection?sessionPartition(connection):'',state.workspace.path),onboardingAutoSuppressed:disk.onboardingLoomConnected===true,orchestration:orchestration.snapshot(),portal:{...portalState,canAdopt:Boolean(portalAdoptionCandidate) && !matchesAdoption(disk.adoptedPortal,portalAdoptionCandidate),adopted:matchesAdoption(disk.adoptedPortal,portalAdoptionCandidate),canManage:portalMaintenance.state().supported,managerKind:portalMaintenance.state().kind,logs:portalState.owned?portal.logs:[],watchdog:portalWatchdog?.state(),connectionBeingName:portalState.owned?portalBeingName:'',connectionCurrent:portalState.owned?portalIdentityRevision===identityRevision:null},portalUpdate:{...portalUpdates.state(),maintenance:portalMaintenance.state()},townApp:townState()});
+  }
+  async function saveSidebarAction(action, ids = state.chatSessions?.items.map(item=>item.id) || []) {
+    const previous=disk.sidebar;
+    disk.sidebar=updateSidebar(previous,connection?sessionPartition(connection):'',state.workspace.path,action,ids);
+    try {await persist();} catch(error) {disk.sidebar=previous;throw error;}
+  }
+  async function selectSavedProject(selected) {
+    if(!sidebarState(disk.sidebar,'',state.workspace.path).projects.includes(selected))throw new Error('项目不存在，请重新选择文件夹。');
+    const files=await safeListWorkspace(selected,'');
+    const previous=disk.workspace;disk.workspace=selected;
+    try {await persist();} catch(error) {disk.workspace=previous;throw error;}
+    state.workspace={path:selected,files};desktopTools?.changed();
   }
   function broadcast() {
     if (win && !win.isDestroyed()) win.webContents.send('being:state',publicState());
@@ -477,11 +609,17 @@ function boot() {
   async function restore() {
     desktopId=await loadDesktopId(app.getPath('userData'));
     // Desktop-native conversations: the five Being endpoints called directly, no Loom page injection.
-    chatSessions=new ChatSessions({desktopId,clientVersion:app.getVersion(),cache:new ChatCache({directory:path.join(app.getPath('userData'),'chat-cache'),safeStorage}),
+    chatSessions=new ChatSessions({desktopId,clientVersion:app.getVersion(),prepareMessage:nativeMessageContext({orchestration,environment:desktopEnvironment}),
+      getWorkerResults:id=>connection&&chatSessions?.identityKey===orchestration.owner?nativeWorkerResults(orchestration.workers,id):[],cache:new ChatCache({directory:path.join(app.getPath('userData'),'chat-cache'),safeStorage}),
       getContext:()=>({connected:!exitStarted&&Boolean(connection)&&state.connection.status==='connected',connection,revision:generation}),
       fetchImpl:(url,options)=>net.fetch(url,options),
       onEvent:event=>{if(win&&!win.isDestroyed())win.webContents.send('being:chat-event',event);},
       onState:snapshot=>{state.chat=snapshot;syncChatSessions();broadcast();}});
+    chatDetails=new ChatDetails({clientVersion:app.getVersion(),
+      getContext:()=>({connected:!exitStarted&&Boolean(connection)&&state.connection.status==='connected',connection,revision:generation}),
+      hasParent:id=>chatSessions.open&&chatSessions.snapshot().sessions.some(item=>item.id===id),
+      fetchImpl:(url,options)=>net.fetch(url,options),
+      onEvent:event=>{if(win&&!win.isDestroyed())win.webContents.send('being:chat-detail-event',event);}});
     await fs.mkdir(groveKitsDir,{recursive:true});
     try { disk = {...disk,...JSON.parse(await fs.readFile(settingsPath(),'utf8'))}; }
     catch (error) { if (error.code !== 'ENOENT') activity('warning','设置读取失败','已保留原文件，请重新检查连接设置。'); }
@@ -574,7 +712,7 @@ function boot() {
       }
       catch(error) {
         const message=error?.code==='TASK_LIMIT_REACHED'?'功能任务记录已满，请到任务页结束不再跟踪的等待任务后重试。':sanitizeText(error?.message || '操作未完成');
-        if(townMethods.has(name)) return {__townError:true,code:townErrorCodes.has(error?.code)?error.code:'TOWN_ERROR',message:townErrorCodes.has(error?.code)?message:'Town 操作未完成，请稍后重试。'};
+        if(townMethods.has(name)) return {__townError:true,code:townErrorCodes.has(error?.code)?error.code:'TOWN_ERROR',message:townErrorCodes.has(error?.code)?message:'Town 操作未完成，请稍后重试。',...(error?.code==='NOT_SENT'&&Array.isArray(error.candidates)?{candidates:townCandidates(error.candidates),detail:sanitizeText(error.detail || '').slice(0,500)}:{})};
         activity('error','操作未完成',message);throw new Error(message);
       }
     });
@@ -639,6 +777,7 @@ function boot() {
     messageQueueTimer.unref();
     void poll();
   }
+  const readComposerKits=()=>listInstalledComposerKits({configPath:portal.state.deployment?.configPath || disk.portalConfig || '',desktopKitsDir:groveKitsDir});
   async function mountComposer(contents,connectionEpoch) {
     const revision=++composerRevision;
     clearInterval(composerTimer);composerTimer=null;
@@ -671,14 +810,14 @@ function boot() {
     },400);
     composerTimer.unref();
     const data=await Promise.allSettled([
-      getGroveCatalog({limit:100,offset:0},{fetchImpl:(url,options)=>net.fetch(url,{...options,credentials:'omit',referrerPolicy:'no-referrer'})}),
+      readComposerKits(),
       townSession.getMembers(),
     ]);
     if (!current()) return;
     await updateLoomComposerData(contents,{
       kits:data[0].status==='fulfilled'?data[0].value.kits:[],
       members:data[1].status==='fulfilled'?data[1].value.members:[],
-      kitsError:data[0].status==='rejected'?'工具目录暂时无法加载。':'',
+      kitsError:data[0].status==='rejected'?'已安装 Kit 暂时无法读取。':'',
       membersError:data[1].status==='rejected'?'Being 成员暂时无法加载。':'',
     });
   }
@@ -816,7 +955,7 @@ function boot() {
       state.runtime=nextRuntime;
       if(previous!==state.runtime.status)activity(state.runtime.status==='connected'?'info':'warning',state.runtime.status==='connected'?'运行时已连接':'运行时暂不可达',state.runtime.error);
     })());
-    await Promise.allSettled(tasks);syncTownLifecycle();broadcast();return publicState();
+    await Promise.allSettled(tasks);await portalMaintenance.refresh();syncTownLifecycle();broadcast();return publicState();
   }
   function refresh() {
     if (!refreshPromise) refreshPromise=doRefresh().finally(()=>{refreshPromise=null;});
@@ -828,7 +967,16 @@ function boot() {
   }
   async function startCurrentPortal(permissionRestart = false, automatic = false) {
     if(exitStarted)throw new Error('桌面端正在退出。');
+    if(portalMaintenance.state().busy && !permissionRestart)throw new Error('Portal 正在更新，请等待操作完成。');
     if(!automatic)portalWatchdog?.resume();
+    await portal.inspect();
+    if(portal.state.management==='external') {
+      const adapter=await resolvePortalAdapter();
+      if(!adapter)throw new Error('尚未识别原 Portal 的启动方式，请在原部署位置管理。');
+      await adapter.start();
+      await portal.inspect({forceVersion:true});
+      return portal.state;
+    }
     if(portalPermissionsBusy && !permissionRestart)throw new Error('Portal 权限正在保存，请稍后重试。');
     if(!connection)throw new Error('请先连接 Being。');
     const managed=disk.managedPortal?.configPath===disk.portalConfig && disk.managedPortal?.executable===disk.portalExecutable;
@@ -938,15 +1086,17 @@ function boot() {
         await orchestrationPolicy.configure(next.enabled);
         const previous=disk.orchestration;disk.orchestration=next;
         try{await persist();}catch(error){disk.orchestration=previous;throw error;}
-      });
+      }).catch(async error=>{await orchestrationPolicy.syncBridge();throw error;});
       desktopTools.disconnectLink();
       await updateOrchestrationViews();
-      await connectOrchestration();broadcast();return orchestration.snapshot();
+      await connectOrchestration();await orchestrationPolicy.syncBridge();broadcast();return orchestration.snapshot();
     });
     handle('copyDesktopText',value=>{if(typeof value!=='string'||value.length>1024*1024)throw new Error('复制内容无效。');clipboard.writeText(value);return true;});
     handle('desktopAction',(action,value)=>{if(exitStarted)throw new Error('桌面端正在退出。');return desktopTools.perform(action,value);});
     handle('setBrowserView',value=>desktopTools.browser.setViewport(value));
     handle('getState',()=>publicState());handle('refresh',refresh);
+    handle('sidebarAction',async action=>{await saveSidebarAction(action);broadcast();return publicState();});
+    handle('selectSavedProject',async selected=>{await selectSavedProject(selected);broadcast();return publicState();});
     const nativeChat=()=>state.settings.chatMode==='native';
     handle('showSessionMenu',id=>{
       if(typeof id!=='string' || !state.chatSessions?.items.some(item=>item.id===id))throw new Error('会话不存在。');
@@ -966,11 +1116,24 @@ function boot() {
       state.chatSessions=await view.webContents.executeJavaScript('globalThis.__beingDesktopSessions.list()');
       broadcast();return true;
     });
-    handle('changeChatSession',async(id)=>{
+    handle('changeChatSession',async(id,project='')=>{
       if(id!==null && (typeof id!=='string' || !/^[0-9a-f-]{36}$/i.test(id)))throw new Error('会话标识无效。');
+      const scope=connection?sessionPartition(connection):'';
+      const sidebar=sidebarState(disk.sidebar,scope,state.workspace.path);
+      if(typeof project!=='string' || (id===null && project && !sidebar.projects.includes(project)))throw new Error('项目不存在，请重新选择文件夹。');
+      if(id!==null && !state.chatSessions?.items.some(item=>item.id===id))throw new Error('会话不存在。');
+      const targetProject=id===null?project:sidebar.tasks[id]?.project;
+      if(targetProject && targetProject!==state.workspace.path)await selectSavedProject(targetProject);
+      const remember=async sessionId=>{
+        if(id===null){
+          await saveSidebarAction({type:'move',id:sessionId,project,scope},[sessionId]);
+          await saveSidebarAction({type:'touch',id:sessionId,scope},[sessionId]);
+        }
+      };
       if(nativeChat()){
         if(!chatSessions?.open)throw new Error('请先连接 Being。');
-        if(id===null)chatSessions.create({title:`会话 ${chatSessions.snapshot().sessions.length+1}`});else chatSessions.select(id);
+        if(id===null)chatSessions.create({title:'新会话'});else chatSessions.select(id);
+        await remember(chatSessions.snapshot().active);broadcast();
         return {ok:true};
       }
       if(!view || state.connection.status!=='connected')throw new Error('请先连接 Loom。');
@@ -978,6 +1141,7 @@ function boot() {
       const result = await changeLoomSession(contents,id);
       if(!result.ok)return result;
       if(view?.webContents!==contents || contents.isDestroyed())return {ok:false,message:'会话页面已变化，请重试。'};
+      await remember(result.sessionId);
       viewRevision++;
       const next=chatViews.get(result.sessionId);
       if(next && !next.webContents.isDestroyed()) {
@@ -1000,7 +1164,17 @@ function boot() {
     });
     // Native conversations. Errors keep their codes across IPC through the Town error envelope.
     handle('chatView',id=>chatSessions.view(id));
-    handle('chatSend',({sessionId,text,images}={})=>chatSessions.send({sessionId,text,images}));
+    handle('chatOpenWorkerResult',({sessionId,workerId}={})=>{
+      chatSessions.view(sessionId);
+      if(!connection||chatSessions.identityKey!==orchestration.owner)throw new Error('Being 连接已变化。');
+      return orchestration.openResult(workerId,sessionId);
+    });
+    handle('chatSend',({sessionId,text,images,references}={})=>chatSessions.send({sessionId,text,images,references}));
+    handle('chatDetailOpen',value=>chatDetails.open(value));
+    handle('chatDetailView',id=>chatDetails.view(id));
+    handle('chatDetailSend',value=>chatDetails.send(value));
+    handle('chatDetailStop',id=>chatDetails.stop(id));
+    handle('chatDetailClose',id=>chatDetails.close(id));
     handle('chatStop',({sessionId,force}={})=>chatSessions.stop({sessionId,force:force===true}));
     handle('chatReload',()=>chatSessions.reload());
     handle('chatForgetSession',id=>chatSessions.forget(id));
@@ -1010,7 +1184,7 @@ function boot() {
       const previous=disk.chatMode;disk.chatMode=next;
       try{await persist();}catch(error){disk.chatMode=previous;throw error;}
       state.settings.chatMode=next;
-      if(next==='native')startNativeChat();else{chatSessions?.end();if(view&&state.connection.status==='connected')state.chatSessions=await view.webContents.executeJavaScript('globalThis.__beingDesktopSessions.list()').catch(()=>state.chatSessions);}
+      if(next==='native')startNativeChat();else{chatDetails?.reset();chatSessions?.end();if(view&&state.connection.status==='connected')state.chatSessions=await view.webContents.executeJavaScript('globalThis.__beingDesktopSessions.list()').catch(()=>state.chatSessions);}
       mountView();broadcast();return publicState();
     });
     handle('getModelConfig',async()=>publishModelConfig(await modelConfig.get()));
@@ -1044,7 +1218,23 @@ function boot() {
     handle('getTownAppState',()=>townState());
     handle('refreshTownApp',async()=>{await town.refresh();return townState();});
     handle('getTownCachedData',value=>townCachedReads.snapshot(value));
-    handle('getBeingMembers',()=>townCachedReads.read('getBeingMembers',undefined,()=>townSession.getMembers()));
+    const memberOptions=value=>{
+      if(value!==undefined&&(!value||Object.getPrototypeOf(value)!==Object.prototype||Object.keys(value).some(key=>key!=='force')||value.force!==undefined&&typeof value.force!=='boolean'))throw Object.assign(new Error('成员刷新参数无效。'),{code:'INVALID_REQUEST'});
+      return {force:value?.force===true};
+    };
+    handle('getBeingMembers',async value=>{
+      const options=memberOptions(value);
+      const data=await townCachedReads.read('getBeingMembers',undefined,()=>townSession.getMembers(options));
+      broadcast();
+      return {...data,...townSession.memberCacheState()};
+    });
+    // Call after a local rename has succeeded. Re-read the authenticated profile before
+    // notifying every consumer; this hook performs no rename and sends no message.
+    handle('notifyTownProfileChanged',async()=>{
+      const metadata=invalidateTownMembers();
+      try { await townClient.identity({force:true}); } catch(error) { if(error.code!=='AUTH_REQUIRED')throw error; }
+      return metadata;
+    });
     handle('listScrolls',value=>townCachedReads.read('listScrolls',value,query=>townSession.listScrolls(query)));
     handle('getScroll',value=>townCachedReads.read('getScroll',value,query=>townSession.getScroll(query)));
     handle('listBeings',value=>townCachedReads.read('listBeings',value,query=>townSession.listBeings(query)));
@@ -1091,10 +1281,27 @@ function boot() {
       mutationTail=completion.catch(()=>{});
       return completion;
     });
-    handle('beginChannelConnection',value=>channelBeing.beginChannelConnection(value));
+    handle('beginChannelConnection',value=>runChannel(()=>channelBeing.beginChannelConnection(value)));
     handle('updateFeishuCredentials',value=>channelBeing.updateFeishuCredentials(value));
-    handle('checkChannelStatus',value=>channelBeing.getChannelStatus(value));
+    handle('checkChannelStatus',value=>runChannel(()=>channelBeing.getChannelStatus(value)));
+    handle('inspectChannelStatus',value=>channelBeing.inspectChannelStatus(value));
     const publicTownFetch=(url,options)=>net.fetch(url,{...options,credentials:'omit',referrerPolicy:'no-referrer'});
+    handle('getChatComposerData',async value=>{
+      const options=memberOptions(value);
+      const revision=generation,identity=identityRevision;
+      if(!connection || state.connection.status!=='connected')throw new Error('请先连接 Being。');
+      const data=await Promise.allSettled([
+        readComposerKits(),
+        townSession.getMembers(options),
+      ]);
+      if(revision!==generation || identity!==identityRevision || state.connection.status!=='connected')throw Object.assign(new Error('Being 连接已变化。'),{code:'SESSION_CHANGED'});
+      return {...normalizeComposerData({
+        kits:data[0].status==='fulfilled'?data[0].value.kits:[],
+        members:data[1].status==='fulfilled'?data[1].value.members:[],
+        kitsError:data[0].status==='rejected'?'已安装 Kit 暂时无法读取。':'',
+        membersError:data[1].status==='rejected'?'Being 成员暂时无法加载。':'',
+      }),connectionRevision:revision,...townSession.memberCacheState()};
+    });
     handle('getGroveCatalog',options=>townCachedReads.read('getGroveCatalog',options,query=>getGroveCatalog(query,{fetchImpl:publicTownFetch})));
     handle('getGroveDetail',id=>townCachedReads.read('getGroveDetail',id,key=>groveActions.detail(key)));
     handle('prepareGroveInstallation',value=>groveActions.prepare(value));
@@ -1118,43 +1325,74 @@ function boot() {
     });
     for(const name of ['createFireside','joinFireside']) handle(name,requireTownIdentity);
     handle('getPortalPermissions',async()=>{
-      const result=await inspectPortalPermissions(disk);
-      return {permissions:result.permissions,revision:result.revision,configPath:disk.portalConfig};
+      const adapter=await resolvePortalAdapter();
+      if(!adapter)throw new Error(portal.state.management==='external' ? '请先一键接管此 Portal，再管理工具权限。' : '请先配置 Portal，再管理工具权限。');
+      const result=await inspectPortalPermissions(disk,{adapter});
+      return {permissions:result.permissions,revision:result.revision,configPath:result.configPath};
     });
     handle('savePortalPermissions',async request=>{
-      if(portalPermissionsBusy || exitStarted || town._deploying)throw new Error('Portal 正忙，请稍后重试。');
+      if(portalPermissionsBusy || exitStarted || town._deploying || portalMaintenance.state().busy)throw new Error('Portal 正忙，请稍后重试。');
       normalizePortalPermissions(request?.permissions);
       portalPermissionsBusy=true;
       const identity=identityRevision;
-      const configPath=disk.portalConfig;
       try {
-        const current=await inspectPortalPermissions(disk);
-        if(request?.configPath!==configPath || request?.revision!==current.revision)throw new Error('Portal 配置已变化，请重新读取后保存。');
-        await portal.inspect();
-        if(portal.state.status==='external' || portal.state.status==='error')throw new Error('请先在原启动位置停止 Portal，再保存权限。');
-        const restart=portal.state.owned;
-        if(restart)await portal.stop();
-        if(exitStarted || identity!==identityRevision || configPath!==disk.portalConfig)throw new Error('连接或配置已变化，Portal 已停止，请重新读取权限。');
-        await savePortalPermissions({settings:disk,request,persist});
-        let detail='权限已保存，下次启动 Portal 时生效。';
-        if(restart) {
-          try {
-            if(exitStarted || identity!==identityRevision)throw new Error('Connection changed');
-            const started=await startCurrentPortal(true);
-            detail=started.status==='running'?'权限已保存，Portal 已重启，等待工具重新注册。':'权限已保存，Portal 尚未启动，请手动启动。';
-          } catch {detail='权限已保存，但 Portal 重启失败，请手动启动。';}
-        }
-        activity('info','Portal 权限已保存',detail);
-        broadcast();
-        return {detail,state:publicState()};
+        const adapter=await resolvePortalAdapter();
+        const result=await applyPortalPermissions({settings:disk,request,persist,adapter,
+          isCurrent:()=>!exitStarted&&identity===identityRevision,
+          verify:async(adapter,marker)=>{
+            let pid=null,samples=0;
+            for(let n=0;n<30;n++) {
+              const current=await adapter.state(),health=await adapter.health(marker);
+              if(current.running&&current.pid===pid&&health.tools)samples++;else samples=0;
+              pid=current.pid;
+              if(samples>=2)return {passed:true,connected:health.connected};
+              await new Promise(resolve=>setTimeout(resolve,1000));
+            }
+            return {passed:false};
+          }});
+        await portal.inspect({forceVersion:true});await portalMaintenance.refresh();
+        if(result.changed)activity('info','Portal 权限已保存',result.detail);
+        broadcast();return {...result,state:publicState()};
       } finally {portalPermissionsBusy=false;}
     });
-    handle('deployPortal',value=>{if(portalPermissionsBusy)throw new Error('Portal 权限正在保存，请稍后重试。');return town.deploy(value);});
+    handle('deployPortal',value=>{if(portalMaintenance.state().busy)throw new Error('Portal 正在更新，请等待操作完成。');if(portalPermissionsBusy)throw new Error('Portal 权限正在保存，请稍后重试。');return town.deploy(value);});
+    handle('adoptPortal',async()=>{
+      if(exitStarted || portalPermissionsBusy || town._deploying || portalMaintenance.state().busy)throw new Error('Portal 正忙，请稍后重试。');
+      const adapter=await resolvePortalAdapter(undefined,{allowUnadopted:true});
+      if(!adapter || adapter.kind==='desktop')throw new Error('尚未可靠识别原服务，请刷新状态后重试。');
+      await adapter.state();
+      const previous=disk.adoptedPortal;
+      disk.adoptedPortal=adoptionRecord(adapter);
+      try {await persist();} catch {disk.adoptedPortal=previous;throw new Error('接管记录未能保存，尚未接管，请重试。');}
+      await portalMaintenance.refresh();
+      activity('info','Portal 已接管','已沿用原服务接入启停与更新；原配置、身份和工作区保留，Portal 未重启。');
+      broadcast();return publicState();
+    });
     handle('checkPortalUpdates',async()=>{
       if(exitStarted)throw new Error('桌面端正在退出。');
       await portal.inspect({forceVersion:true});
       await portalUpdates.check({force:true});
+      await portalMaintenance.refresh();
       return publicState();
+    });
+    handle('downloadPortalUpdate',async()=>{
+      if(exitStarted || portalPermissionsBusy || town._deploying)throw new Error('Portal 正忙，请稍后重试。');
+      const release=portalUpdates.state().asset;
+      if(!release)throw new Error('请先检查 Portal 更新。');
+      await portalMaintenance.stage(release);return publicState();
+    });
+    handle('cancelPortalDownload',async()=>{portalMaintenance.cancelDownload();await portalMaintenance._operation?.catch(()=>{});return publicState();});
+    handle('applyPortalUpdate',async()=>{
+      if(exitStarted || portalPermissionsBusy || town._deploying)throw new Error('Portal 正忙，请稍后重试。');
+      // Explicit UI action: the user chooses a controlled stop, update and start.
+      await portalMaintenance.apply({restart:true});
+      await portal.inspect({forceVersion:true});
+      void portalUpdates.changed();
+      await portalMaintenance.refresh();return publicState();
+    });
+    handle('recoverPortalUpdate',async()=>{
+      await portalMaintenance.run(()=>portalMaintenance.recover());
+      await portal.inspect({forceVersion:true});return publicState();
     });
     handle('openPortalUpdate',()=>{
       const url=portalUpdates.state().releaseUrl;
@@ -1170,15 +1408,19 @@ function boot() {
       if(!state.onboarding.completed)disk.onboarding={step:'loom',completed:false};
       try{await persist();}catch(error){Object.assign(disk,previous);throw error;}
       state.onboarding={...disk.onboarding};
-      desktopTools?.disconnectLink();await orchestration.selectOwner('');onboardingInspection.reset();channelBeing.reset();resetTownReader();chatSessions?.end();generation++;identityRevision++;connection=null;discardView();await loadFeatureHistory();state.connection={configured:false,displayUrl:'',beingName:'',status:'disconnected',error:'',updatedAt:null};state.runtime=emptyRuntime();townSession.reset();syncTownLifecycle();activity('info','已断开桌面连接','Portal 与 Being 的后台运行状态未改变。');return publicState();
+      desktopTools?.disconnectLink();await orchestration.selectOwner('');onboardingInspection.reset();channelBeing.reset();resetTownReader();chatDetails?.reset();chatSessions?.end();generation++;identityRevision++;connection=null;discardView();await loadFeatureHistory();state.connection={configured:false,displayUrl:'',beingName:'',status:'disconnected',error:'',updatedAt:null};state.runtime=emptyRuntime();townSession.reset();syncTownLifecycle();activity('info','已断开桌面连接','Portal 与 Being 的后台运行状态未改变。');return publicState();
     });
-    handle('reconnect',()=>{if(!connection)throw new Error('请先配置 Loom 连接。');onboardingInspection.reset();channelBeing.reset();resetTownReader();chatSessions?.end();generation++;state.connection.status='connecting';state.connection.error='';syncTownLifecycle();createLoom();broadcast();refresh();return publicState();});
+    handle('reconnect',()=>{if(!connection)throw new Error('请先配置 Loom 连接。');onboardingInspection.reset();channelBeing.reset();resetTownReader();chatDetails?.reset();chatSessions?.end();generation++;state.connection.status='connecting';state.connection.error='';syncTownLifecycle();createLoom();broadcast();refresh();return publicState();});
     handle('selectWorkspace',async()=>{
       const result=await dialog.showOpenDialog(win,{title:'选择本地工作区',properties:['openDirectory']});
       if(result.canceled)return publicState();
       const selected=result.filePaths[0];
       const files=await safeListWorkspace(selected,'');
-      disk.workspace=selected;await persist();state.workspace={path:selected,files};
+      const previous={workspace:disk.workspace,sidebar:disk.sidebar};
+      disk.sidebar={...disk.sidebar,projects:[...new Set([...sidebarState(disk.sidebar,'',state.workspace.path).projects,selected])]};
+      disk.workspace=selected;
+      try{await persist();}catch(error){Object.assign(disk,previous);throw error;}
+      state.workspace={path:selected,files};
       desktopTools?.changed();activity('info','工作区已选择','用于文件浏览与控制台起始目录；Portal 的实际权限仍以其配置为准。');return publicState();
     });
     handle('selectPortalWorkspace',async()=>{
@@ -1199,7 +1441,16 @@ function boot() {
     handle('selectPortalConfig',async()=>{if(portalPermissionsBusy)throw new Error('Portal 权限正在保存，请稍后重试。');await portal.inspect();if(portal.state.management==='external')throw new Error('已有 Portal 优先，请在原部署位置管理。');const selected=await chooseFile('选择已有 portal.toml 配置',['toml']);if(selected){portal.configure({configPath:selected});disk.portalConfig=selected;await persist();activity('info','Portal 配置已选择','沿用此配置定义的工作区和权限，已有部署由原启动方式管理。');}return publicState();});
     handle('startPortal',async()=>{await startCurrentPortal();if(portalUpdateChecksEnabled)void portalUpdates.check({force:true});broadcast();return publicState();});
     handle('testPortalConnection',()=>testPortalConnection());
-    handle('stopPortal',async()=>{if(portalPermissionsBusy)throw new Error('Portal 权限正在保存，请稍后重试。');portalWatchdog.pause();await portal.stop();broadcast();return publicState();});
+    handle('stopPortal',async()=>{
+      if(portalPermissionsBusy || portalMaintenance.state().busy)throw new Error('Portal 正忙，请稍后重试。');
+      portalWatchdog.pause();await portal.inspect();
+      if(portal.state.management==='external') {
+        const adapter=await resolvePortalAdapter();
+        if(!adapter)throw new Error('尚未识别原 Portal 的启动方式，请在原部署位置管理。');
+        await adapter.stop();await portal.inspect({forceVersion:true});
+      } else await portal.stop();
+      await portalMaintenance.refresh();broadcast();return publicState();
+    });
     handle('setView',({visible,bounds}={})=>{viewWanted=visible===true;if(bounds && ['x','y','width','height'].every(key=>Number.isFinite(bounds[key])))viewport={...bounds};mountView();});
     handle('minimize',()=>win.minimize());handle('maximize',()=>{if(win.isMaximized())win.unmaximize();else win.maximize();});handle('close',()=>win.close());
     handle('setCloseToTray',async(value)=>{if(typeof value!=='boolean')throw new Error('无效设置');disk.closeToTray=value;state.settings.closeToTray=value;await persist();broadcast();return publicState();});
@@ -1238,6 +1489,9 @@ function boot() {
     });
   }
   function trayIcon() {
+    // Template artwork lets macOS tint the menu bar icon, including selection
+    // and light/dark backgrounds. Electron loads the matching @2x PNG as well.
+    if (process.platform === 'darwin') return path.join(__dirname, '../renderer/assets/being/being-trayTemplate.png');
     return path.join(__dirname, '../renderer/assets/being', process.platform === 'win32' ? 'being-icon.ico' : 'being-icon-32.png');
   }
   function showDesktopWindow() {
@@ -1254,12 +1508,14 @@ function boot() {
   async function shutdown() {
     if(exitStarted)return;exitStarted=true;
     portalWatchdog?.stop();
-    onboardingInspection.reset();channelBeing.reset();resetTownReader();chatSessions?.end();
+    onboardingInspection.reset();channelBeing.reset();resetTownReader();chatDetails?.reset();chatSessions?.end();
     townClient.reset();
     townBackground.stop();
     clearInterval(refreshTimer);
     portalUpdates.stop();
+    portalMaintenance.cancelDownload();
     await mutationTail;
+    await portalMaintenance._operation?.catch(()=>{});
     try { await portal.dispose(); } catch {
       exitStarted=false;
       portalWatchdog.start();
@@ -1307,6 +1563,7 @@ function boot() {
     session.defaultSession.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));
     session.defaultSession.setPermissionCheckHandler(()=>false);
     await restore();
+    await portalMaintenance.initialize();
     win=new BrowserWindow({width:1440,height:940,minWidth:1000,minHeight:700,...windowAppearance({background:state.settings.colors.background,...systemAppearance(nativeTheme)}),show:false,title:'Being Desktop',icon:path.join(__dirname,'../renderer/assets/being/being-icon.ico'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true}});
     const updateAppearance=()=>{
       if(!win || win.isDestroyed())return;
@@ -1337,7 +1594,7 @@ function boot() {
         const shown=await win.webContents.executeJavaScript(`(async()=>{window.beingTools?.show('console');return window.beingTerminal?.reveal(${JSON.stringify(id)});})()`);
         if(!shown)throw new Error('终端已创建，但面板尚未展示，请用终端列表和显示工具恢复。');
       },
-      onChange:toolsState=>{if(win && !win.isDestroyed())win.webContents.send('being:tools-state',toolsState);if(orchestration.workers.some(worker=>worker.presentation))orchestration.notify();}});
+      onChange:toolsState=>{void orchestrationPolicy.syncBridge();if(win && !win.isDestroyed())win.webContents.send('being:tools-state',toolsState);if(orchestration.workers.some(worker=>worker.presentation))orchestration.notify();}});
     orchestration.presentation=new WorkerPresentation({browser:desktopTools.browser,showBrowser:async()=>{
       if(exitStarted||!win||win.isDestroyed())throw new Error('桌面窗口已关闭。');
       win.webContents.send('being:tools-state',desktopTools.snapshot());

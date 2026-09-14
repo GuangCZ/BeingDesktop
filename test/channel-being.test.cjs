@@ -11,7 +11,7 @@ function contract(options) {
   const message=JSON.parse(options.body).message;
   return {protocol:'being-desktop-channel-result/1',requestId:message.match(/^\[Being Desktop Town sync:([^\]]+)\]/)[1],route:message.match(/任务路线：([^。]+)。/)[1],beingId:message.match(/当前 Being：([^；]+)；/)[1]};
 }
-const turn = (reply, sessionId = 'server-wechat', options) => event('content_block_delta', {delta: {text: typeof reply === 'string' ? reply : JSON.stringify({...options ? contract(options) : {}, ...reply})}}) + event('message_stop', {session_id: sessionId});
+const turn = (reply, sessionId = 'server-wechat', options) => (options ? event('meta', {scene_id:JSON.parse(options.body).scene_id}) : '') + event('content_block_delta', {delta: {text: typeof reply === 'string' ? reply : JSON.stringify({...options ? contract(options) : {}, ...reply})}}) + event('message_stop', {session_id: sessionId});
 const stream = text => new Response(text, {headers: {'Content-Type': 'text/event-stream'}});
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return {promise, resolve}; };
 function harness(respond = async (_, options) => stream(turn({channel: 'wechat', status: 'pending', detail: '请按返回的说明继续。'}, undefined, options)), overrides = {}) {
@@ -38,7 +38,9 @@ test('channel clicks send fixed background requests only to authenticated Loom',
   assert.equal(call.options.redirect, 'error');
   assert.equal(call.options.credentials, 'omit');
   assert.equal(call.options.referrerPolicy, 'no-referrer');
-  assert.deepEqual(Object.keys(call.body), ['message']);
+  assert.deepEqual(Object.keys(call.body), ['message', 'scene_id', 'scene_meta', 'client_ref']);
+  assert.match(call.body.scene_id, /^desktop-channel-[0-9a-f-]+-wechat$/);
+  assert.equal(call.body.scene_meta.scene_label, '微信 · Channel');
   assert.match(call.body.message, /"channel":"wechat"/);
   assert.match(call.body.message, /仅适用于本次请求/);
   assert.doesNotMatch(call.body.message, /不要部署 Portal|不要要求用户向 Heart 申请 IP Trust/);
@@ -54,7 +56,7 @@ test('channel clicks send fixed background requests only to authenticated Loom',
   assert.ok(!JSON.stringify(requests).includes('loom-test-private'));
 });
 
-test('only server supplied session IDs are reused and each channel keeps its own continuation', async () => {
+test('every channel uses its own scene from the first request and ignores legacy server session IDs', async () => {
   const {channel, calls} = harness(async (_, options) => {
     const target = JSON.parse(options.body).message.includes('"channel":"feishu"') ? 'feishu' : 'wechat';
     return stream(turn({channel: target, status: 'connected', detail: '实际服务已连接。'}, `actual-${target}`, options));
@@ -64,7 +66,9 @@ test('only server supplied session IDs are reused and each channel keeps its own
   const result = await channel.getChannelStatus(wechat);
   assert.equal(calls[0].body.session_id, undefined);
   assert.equal(calls[1].body.session_id, undefined);
-  assert.equal(calls[2].body.session_id, 'actual-wechat');
+  assert.equal(calls[2].body.session_id, undefined);
+  assert.notEqual(calls[0].body.scene_id, calls[1].body.scene_id);
+  assert.equal(calls[2].body.scene_id, calls[0].body.scene_id);
   assert.equal(result.channels[0].status, 'connected');
   assert.match(calls[2].body.message, /只读检查/);
   assert.match(calls[2].body.message, /不要登记渠道/);
@@ -103,7 +107,7 @@ test('new channel flows reject stale UUID, wrong route or Being, legacy untagged
   const reused = harness(async (_, options) => {
     const metadata = previous ?? contract(options);
     previous = metadata;
-    return stream(turn({...metadata,channel:'wechat',status:'connected',detail:'First request response'}));
+    return stream(turn({...metadata,channel:'wechat',status:'connected',detail:'First request response'}, undefined, options));
   });
   assert.equal((await reused.channel.beginChannelConnection(wechat)).status,'connected');
   assert.equal((await reused.channel.beginChannelConnection(wechat)).status,'unknown');
@@ -123,7 +127,7 @@ test('channel enrollment runs exactly before sending, stays four-field and canno
 });
 
 test('correlated JSON fences are parsed and legacy outcome parsing still omits private unknown fields', async () => {
-  const {channel, changes} = harness(async (_, options) => stream(turn('```json\n' + JSON.stringify({...contract(options),channel:'wechat',status:'connected',detail:'实际服务已连接。'}) + '\n```')));
+  const {channel, changes} = harness(async (_, options) => stream(turn('```json\n' + JSON.stringify({...contract(options),channel:'wechat',status:'connected',detail:'实际服务已连接。'}) + '\n```', undefined, options)));
   const result = await channel.beginChannelConnection(wechat);
   assert.equal(result.status, 'connected');
   assert.ok(!JSON.stringify([result, changes]).includes('DO_NOT_EXPOSE'));
@@ -256,4 +260,71 @@ test('unsafe or oversized QR content does not invalidate an accepted channel ope
     assert.equal(result.qrCodeDataUrl, undefined);
     assert.match(result.detail, /扫码图像暂时无法读取/);
   }
+});
+
+test('an accepted or broken first request keeps its allocated channel scene without replay', async () => {
+  for (const first of [() => new Response('{}', {status:202}), () => { throw new Error('offline'); }]) {
+    const f = harness(async (_, options, calls) => calls.length === 1 ? first() : stream(turn({channel:'wechat', status:'connected', detail:'已核对'}, undefined, options)));
+    try { await f.channel.beginChannelConnection(wechat); } catch (error) { assert.equal(error.code, 'RESULT_UNKNOWN'); }
+    assert.equal(f.calls.length, 1);
+    await f.channel.getChannelStatus(wechat);
+    assert.equal(f.calls.length, 2);
+    assert.equal(f.calls[0].body.scene_id, f.calls[1].body.scene_id);
+    assert.match(f.calls[1].body.message, /只读检查/);
+  }
+});
+
+test('foreign and unscoped replies cannot supply channel results even with matching JSON', async () => {
+  for (const scene of ['loom-current', 'desktop-another-conversation', '']) {
+    const f = harness(async (_, options) => stream(event('meta', {scene_id:scene}) + turn({channel:'wechat', status:'connected', detail:'Wrong conversation', ...contract(options)})));
+    assert.equal((await f.channel.beginChannelConnection(wechat)).status, 'unknown');
+  }
+  const f = harness(async (_, options) => stream(
+    turn({channel:'wechat', status:'connected', detail:'Channel result'}, undefined, options) +
+    event('meta', {scene_id:'loom-current', continuation:true}) +
+    turn({channel:'wechat', status:'error', detail:'Foreign result', ...contract(options)})
+  ));
+  const result = await f.channel.beginChannelConnection(wechat);
+  assert.equal(result.status, 'connected'); assert.equal(result.detail, 'Channel result');
+});
+
+test('allocated Desktop channel scenes are used directly and a missing session fails before POST', async () => {
+  const target = 'desktop-11111111-1111-4111-8111-111111111111-22222222-2222-4222-8222-222222222222';
+  const f = harness(undefined, {getSession:channel => { assert.equal(channel,'wechat'); return {sceneId:target}; }});
+  await f.channel.beginChannelConnection(wechat);
+  assert.equal(f.calls[0].body.scene_id, target);
+  for (const value of [null, {}, {sceneId:'invalid scene'}]) {
+    const missing = harness(undefined, {getSession:() => value});
+    await assert.rejects(missing.channel.beginChannelConnection(wechat), {code:'NOT_CONNECTED'});
+    assert.equal(missing.calls.length,0);
+  }
+});
+
+test('an identity change without reset does not reuse the previous channel scene', async () => {
+  const f = harness();
+  await f.channel.beginChannelConnection(wechat);
+  f.context.identityRevision++; f.context.beingName='bob';
+  await f.channel.beginChannelConnection(wechat);
+  assert.notEqual(f.calls[0].body.scene_id, f.calls[1].body.scene_id);
+});
+
+test('automatic channel inspection reads existing binding without allocating a session or sending a message', async () => {
+  let reads=0;
+  const f=harness(undefined,{getSession:()=>assert.fail('Read-only inspection must not allocate a session'),readStatus:async({signal})=>{
+    assert.equal(signal.aborted,false);reads++;return {channels:[{channel:'feishu',status:'connected'}]};
+  }});
+  assert.deepEqual(await f.channel.inspectChannelStatus(feishu),{channels:[{channel:'feishu',status:'connected'}]});
+  assert.equal(reads,1);assert.equal(f.calls.length,0);assert.equal(f.requests.length,0);
+  await assert.rejects(f.channel.inspectChannelStatus({...feishu,extra:true}),{code:'INVALID_REQUEST'});
+});
+
+test('inspection permission errors do not trigger a Being request and reset cancels stale inspection', async () => {
+  const denied=harness(undefined,{readStatus:async()=>{throw Object.assign(new Error('No status access'),{code:'AUTH_REQUIRED'});}});
+  await assert.rejects(denied.channel.inspectChannelStatus(feishu),{code:'AUTH_REQUIRED'});
+  assert.equal(denied.calls.length,0);
+  const gate=deferred();let signal;
+  const f=harness(undefined,{readStatus:async options=>{signal=options.signal;await gate.promise;return {channels:[{channel:'feishu',status:'connected'}]};}});
+  const pending=f.channel.inspectChannelStatus(feishu);f.channel.reset();assert.equal(signal.aborted,true);gate.resolve();
+  await assert.rejects(pending,{code:'SESSION_CHANGED'});
+  assert.equal(f.calls.length,0);
 });

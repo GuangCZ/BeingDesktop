@@ -10,6 +10,7 @@ const CLI_ENVIRONMENT_KEYS = new Set([
   'xdg_config_home','xdg_data_home','xdg_cache_home',
   'openai_api_key','openai_base_url','openai_org_id','openai_organization','openai_project_id',
   'cursor_api_key','xai_api_key','grok_api_key',
+  'anthropic_api_key','anthropic_auth_token','anthropic_base_url','claude_config_dir',
   'node_extra_ca_certs','ssl_cert_file','ssl_cert_dir','requests_ca_bundle',
 ]);
 

@@ -2,27 +2,29 @@
   'use strict';
   const labels = {file:'文件读写',exec:'命令执行',screenshot:'屏幕截图',search:'文件搜索',web_fetch:'网页搜索',custom_tools_enabled:'自定义工具'};
   const $ = id => document.getElementById(id);
-  let bridge, onState, state = {}, loaded = null, busy = false, generation = 0;
+  const errorText=error=>(error?.message || '').replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
+  const configKey=value=>JSON.stringify([value.portal?.management,value.portal?.management==='external'?value.portal?.deployment?.configPath:value.portal?.configPath,Boolean(value.portal?.adopted)]);
+  let bridge, onState, state = {}, loaded = null, busy = false, reading = false, generation = 0;
   function render() {
-    const unavailable = busy || !loaded || state.portal?.status==='external';
+    const unavailable = busy || state.portalUpdate?.maintenance?.busy || !loaded || state.portal?.status==='external'&&!state.portal?.adopted;
     for (const key of Object.keys(labels)) $(`portal-permission-${key}`).disabled = unavailable;
     $('portal-permission-save').disabled = unavailable;
     $('portal-permission-refresh').disabled = busy;
-    $('portal-permission-save').textContent = busy ? '保存中…' : state.portal?.owned ? '保存并重启' : '保存';
+    $('portal-permission-save').textContent = busy ? reading ? '读取中…' : '保存中…' : state.portal?.owned || state.portal?.adopted&&state.portal?.pid ? '保存并重启' : '保存';
   }
   function message(value) { $('portal-permission-status').textContent = value; }
   async function read() {
     if (busy) return;
     const revision = ++generation;
-    loaded = null; busy = true; render(); message('正在读取配置…');
+    loaded = null; busy = true; reading = true; render(); message('正在读取配置…');
     try {
       const result = await bridge.getPortalPermissions();
       if (revision!==generation) return;
       loaded = result;
       for (const key of Object.keys(labels)) $(`portal-permission-${key}`).checked = result.permissions[key];
       message('');
-    } catch (error) { if(revision===generation) message(error.message || '无法读取权限。'); }
-    finally { busy = false; render(); }
+    } catch (error) { if(revision===generation) message(errorText(error) || '无法读取权限。'); }
+    finally { busy = false; reading = false; render(); }
   }
   async function save() {
     if (busy || !loaded) return;
@@ -33,8 +35,8 @@
       onState?.(result.state);
       loaded = null;
       message(result.detail);
-    } catch (error) { loaded=null; message(error.message || '保存失败，请重新读取权限。'); }
-    finally { busy = false; render(); }
+    } catch (error) { loaded=null; message(errorText(error) || '保存失败，请重新读取权限。'); }
+    finally { busy = false; reading = false; render(); }
   }
   window.beingPortalPermissions = {
     init(options) {
@@ -53,11 +55,13 @@
       render();
     },
     setState(next) {
-      if (state.portal?.configPath!==next.portal?.configPath) {
+      const changed=configKey(state)!==configKey(next);
+      if (changed) {
         generation++; loaded=null;
         message('配置已变化，请重新读取权限。');
       }
       state=next; render();
+      if(changed && !busy && $('portal-permissions').open)void read();
     },
   };
 })();

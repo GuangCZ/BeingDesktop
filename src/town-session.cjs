@@ -4,6 +4,7 @@
 // Production protected reads use the Town client SDK. A Loom token is never a Town credential.
 const {scrollId, libraryRoute, scrollListDto, scrollDto, beingsDto} = require('./town-library-contract.cjs');
 const {relaySource} = require('./town-result-source.cjs');
+const {memberId, matchesTownIdentity, normalizeTownResponse} = require('./town-wire.cjs');
 const TOWN_ORIGIN = 'https://beings.town';
 const TOWN_AUTH_DETAIL = 'Town 拒绝了本机的 GET 读取请求（401/403），当前连接没有消息读取权限。';
 const MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -50,8 +51,8 @@ function inlineQr(value) {
 function membersDto(value) {
   if (!record(value) || !Array.isArray(value.community)) throw failure('INVALID_RESPONSE', 'Town 成员目录格式发生变化，请稍后重试。');
   const seen = new Set();
-  return value.community.slice(0, 2000).filter(member => record(member) && validId(member.being_id) && !seen.has(member.being_id) && seen.add(member.being_id))
-    .map(member => ({id: member.being_id, name: text(member.display_name, 100) || member.being_id, description: text(member.about, 500)}));
+  return value.community.slice(0, 2000).filter(member => record(member) && validId(memberId(member)) && !seen.has(memberId(member)) && seen.add(memberId(member)))
+    .map(member => ({id: memberId(member), name: text(member.display_name, 100) || memberId(member), description: text(member.about, 500)}));
 }
 
 // Town reports who actually spoke ("being" or "client:<name>"). Carried only when present,
@@ -68,14 +69,10 @@ function messagesDto(value, members = []) {
   const seen = new Set();
   const messages = value.messages.slice(0, 200).filter(item => record(item) && sequence(item.seq) && typeof item.message === 'string' && typeof item.being === 'string' && !seen.has(item.seq) && seen.add(item.seq))
     .map(item => {
-      const byName = members.filter(member => member.name === item.being);
+      // Display names, including formerly unique names, cannot establish a historical author.
       const byId = members.find(member => member.id === item.being);
-      // Duplicate display names are intentionally not attributed to one member.
-      // The SDK guide documents `being` as the being_id, but observed responses have also carried a
-      // display name there. The member directory therefore still wins; `being` is only trusted when
-      // the directory cannot resolve the sender, which previously left the id empty.
-      const beingId = validId(item.being_id) ? item.being_id : byId?.id || (byName.length === 1 ? byName[0].id : '') || (validId(item.being) ? item.being : '');
-      return {id: String(item.seq), beingId, beingName: text(item.speaker_name, 100) || text(item.being, 100), content: text(item.message, 4000), createdAt: text(item.at, 64), revisedAt: text(item.revised_at, 64), mentions: [], ...viaField(item), ...replyField(item)};
+      const beingId = validId(item.town_id) ? item.town_id : validId(item.being_id) ? item.being_id : byId?.id || (/^t_/.test(item.being) && validId(item.being) ? item.being : '');
+      return {id: String(item.seq), beingId, ...(validId(item.town_id) ? {townId: item.town_id} : {}), ...(!beingId ? {authorUnknown: true} : {}), beingName: text(item.speaker_name, 100) || text(item.being, 100), content: text(item.message, 4000), createdAt: text(item.at, 64), revisedAt: text(item.revised_at, 64), mentions: [], ...viaField(item), ...replyField(item)};
     })
     .sort((left, right) => Number(left.id) - Number(right.id));
   return {messages, latestSeq: value.global_latest_seq, ...(sequence(value.total_count) ? {total: value.total_count} : {}), ...relaySource(value)};
@@ -128,7 +125,7 @@ function firesideMessagesDto(value, expected) {
 function channelDto(value, channel) {
   const source = record(value) ? value : {};
   const known = new Set(['connected', 'disconnected', 'pending', 'registered', 'disabled', 'waiting', 'expired', 'error']);
-  const status = known.has(source.status) ? source.status : 'unknown';
+  const status = known.has(source.status) ? source.status : source.ready === true ? 'connected' : source.ready === false ? 'registered' : 'unknown';
   // Channel response prose can contain credentials. Keep the UI description local.
   const result = {channel, status, detail: status === 'unknown' ? '渠道状态尚未确认，请刷新后查看。' : ''};
   if (typeof source.app_id === 'string' && /^cli_[A-Za-z0-9_-]{1,120}$/.test(source.app_id)) result.appId = source.app_id;
@@ -146,13 +143,15 @@ function channelDto(value, channel) {
 }
 
 class TownSession {
-  constructor({getContext, fetchImpl = globalThis.fetch, readImpl = null, writeImpl = null, onChange = () => {}} = {}) {
+  constructor({getContext, fetchImpl = globalThis.fetch, readImpl = null, writeImpl = null, getIdentity = null, onChange = () => {}, now = Date.now, membersTtlMs = 60000} = {}) {
     if (typeof getContext !== 'function' || typeof fetchImpl !== 'function' || readImpl !== null && typeof readImpl !== 'function') throw new Error('Town 会话配置无效。');
-    Object.assign(this, {getContext, fetchImpl, readImpl, writeImpl, onChange});
+    Object.assign(this, {getContext, fetchImpl, readImpl, writeImpl, getIdentity, onChange, now, membersTtlMs});
+    this._membersRevision = 0; this._membersExpiresAt = 0;
     this._epoch = 0;
     this._requests = new Set();
     this._mutations = new Set();
     this._members = null;
+    this._membersExpiresAt = 0; this._membersRevision++;
     this._state = {bonfire: {status: 'unknown', detail: ''}, fireside: {status: 'unknown', detail: ''}, channel: {status: 'unknown', detail: ''}, scroll: {status: 'unknown', detail: ''}, beings: {status: 'unknown', detail: ''}};
   }
 
@@ -164,6 +163,7 @@ class TownSession {
     this._requests.clear();
     this._mutations.clear();
     this._members = null;
+    this._membersExpiresAt = 0; this._membersRevision++;
     this._state = {bonfire: {status: 'unknown', detail: ''}, fireside: {status: 'unknown', detail: ''}, channel: {status: 'unknown', detail: ''}, scroll: {status: 'unknown', detail: ''}, beings: {status: 'unknown', detail: ''}};
   }
 
@@ -174,9 +174,10 @@ class TownSession {
 
   _context(expected, connectionRevision) {
     const current = this.getContext();
-    const beingId = current.beingId || current.beingName;
+    const loomBeingId = current.loomBeingId || current.beingId || current.beingName;
+    const beingId = loomBeingId;
     if (!current.configured || !current.connected || current.exiting || !validId(beingId) || !sequence(current.connectionId)) throw failure('NOT_CONNECTED', '请先连接 Being 并等待会话加载完成。');
-    const identity = {beingId, connectionId: current.connectionId, identityRevision: current.identityRevision, epoch: this._epoch};
+    const identity = {beingId, loomBeingId, connectionId: current.connectionId, identityRevision: current.identityRevision, epoch: this._epoch};
     if (expected && Object.keys(identity).some(key => identity[key] !== expected[key]) || connectionRevision !== undefined && current.connectionId !== connectionRevision) throw failure('SESSION_CHANGED', '连接身份已变化，请在当前 Being 下重新操作。');
     return identity;
   }
@@ -239,7 +240,8 @@ class TownSession {
       // This read neither marks mentions nor fetches message history. Its identity
       // binds IP Trust to the selected Loom Being before any write is attempted.
       const identity = await this._request('/api/bonfire/mentions', {expected, signal, query: {since_id: '9223372036854775807'}});
-      if (identity.being !== expected.beingId) throw failure('IDENTITY_MISMATCH', 'Town 授权身份与当前 Being 不一致，请检查连接。');
+      const verified = await this._townIdentity(expected, signal);
+      if (!matchesTownIdentity(identity, verified)) throw failure('IDENTITY_MISMATCH', 'Town 授权身份与当前 Being 不一致，请检查连接。');
       this._context(expected);
       checkAborted(signal);
       this._set(area, 'ready');
@@ -251,13 +253,33 @@ class TownSession {
     }
   }
 
-  async getMembers({signal} = {}) {
-    const epoch = this._epoch;
-    // The public homepage redirects to this canonical same-origin directory.
+  async _townIdentity(expected, signal) {
+    let townId = this.getContext().townId || '';
+    if (!townId && this.getIdentity) {
+      try { const identity = await this.getIdentity({signal}); this._context(expected); townId = identity.townId || ''; }
+      catch (error) { if (error.code !== 'AUTH_REQUIRED') throw error; }
+    }
+    this._context(expected);
+    return {loomBeingId: expected.loomBeingId, townId};
+  }
+
+  memberCacheState() { return {revision: this._membersRevision, expiresAt: this._membersExpiresAt}; }
+  memberDisplayName(townId) { return this.now() < this._membersExpiresAt ? this._members?.get(townId)?.name || '' : ''; }
+  invalidateMembers() {
+    this._members = null; this._membersExpiresAt = 0; this._membersRevision++;
+    try { this.onChange(this.state()); } catch { /* Read cache invalidation does not change a send result. */ }
+    return this.memberCacheState();
+  }
+  async getMembers({signal, force = false} = {}) {
+    checkAborted(signal);
+    if (!force && this._members && this.now() < this._membersExpiresAt) return {members: [...this._members.values()], source: 'public'};
+    const epoch = this._epoch, revision = this._membersRevision;
+    // Cache only the stable ID -> current display metadata mapping, never name -> identity.
     const value = await this._request('/api', {signal});
-    if (epoch !== this._epoch) throw failure('SESSION_CHANGED', '连接身份已变化，请重新读取成员。');
+    if (epoch !== this._epoch || revision !== this._membersRevision) throw failure('SESSION_CHANGED', '成员目录已失效，请重新读取。');
     const members = membersDto(value);
-    this._members = members;
+    this._members = new Map(members.map(member => [member.id, member]));
+    this._membersExpiresAt = this.now() + this.membersTtlMs;
     return {members, source: 'public'};
   }
 
@@ -311,7 +333,7 @@ class TownSession {
     return this._read('bonfire', expected, async request => {
       const [response, members] = await Promise.all([
         request('/api/bonfire/hear', {query: {limit: value.limit || 10, ...(value.since === undefined ? {} : {since: value.since})}}),
-        this._members ? Promise.resolve(this._members) : this.getMembers({signal}).then(result => result.members).catch(error => { if (error.code === 'ABORTED') throw error; return []; }),
+        this.getMembers({signal}).then(result => result.members).catch(error => { if (error.code === 'ABORTED') throw error; return []; }),
       ]);
       this._context(expected);
       checkAborted(signal);
@@ -377,7 +399,10 @@ class TownSession {
       checkAborted(signal);
       const request = (route, options = {}) => throughBeing
         ? this._beingRequest(route, {...options, expected, signal})
-        : this._request(route, {...options, expected, signal});
+        : this._request(route, {...options, expected, signal}).then(async value => {
+          if (Object.hasOwn(value, 'town_id') && !matchesTownIdentity(value, await this._townIdentity(expected, signal))) throw failure('IDENTITY_MISMATCH', 'Town 返回的身份与当前 Being 不一致。');
+          return normalizeTownResponse(value, route, expected.loomBeingId);
+        });
       const value = await callback(request);
       this._context(expected);
       checkAborted(signal);
@@ -421,16 +446,17 @@ class TownSession {
       const message = (missing.map(id => `@${id}`).join(' ') + (missing.length ? '\n' : '') + value.content).trim();
       if (message.length > 4000) throw failure('INVALID_REQUEST', '加入 @成员后消息超过 4000 字，请缩短内容。');
       const response = await this._request('/api/bonfire/speak', {expected, body: {message}, mutation: true});
-      if (response.ok !== true || !sequence(response.seq) || response.being !== expected.beingId || !Array.isArray(response.mentions)) throw failure('RESULT_UNKNOWN', '篝火未返回完整发送确认，请刷新消息后核对；不要重复提交。');
+      if (response.ok !== true || !sequence(response.seq) || !matchesTownIdentity(response, await this._townIdentity(expected)) || !Array.isArray(response.mentions)) throw failure('RESULT_UNKNOWN', '篝火未返回完整发送确认，请刷新消息后核对；不要重复提交。');
       this._set('bonfire', 'ready');
-      return {ok: true, id: String(response.seq), mentions: response.mentions.filter(name => typeof name === 'string').slice(0, 20).map(name => text(name, 100))};
+      return {ok: true, id: String(response.seq), ...(Object.hasOwn(response, 'mention_warnings') ? {mention_warnings: response.mention_warnings} : {}), mentions: response.mentions.filter(name => typeof name === 'string').slice(0, 20).map(name => text(name, 100))};
     });
   }
 
   async getChannelStatus({signal} = {}) {
     const expected = this._context();
     return this._read('channel', expected, async () => {
-      const value = await this._request('/api/channels/status', {expected, signal, query: {being_id: expected.beingId}});
+      const value = await this._request('/api/channels/status', {expected, signal, query: {being_id: expected.loomBeingId}});
+      if ((Object.hasOwn(value, 'town_id') || Object.hasOwn(value, 'being')) && !matchesTownIdentity(value, await this._townIdentity(expected, signal))) throw failure('IDENTITY_MISMATCH', '渠道状态返回了不同的 Town 身份。');
       const list = Array.isArray(value.channels) ? value.channels : record(value.channels) ? Object.entries(value.channels).map(([channel, entry]) => ({...(record(entry) ? entry : {}), channel})) : [value];
       return {channels: ['feishu', 'wechat'].map(channel => channelDto(list.find(item => record(item) && item.channel === channel), channel))};
     }, {signal});

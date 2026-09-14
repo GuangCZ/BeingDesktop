@@ -97,7 +97,7 @@ test('a reloaded store resumes from its stored cursor and transcripts', async ()
   const again = fixture({disk: f.disk()});
   const summary = await again.store.load();
   assert.equal(summary.cursor, 41); assert.equal(summary.seeded, true); assert.equal(summary.active, A);
-  assert.deepEqual(summary.sessions, [{id: A, title: '会话一', createdAt: 1757000000000, truncated: false, count: 1, lastSeq: 41}]);
+  assert.deepEqual(summary.sessions, [{id: A, title: '会话一', createdAt: 1757000000000, updatedAt: '2026-09-11T00:00:00Z', truncated: false, count: 1, lastSeq: 41}]);
   assert.deepEqual(again.store.rows(A).map(item => item.content), ['记住我']);
 });
 

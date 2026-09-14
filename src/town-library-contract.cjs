@@ -3,6 +3,7 @@
 // Read contracts checked against /api/scrolls/help, /api/beings/help and a public
 // /api/scrolls/{id} response on 2026-09-07. Never infer human identities from IDs.
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
+const {memberId} = require('./town-wire.cjs');
 const RESERVED_SCROLL_IDS = new Set(['help', 'search', 'graph', 'match']);
 const VISIBILITY = new Set(['private', 'shared', 'public']);
 const record = value => value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype;
@@ -38,10 +39,11 @@ function libraryQuery(route, value = {}) {
 }
 
 function summaryDto(value) {
-  if (!record(value) || !scrollId(value.id) || typeof value.title !== 'string' || typeof value.being_id !== 'string' || !ID.test(value.being_id) || !VISIBILITY.has(value.visibility) || !sequence(value.revision) || value.revision < 1) throw invalid('卷轴文档格式发生变化，请刷新后重试。');
+  const id = memberId(value);
+  if (!record(value) || !scrollId(value.id) || typeof value.title !== 'string' || typeof id !== 'string' || !ID.test(id) || !VISIBILITY.has(value.visibility) || !sequence(value.revision) || value.revision < 1) throw invalid('卷轴文档格式发生变化，请刷新后重试。');
   return {
-    id: value.id, title: display(value.title, 400), beingId: value.being_id,
-    beingName: display(value.display_name, 100) || value.being_id,
+    id: value.id, title: display(value.title, 400), beingId: id,
+    beingName: display(value.display_name, 100) || id,
     visibility: value.visibility, kind: display(value.kind, 30), lifecycle: display(value.lifecycle, 30),
     tags: Array.isArray(value.tags) ? [...new Set(value.tags.filter(tag => typeof tag === 'string').slice(0, 50).map(tag => display(tag, 100)))] : [],
     createdAt: display(value.created_at, 64), updatedAt: display(value.updated_at, 64), revision: value.revision,
@@ -68,9 +70,10 @@ function beingsDto(value) {
   if (!list || list.length > 2000 || record(value) && (value.ok === false || Object.hasOwn(value, 'error') || value.has_more !== undefined && value.has_more !== false || value.hasMore !== undefined && value.hasMore !== false || value.total !== undefined && (!sequence(value.total) || value.total !== list.length) || value.offset !== undefined && value.offset !== 0)) throw invalid('Town 居民目录不完整，请刷新后重试。');
   const seen = new Set();
   return list.map(value => {
-    if (!record(value) || typeof value.being_id !== 'string' || !ID.test(value.being_id) || typeof value.display_name !== 'string' || seen.has(value.being_id)) throw invalid('Town 居民目录格式发生变化，请刷新后重试。');
-    seen.add(value.being_id);
-    return {id: value.being_id, name: display(value.display_name, 100) || value.being_id, description: display(value.about, 500), status: display(value.status, 50), human: null};
+    const id = memberId(value);
+    if (!record(value) || typeof id !== 'string' || !ID.test(id) || typeof value.display_name !== 'string' || seen.has(id)) throw invalid('Town 居民目录格式发生变化，请刷新后重试。');
+    seen.add(id);
+    return {id, name: display(value.display_name, 100) || id, description: display(value.about, 500), status: display(value.status, 50), human: null};
   });
 }
 

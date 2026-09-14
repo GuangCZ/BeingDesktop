@@ -45,7 +45,7 @@ function harness(options = {}) {
     pong() { this.dispatchEvent(new Event('pong')); }
   }
   const link = new DesktopToolLink({
-    portalName:PLACE,toolAllowed:options.toolAllowed,
+    portalName:PLACE,toolAllowed:options.toolAllowed,shouldReconnect:options.shouldReconnect,
     onChange:snapshot => { changes.push(snapshot);options.onChange?.(snapshot,link); },
     invokeTool:(name,args,context) => { calls.push({name,args,context});return options.invokeTool ? options.invokeTool(name,args,context) : structuredClone(success); },
     WebSocketImpl:FakeSocket,clock:() => time,
@@ -382,4 +382,53 @@ test('a local relay performs real native-WebSocket tool discovery and a fixed ca
   for (const socket of relay.sockets) socket.write(frame(1,JSON.stringify(call('desktop_browser_tabs',{place:relay.portalName,target_portal:relay.portalName},'local-call'))));
   assert.deepEqual(await response,{jsonrpc:'2.0',id:'local-call',result:boundResult(success,relay.portalName)});assert.deepEqual(calls,[{name:'desktop_browser_tabs',args:{}}]);
   assert.equal(link.snapshot().status,'connected');assert.equal(link.snapshot().lastCall.status,'completed');
+});
+test('tool initialization notifies configuration observers before the first tool call',async()=>{
+  const observations=[];
+  const h=harness({toolAllowed:name=>name.startsWith('desktop_worker_'),onChange:(_state,link)=>observations.push(link.capabilities().tools)});
+  const socket=await h.ready(false);
+  assert.equal(observations.at(-1).length,0);
+  socket.message(initialized(1));
+  assert.ok(observations.at(-1).includes('desktop_worker_start'));
+  assert.equal(h.calls.length,0);
+  h.link.dispose();
+});
+
+
+test('orchestration reconnects a lost transport with backoff and requires a fresh initialize',async()=>{
+  const h=harness({shouldReconnect:()=>true,toolAllowed:name=>name.startsWith('desktop_worker_')});
+  const socket=await h.ready();socket.close();
+  assert.deepEqual(h.link.snapshot().reconnect,{attempt:1,delayMs:2000});
+  assert.deepEqual(h.link.capabilities().tools,[]);
+  const fire=()=>{const [id,callback]=h.timeouts.entries().next().value;h.timeouts.delete(id);callback();};
+  fire();await tick();assert.equal(h.sockets.length,2);
+  // An unsuccessful handshake times out and backs off rather than looping at full speed.
+  fire();await tick();assert.deepEqual(h.link.snapshot().reconnect,{attempt:2,delayMs:4000});
+  fire();await tick();assert.equal(h.sockets.length,3);
+  const next=h.sockets.at(-1);next.open();next.message({ok:true,relay_keepalive:'text-v1'});await tick();
+  assert.deepEqual(h.link.capabilities().tools,[]);
+  next.message(initialized(1));assert.ok(h.link.capabilities().tools.includes('desktop_worker_start'));
+  next.close();assert.equal(h.link.snapshot().reconnect.delayMs,2000);
+  assert.equal(h.calls.length,0,'Reconnecting must not replay tool requests or start Workers');
+  h.link.dispose();assert.equal(h.timeouts.size,0);
+});
+
+for(const reason of ['disconnect','disable','dispose','identity'])test(`scheduled reconnect respects ${reason}`,async()=>{
+  let enabled=true;const h=harness({shouldReconnect:()=>enabled});
+  const socket=await h.ready();socket.close();const pending=[...h.timeouts.values()][0];
+  if(reason==='disable')enabled=false;
+  if(reason==='disconnect'||reason==='identity')h.link.disconnect();
+  if(reason==='dispose')h.link.dispose();
+  if(reason==='identity'){
+    const connect=h.connect(parseConnection('https://fixture.invalid/other-being/?token=NEW_PRIVATE_TOKEN'));
+    const next=h.sockets.at(-1);next.open();next.message({ok:true,relay_keepalive:'text-v1'});await connect;
+  }
+  const before=h.sockets.length;pending();await tick();assert.equal(h.sockets.length,before);
+  h.link.dispose();
+});
+
+test('protocol rejection does not repeatedly authenticate in the background',async()=>{
+  const h=harness({shouldReconnect:()=>true}),connect=h.connect();
+  h.sockets[0].open();h.sockets[0].message({ok:false});await assert.rejects(connect);
+  assert.equal(h.timeouts.size,0);assert.equal(h.link.snapshot().reconnect,undefined);h.link.dispose();
 });

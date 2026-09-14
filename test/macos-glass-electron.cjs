@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const {app, dialog} = require('electron');
 const {PRESETS} = require('../renderer/theme-colors.js');
 if (process.platform !== 'darwin' || app.isPackaged || process.env.BEING_LOOM_URL) throw new Error('Run with development Electron on macOS without BEING_LOOM_URL.');
-const root = path.resolve(__dirname, '../.local/glass-validation');
+const root = path.resolve(__dirname, '../.local/glass-validation-' + Date.now());
 fs.mkdirSync(root, {recursive: true});
 process.env.BEING_DATA_DIR = fs.mkdtempSync(path.join(root, 'profile-'));
 const report = {passed: false, checks: [], screenshots: []};
@@ -45,6 +45,8 @@ require('../src/main.cjs').startDesktop({portalUpdateChecksEnabled: false, onRea
     await execute('document.fonts.ready');
     await settle();
     check('production preload identifies macOS', await execute("document.documentElement.dataset.platform==='darwin'"));
+    report.nativeBackground = win.getBackgroundColor();
+    report.nativePreferences = require('../src/desktop-appearance.cjs').systemAppearance(require('electron').nativeTheme);
     check('native traffic lights occupy reserved titlebar space', win.getWindowButtonPosition()?.x === 20);
     await execute("document.querySelector('#setup-close').click()");
     for (const preset of PRESETS.filter(item => ['default', 'light'].includes(item.id))) {
@@ -58,6 +60,8 @@ require('../src/main.cjs').startDesktop({portalUpdateChecksEnabled: false, onRea
         check(`${preset.id} ${width}: navigation clears traffic lights`, value.navigation.x >= 88);
         check(`${preset.id} ${width}: toolbar clears navigation and content`, value.toolbar.x >= value.navigation.right && value.toolbar.bottom <= value.content.y);
         check(`${preset.id} ${width}: layout stays inside window`, !value.overflow && value.content.right <= width && value.content.bottom <= height);
+        check(`${preset.id} ${width}: the header has no extra opaque pill`, await execute("getComputedStyle(document.querySelector('.header-actions')).backgroundColor==='rgba(0, 0, 0, 0)' && getComputedStyle(document.querySelector('.header-actions')).boxShadow==='none'"));
+        check(`${preset.id} ${width}: the frame uses a translucent tint`, await execute("getComputedStyle(document.body).backgroundColor==='rgba(0, 0, 0, 0)' && parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--glass-opacity'))<100"));
         await capture(`${preset.id}-home-${width}`);
         await execute("document.querySelector('#toggle-inspector').click()");
         await settle();
@@ -66,7 +70,7 @@ require('../src/main.cjs').startDesktop({portalUpdateChecksEnabled: false, onRea
         await settle();
         value = await layout();
         check(`${preset.id} ${width}: collapsed sidebar keeps toolbar clear`, value.toolbar.x >= value.navigation.right);
-        await execute("document.querySelector('#toggle-sidebar').click();document.querySelector('#header-settings').click();document.querySelector('[data-settings-section=appearance]').click()");
+        await execute("document.querySelector('#toggle-sidebar').click();changePage('settings');document.querySelector('[data-settings-section=appearance]').click()");
         await settle();
         value = await layout();
         check(`${preset.id} ${width}: settings fits without horizontal scrolling`, value.settings.right <= width && !value.overflow && await execute("document.querySelector('#settings-content').scrollWidth<=document.querySelector('#settings-content').clientWidth"));
@@ -76,9 +80,12 @@ require('../src/main.cjs').startDesktop({portalUpdateChecksEnabled: false, onRea
     }
     await execute(`renderWindowState({platform:'darwin',focused:true,reducedTransparency:true});`);
     check('reduced transparency uses opaque navigation and removes blur', await execute(`getComputedStyle(document.querySelector('.header-actions')).backdropFilter==='none' && getComputedStyle(document.documentElement).getPropertyValue('--glass-opacity').trim()==='100%'`));
+    check('reduced transparency also removes popup and card blur', await execute(`(()=>{const popup=document.createElement('div');popup.className='chat-detail-card';document.body.append(popup);const value=getComputedStyle(popup);const ok=value.backdropFilter==='none'&&value.backgroundColor===getComputedStyle(document.documentElement).getPropertyValue('--background').trim().replace(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i,(_,r,g,b)=>'rgb('+[r,g,b].map(v=>parseInt(v,16)).join(', ')+')');popup.remove();return ok})()`));
     await capture('reduced-transparency');
     await execute(`renderWindowState({platform:'darwin',focused:true,highContrast:true});`);
-    check('increased contrast gives selected navigation a visible outline', await execute("getComputedStyle(document.querySelector('.nav-button.active')).outlineStyle==='solid'"));
+    await execute("changePage('settings')");
+    check('increased contrast gives selected navigation a visible outline', await execute("getComputedStyle(document.querySelector('.settings-nav-item[aria-current]')).outlineStyle==='solid'"));
+    await execute("document.querySelector('.settings-back').click()");
     await execute(`(async()=>renderWindowState(await window.beingDesktop.getWindowState()))()`);
     win.webContents.debugger.attach('1.3');
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {features: [{name: 'prefers-reduced-motion', value: 'reduce'}]});

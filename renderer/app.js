@@ -51,7 +51,7 @@ function portalSetupIdentity(value = state) {
 
 const connectionNames = { disconnected: '已断开', connecting: '连接中', connected: '已连接', error: '连接失败' };
 const portalNames = { not_configured: '未配置', stopped: '已停止', running: '运行中', external: '运行中（外部）', error: '状态异常' };
-const portalStatusLabel = portal => portal.status === 'external' && !portal.pid ? '已有部署（未运行）' : portalNames[portal.status] || '状态未知';
+const portalStatusLabel = portal => portal.status === 'external' && portal.adopted ? (portal.pid ? '运行中（已接管）' : '已接管（未运行）') : portal.status === 'external' && !portal.pid ? '已有部署（未运行）' : portalNames[portal.status] || '状态未知';
 const statusTone = (value) => ({ connected: 'good', healthy: 'good', ok: 'good', available: 'good', reachable: 'good', running: 'good', connecting: 'warning', external: 'warning', error: 'error', unhealthy: 'error', unavailable: 'error', unreachable: 'error' }[value] || 'unknown');
 const text = (id, value) => {
   const target = $(id);
@@ -156,8 +156,9 @@ function acceptState(next) {
     loadingFolderKey = '';
     fileRequest += 1;
   }
-  render();
+  // The sidebar must read the same Worker snapshot it uses to detect changes.
   window.beingOrchestration?.setState(state.orchestration);
+  render();
   if (currentPage === 'workspace' && state.workspace.path && listedWorkspace !== state.workspace.path) {
     void loadFiles('');
   }
@@ -183,52 +184,8 @@ function render() {
   document.body.classList.toggle('has-connection', connection.configured === true);
   if ($('active-session')) $('active-session').hidden = !connection.configured || Boolean(state.chatSessions?.items?.length);
   if ($('new-chat-session')) $('new-chat-session').disabled = !connected;
-  const sessionList = $('chat-session-list');
+  window.beingSidebar?.setState(state);
   if ($('session-route-warning')) $('session-route-warning').hidden = !connection.configured || !state.chatSessions?.routingWarning;
-  if (sessionList && (!editingSession || !connected)) {
-    editingSession = null;
-    sessionList.replaceChildren();
-    for (const item of connection.configured ? state.chatSessions?.items || [] : []) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'session-shortcut';
-      button.classList.toggle('active', item.id === state.chatSessions.activeId);
-      if (item.id === state.chatSessions.activeId) button.setAttribute('aria-current', 'page');
-      const activity = state.chatSessionActivity?.[item.id];
-      const activityLabel = activity === 'talking' ? '正在和 Being 通话' : activity === 'waiting' ? '消息等待' : '未激活';
-      const dot = document.createElement('span');
-      dot.className = `session-activity-light ${activity === 'talking' ? 'talking' : activity === 'waiting' ? 'waiting' : 'inactive'}`;
-      // Keep the breathing phase continuous when state updates rebuild the list.
-      dot.style.animationDelay = `-${(document.timeline.currentTime || 0) % 2400}ms`;
-      dot.setAttribute('aria-hidden', 'true');
-      const title = document.createElement('span');
-      title.className = 'session-title';
-      title.textContent = `${name} · ${item.title}`;
-      button.append(dot, title);
-      button.setAttribute('aria-label', `${name} · ${item.title}，${activityLabel}`);
-      button.title = `${item.title} · ${activityLabel}\nSession ID: ${item.id}`;
-      button.disabled = !connected;
-      button.addEventListener('click', () => selectChatSession(item.id));
-      button.addEventListener('contextmenu',async event=>{
-        event.preventDefault();
-        if(!connected)return;
-        try {
-          const choice=await bridge.showSessionMenu(item.id);
-          if(choice==='rename') {
-            const current=state.chatSessions?.items.find(session=>session.id===item.id);
-            const target=[...sessionList.querySelectorAll('.session-shortcut')].find(node=>node.dataset.sessionId===item.id);
-            if(current && target)renameChatSession(current,target);
-          } else if(choice==='forget' && window.confirm(`删除会话「${item.title}」？Being 的记忆不受影响，只是本机不再显示这个视图。`)) {
-            await bridge.chatForgetSession(item.id);
-          }
-        } catch(error){showToast(error.message);}
-      });
-      button.dataset.sessionId=item.id;
-      sessionList.append(button);
-      window.beingOrchestration?.appendSession(sessionList,item.id);
-    }
-  }
-  if ($('session-empty')) $('session-empty').hidden = Boolean(connection.configured);
   renderPageContext();
   text('sidebar-status', label);
   text('footer-status', label);
@@ -254,9 +211,6 @@ function render() {
   text('loom-status-label', label);
   setDot('loom-status-dot', tone);
   const workspaceName = basename(state.workspace.path);
-  text('sidebar-workspace-name', workspaceName || '选择文件夹');
-  text('sidebar-workspace-hint', state.workspace.path ? `${str(state.machine.hostname, '本机')} · 本机目录` : '尚未选择本机工作区');
-  $('workspace-shortcut').title = state.workspace.path || '选择本机工作区';
   text('footer-workspace', state.workspace.path || '尚未选择工作区');
   $('footer-workspace').title = state.workspace.path || '';
   text('workspace-name', workspaceName || '工作区');
@@ -272,14 +226,14 @@ function render() {
   text('portal-config', str(portal.management === 'external' ? portal.deployment?.configPath : portal.configPath, '尚未确认'));
   setValue('portal-process-detail', `${portalStatusLabel(portal)}${portal.pid ? ` · PID ${portal.pid}` : ''}`, statusTone(portal.status));
   setValue('portal-health-detail', portal.connectionCurrent === false ? '仍连接之前的 Being' : healthLabel(portal.health), portal.connectionCurrent === false ? 'warning' : statusTone(portal.health));
-  text('portal-owner-detail', portal.owned ? '此 Portal 由桌面应用启动，可以在这里停止。' : portal.status === 'external' ? '沿用已有 Portal 部署，请在原启动位置管理。' : '应用只管理自己启动的 Portal 进程。');
-  text('portal-detail', str(portal.detail));
-  $('portal-detail').hidden = !portal.detail;
+  text('portal-owner-detail', portal.owned ? '此 Portal 由桌面应用启动，可以在这里停止。' : portal.status === 'external' ? portal.canManage ? '已接入原系统服务，可在这里启停与更新；配置和身份沿用原部署。' : portal.canAdopt ? '已识别原服务，可点击上方「一键接管」。' : '已有 Portal 的启动方式尚未识别，请在原部署位置管理。' : '应用只管理自己启动的 Portal 进程。');
+  text('portal-detail', portal.adopted ? '已接管原服务，可在这里启停和更新；当前 Being 的连接仍需单独验证。' : portal.canAdopt ? '已识别原服务，点击上方「一键接管」后可在这里管理。' : str(portal.detail));
+  $('portal-detail').hidden = !portal.detail && !portal.adopted && !portal.canAdopt;
   text('portal-observed-path', portal.status === 'external' && portal.observedExecutable ? `程序位置：${portal.observedExecutable}` : '');
   $('portal-observed-path').hidden = !portal.observedExecutable || portal.status !== 'external';
   const watchdog = portal.watchdog;
   $('portal-watchdog-detail').hidden = !watchdog;
-  text('portal-watchdog-detail', watchdog ? `${watchdog.detail}${watchdog.retryAt ? ` 下次重试：${new Date(watchdog.retryAt).toLocaleTimeString()}` : ''}` : '');
+  text('portal-watchdog-detail', portal.adopted ? '原系统服务继续负责进程守护，Desktop 提供启停与更新入口。' : watchdog ? `${watchdog.detail}${watchdog.retryAt ? ` 下次重试：${new Date(watchdog.retryAt).toLocaleTimeString()}` : ''}` : '');
   const autoHealth = watchdog?.health;
   $('portal-auto-health').hidden = !autoHealth;
   if (autoHealth) {
@@ -404,7 +358,7 @@ function renderInspector() {
   $('inspector-connection-error').hidden = !connectionError;
   setValue('inspector-portal', portalStatusLabel(portal), portal.status === 'running' ? 'good' : statusTone(portal.status));
   setValue('inspector-health', healthLabel(portal.health), statusTone(portal.health));
-  text('inspector-portal-note', portal.status === 'running' ? `进程${portal.pid ? ` ${portal.pid}` : ''}由桌面管理。工具连接以健康状态为准。` : portal.status === 'external' ? '已有外部部署，桌面应用不会接管其启停。' : portal.detail || '选择 Portal 程序与配置后，可以在此管理。');
+  text('inspector-portal-note', portal.status === 'running' ? `进程${portal.pid ? ` ${portal.pid}` : ''}由桌面管理。工具连接以健康状态为准。` : portal.status === 'external' ? portal.canManage ? '已接入原系统服务，由同一个服务管理器负责启停。' : '已有部署的启动方式尚未识别。' : portal.detail || '选择 Portal 程序与配置后，可以在此管理。');
   text('inspector-model', runtime.configStatus === 'connected' ? str(runtime.model, '未提供模型名称') : runtime.configStatus === 'error' ? '配置读取失败' : '当前配置未知');
   text('inspector-provider', runtime.configStatus === 'connected' ? str(runtime.provider, '未提供') : '未知');
   setValue('inspector-proxy', proxyLabel(state.localProxy.status), statusTone(state.localProxy.status));
@@ -501,11 +455,11 @@ function renderButtons() {
     $(id).classList.toggle('is-busy', pending.has('refresh'));
     $(id).setAttribute('aria-busy', String(pending.has('refresh')));
   });
-  const portalBusy = pending.has('startPortal') || pending.has('stopPortal') || pending.has('deployPortal') || state.townApp?.portalInstall?.status === 'installing';
+  const portalBusy = state.portalUpdate?.maintenance?.busy || pending.has('adoptPortal') || pending.has('startPortal') || pending.has('stopPortal') || pending.has('deployPortal') || state.townApp?.portalInstall?.status === 'installing';
   $('test-portal-connection').disabled = portalBusy || pending.has('testPortalConnection');
   text('test-portal-connection', pending.has('testPortalConnection') ? '自测中…' : '连接自测');
-  $('start-portal').disabled = portalBusy || state.portal.management === 'external' || state.portal.owned || !state.portal.executable || !state.portal.configPath || ['running', 'external'].includes(state.portal.status);
-  $('stop-portal').disabled = portalBusy || !state.portal.owned || !state.portal.pid;
+  $('start-portal').disabled = portalBusy || state.portal.owned || Boolean(state.portal.pid) || (state.portal.management === 'external' ? !state.portal.canManage : !state.portal.executable || !state.portal.configPath);
+  $('stop-portal').disabled = portalBusy || (!state.portal.owned && !state.portal.canManage) || !state.portal.pid;
   text('start-portal', pending.has('startPortal') ? '启动中…' : '启动');
   text('stop-portal', pending.has('stopPortal') ? '停止中…' : '停止');
   $('select-portal-executable').disabled = portalBusy || state.portal.owned || (state.portal.management === 'external' || state.portal.status === 'external');
@@ -526,10 +480,14 @@ function renderPortalSetup() {
   const installation = state.townApp?.portalInstall || {};
   const busy = pending.has('deployPortal') || installation.status === 'installing';
   const connected = state.connection.status === 'connected';
+  const adopt = $('portal-adopt');
+  adopt.hidden = portal.status !== 'external';
+  adopt.disabled = pending.has('adoptPortal') || busy || state.portalUpdate?.maintenance?.busy || !portal.canAdopt || typeof bridge?.adoptPortal !== 'function';
+  adopt.textContent = pending.has('adoptPortal') ? '接管中…' : portal.adopted ? '已接管' : '一键接管';
   const existing = Boolean(portal.executable || portal.configPath);
   const running = portal.owned || portal.status === 'running';
   const failed = portalSetup.status === 'error' || installation.status === 'error';
-  const workspace = state.townApp?.portalWorkspace?.path || '';
+  const workspace = portal.status === 'external' ? portal.deployment?.workspace || (state.townApp?.portalWorkspace?.readOnly ? state.townApp.portalWorkspace.path : '') : state.townApp?.portalWorkspace?.path || '';
   const readOnly = state.townApp?.portalWorkspace?.readOnly || portal.status === 'external';
   const phases = { checking: '正在检查安装包…', download: '正在下载官方程序…', hash: '正在校验文件…', install: '正在安装程序…', starting: '正在连接 Being…' };
   button.hidden = (existing || portal.status === 'external') && !busy && !failed;
@@ -550,7 +508,8 @@ function renderPortalSetup() {
   } else progress.removeAttribute('value');
   let detail;
   if (busy) detail = phases[installation.phase] || '正在准备工作区和 Portal 配置…';
-  else if (portal.status === 'external') detail = portal.pid ? '已检测到外部 Portal，工作区与权限沿用其原有配置，请在原启动位置管理。' : '已有 Portal 部署当前未运行；沿用原配置，请由原启动方式恢复。';
+  else if (portal.status === 'external' && portal.canAdopt) detail = '接管后可在这里启动、停止和更新。沿用原配置、身份和工作区，接管不会重启 Portal。';
+  else if (portal.status === 'external') detail = portal.pid ? portal.canManage ? '已接管此 Portal，沿用原工作区与配置，可在这里启停和更新。' : '已检测到 Portal，但尚未可靠识别原服务，暂不能接管。' : portal.canManage ? '已有 Portal 当前未运行，可通过下方启动按钮恢复。' : '已有 Portal 部署当前未运行，请由原启动方式恢复。';
   else if (!connected) detail = '先连接 Being，等待会话加载完成。';
   else if (state.townApp?.platformSupported === false) detail = '当前平台暂无已校验的 Portal 安装包。';
   else if (running && portal.connectionCurrent === false) detail = `Portal 仍连接 ${portal.connectionBeingName || '之前的 Being'}。先停止 Portal，再启动以连接当前 Being。`;
@@ -616,7 +575,7 @@ async function saveTypography(typography) {
 function renderPageContext() {
   const name = str(state.connection.beingName, 'Being');
   const titles = {
-    chat: state.connection.configured ? name : '对话',
+    chat: state.chatSessions?.items?.find(item=>item.id===state.chatSessions.activeId)?.title || (state.connection.configured ? name : '对话'),
     workspace: basename(state.workspace.path) || '本机工作区',
     town: 'Town 功能',
     tasks: '功能任务',
@@ -631,11 +590,12 @@ function renderPageContext() {
   text('titlebar-caption', currentPage === 'workspace' && state.workspace.path ? '本机工作区' : '');
   const session = $('active-session');
   if (session) {
-    session.classList.toggle('active', currentPage === 'chat');
-    if (currentPage === 'chat') session.setAttribute('aria-current', 'page');
+    session.classList.toggle('active', currentPage === 'chat' && !session.hidden);
+    if (currentPage === 'chat' && !session.hidden) session.setAttribute('aria-current', 'page');
     else session.removeAttribute('aria-current');
   }
   document.body.dataset.page = currentPage;
+  window.beingSidebar?.setPage(currentPage,selectedTownFeature);
   renderTownSelection();
 }
 
@@ -737,6 +697,7 @@ async function openAppMenu(button) {
 function toggleSidebar() {
   sidebarVisible = !sidebarVisible;
   document.body.classList.toggle('sidebar-collapsed', !sidebarVisible);
+  window.beingSidebar?.saveVisibility(sidebarVisible);
   const sidebar = $('sidebar');
   if (sidebar) sidebar.hidden = !sidebarVisible;
   const button = $('toggle-sidebar');
@@ -769,7 +730,7 @@ function scheduleView() {
     const rect = $('loom-host')?.getBoundingClientRect();
     const coordinate = (value) => Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
     const bounds = { x: coordinate(rect?.x), y: coordinate(rect?.y), width: coordinate(rect?.width), height: coordinate(rect?.height) };
-    const visible = currentPage === 'chat' && state.settings?.chatMode === 'loom' && state.connection.configured && state.connection.status === 'connected' && !window.beingOnboarding?.isOpen() && !document.hidden && bounds.width > 0 && bounds.height > 0;
+    const visible = currentPage === 'chat' && state.settings?.chatMode === 'loom' && state.connection.configured && state.connection.status === 'connected' && !window.beingOnboarding?.isOpen() && !$('sidebar-search-dialog')?.open && !document.hidden && bounds.width > 0 && bounds.height > 0;
     const payload = { visible, bounds };
     const key = JSON.stringify(payload);
     if (key === lastView) return;
@@ -841,13 +802,9 @@ function renderTownCatalogStatus() {
   const failed = townCatalog.status === 'error';
   const message = failed ? townCatalog.error : '正在读取 Town 功能目录…';
   text('town-status-message', message);
-  text('sidebar-town-status', failed ? '功能目录读取失败' : '正在读取功能目录…');
   $('town-catalog-status').hidden = ready;
-  $('sidebar-town-status').hidden = ready;
   $('town-retry').hidden = !failed;
-  $('sidebar-town-retry').hidden = !failed;
   $('town-feature-list').hidden = !ready;
-  $('sidebar-town-features').hidden = !ready;
   $('town-search').disabled = !ready;
   if (!ready) {
     text('town-count', failed ? '读取失败' : '读取中');
@@ -888,50 +845,19 @@ function mountTownCatalog() {
   townRows.clear();
   townSidebarButtons.clear();
   townGroups.clear();
-  $('sidebar-town-features').replaceChildren();
   $('town-feature-list').replaceChildren();
   const groups = new Map();
   for (const feature of townCatalog.features) {
     if (!groups.has(feature.group)) groups.set(feature.group, []);
     groups.get(feature.group).push(feature);
   }
-  let groupIndex = 0;
   for (const [groupName, features] of groups) {
-    const sidebarGroup = element('section', 'town-sidebar-group');
-    const groupToggle = element('button', 'town-group-toggle');
-    const groupItems = element('div', 'town-group-items');
-    groupItems.id = `town-sidebar-group-${groupIndex++}`;
-    groupToggle.dataset.townGroup = groupName;
-    groupToggle.setAttribute('aria-controls', groupItems.id);
-    groupToggle.setAttribute('aria-expanded', String(!townCollapsedGroups.has(groupName)));
-    groupItems.hidden = townCollapsedGroups.has(groupName);
-    groupToggle.append(element('span', '', groupName), icon('chevron', true));
-    groupToggle.addEventListener('click', () => {
-      const collapsed = !groupItems.hidden;
-      groupItems.hidden = collapsed;
-      groupToggle.setAttribute('aria-expanded', String(!collapsed));
-      if (collapsed) townCollapsedGroups.add(groupName);
-      else townCollapsedGroups.delete(groupName);
-    });
-    sidebarGroup.append(groupToggle, groupItems);
-    $('sidebar-town-features').append(sidebarGroup);
     const mainGroup = element('section', 'town-main-group');
     mainGroup.append(element('h3', '', groupName));
     townGroups.set(groupName, { node: mainGroup, features });
     $('town-feature-list').append(mainGroup);
     for (const feature of features) {
       const modeIcon = { being: 'chat', web: 'external', local: 'terminal', app:'panel' }[feature.mode];
-      const sidebarButton = element('button', 'town-sidebar-feature');
-      sidebarButton.dataset.townFeature = feature.id;
-      sidebarButton.title = `${feature.label} · ${feature.name}`;
-      const sidebarCopy = element('span', 'town-sidebar-copy');
-      sidebarCopy.append(element('span', 'town-sidebar-label', feature.label), element('span', 'town-sidebar-name', feature.name));
-      sidebarButton.setAttribute('aria-label', `${feature.label} · ${feature.name}`);
-      sidebarButton.append(icon(modeIcon, true), sidebarCopy);
-      sidebarButton.addEventListener('click', () => selectTownFeature(feature.id));
-      groupItems.append(sidebarButton);
-      townSidebarButtons.set(feature.id, sidebarButton);
-
       const row = element('article', 'town-feature');
       row.id = `town-feature-${feature.id}`;
       row.dataset.featureId = feature.id;
@@ -1238,15 +1164,7 @@ document.querySelectorAll('button[data-page]').forEach((button) => button.addEve
   if(button.dataset.page==='tasks')featureTaskView?.setFeature('');
   changePage(button.dataset.page);
 }));
-for (const section of ['project', 'session', 'town']) {
-  const toggle = $(`sidebar-${section}-toggle`);
-  toggle?.addEventListener('click', () => {
-    const content = $(`sidebar-${section}-content`);
-    content.hidden = !content.hidden;
-    toggle.setAttribute('aria-expanded', String(!content.hidden));
-  });
-}
-['town-retry', 'sidebar-town-retry'].forEach((id) => $(id)?.addEventListener('click', () => { void loadTownCatalog(); }));
+$('town-retry')?.addEventListener('click', () => { void loadTownCatalog(); });
 $('town-search')?.addEventListener('input', filterTownCatalog);
 $('town-search-clear')?.addEventListener('click', () => {
   $('town-search').value = '';
@@ -1272,11 +1190,11 @@ $('settings-connect-form').addEventListener('submit', (event) => { event.prevent
 ['settings-reconnect', 'reconnect-inline', 'reconnect-placeholder'].forEach((id) => $(id).addEventListener('click', () => { void perform('reconnect'); }));
 $('settings-disconnect').addEventListener('click', () => { void perform('disconnect'); });
 ['sidebar-select-workspace', 'workspace-select', 'workspace-empty-select'].forEach((id) => $(id).addEventListener('click', () => { void selectWorkspace(); }));
-$('workspace-shortcut').addEventListener('click', () => { if (state.workspace.path) changePage('workspace'); else void selectWorkspace(); });
 $('workspace-open').addEventListener('click', () => { void perform('openWorkspace'); });
 $('workspace-refresh').addEventListener('click', () => { void loadFiles(currentFolder); });
 $('select-portal-executable').addEventListener('click', () => { void perform('selectPortalExecutable'); });
 $('select-portal-config').addEventListener('click', () => { void perform('selectPortalConfig'); });
+$('portal-adopt').addEventListener('click', () => { if (!$('portal-adopt').disabled) void perform('adoptPortal'); });
 $('portal-setup').addEventListener('click', () => { void setupPortal(); });
 $('portal-setup-assist').addEventListener('click', () => { void askBeingAboutPortal(); });
 $('portal-setup-choose-workspace').addEventListener('click', () => { void perform('selectPortalWorkspace'); });
@@ -1341,14 +1259,17 @@ for (const type of ['pointerdown', 'focusin']) {
   });
 }
 $('active-session')?.addEventListener('click', () => changePage('chat'));
-async function selectChatSession(id) {
+async function selectChatSession(id, project='') {
   try {
     if (id !== null && id === state.chatSessions?.activeId) { changePage('chat'); return; }
-    await bridge.changeChatSession(id);
+    await bridge.changeChatSession(id,project);
+    if(bridge.getState)acceptState(await bridge.getState());
     changePage('chat');
-  } catch (error) { showToast(str(error?.message, '会话操作失败，请重试。'), true); }
+    return true;
+  } catch (error) { showToast(str(error?.message, '会话操作失败，请重试。'), true); return false; }
 }
-$('new-chat-session')?.addEventListener('click', () => selectChatSession(null));
+window.beingSidebar?.init({bridge,selectSession:selectChatSession,changePage,openTownModule,selectFeature:selectTownFeature,acceptState,showToast,rename:renameChatSession,toggleSidebar,navigateHistory});
+if(window.beingSidebar?.isCollapsed())toggleSidebar();
 [['window-minimize', 'minimize'], ['window-maximize', 'maximize'], ['window-close', 'close']].forEach(([id, method]) => $(id).addEventListener('click', () => { void perform(method); }));
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') dismissToast();
@@ -1365,8 +1286,6 @@ document.addEventListener('keydown', (event) => {
   }
   if (!(state.machine.platform === 'darwin' ? event.metaKey : event.ctrlKey) || event.altKey || event.shiftKey || event.repeat) return;
   if (event.key.toLowerCase() === 'b') { event.preventDefault(); toggleSidebar(); }
-  if (event.key === '1') { event.preventDefault(); changePage('chat'); }
-  if (event.key === '2') { event.preventDefault(); changePage('workspace'); }
   if (event.key === ',') { event.preventDefault(); changePage('settings'); }
 });
 window.addEventListener('resize', scheduleView);
@@ -1382,7 +1301,7 @@ const settingsSections = [
   {id: 'appearance', label: '外观', icon: 'eye', targets: ['appearance-settings', 'reading-settings'], keywords: '颜色 配色 主题 字号 阅读'},
   {id: 'connection', label: '连接', icon: 'link', targets: ['settings-connect-form', 'town-connection-settings'], keywords: 'Being Loom Town 地址 授权 实时 同步 配对'},
   {id: 'models', label: '模型', icon: 'cpu', targets: ['model-settings'], keywords: 'API 服务 密钥 Side by Side'},
-  {id: 'orchestration', label: '编排模式', icon: 'cpu', targets: ['orchestration-settings'], keywords: 'Orchestrator Worker Agent Kit Codex Cursor Grok 执行 工具'},
+  {id: 'orchestration', label: '编排模式', icon: 'cpu', targets: ['orchestration-settings'], keywords: 'Orchestrator Worker Agent Kit Codex Claude Cursor Grok 执行 工具'},
   {id: 'portal', label: '本机 Portal', icon: 'terminal', targets: ['portal-settings'], keywords: '工作区 工具 权限 程序 更新'},
   {id: 'about', label: '关于', icon: 'info', targets: ['export-diagnostics', 'setup-restart'], keywords: '版本 诊断 新手引导'},
 ];
@@ -1489,7 +1408,7 @@ function initializeSettingsLayout() {
 }
 
 initializeSettingsLayout();
-window.beingOrchestration?.init({bridge,onOpen:()=>changePage('workers'),onBack:()=>changePage('chat'),onUpdate:()=>render()});
+window.beingOrchestration?.init({bridge,onOpen:()=>changePage('workers'),onBack:()=>changePage('chat'),onUpdate:orchestration=>{state.orchestration=orchestration;render();}});
 window.beingThemeSettings?.init({bridge,onState:acceptState});
 window.beingPortalPermissions?.init({bridge,onState:acceptState});
 window.beingPortalUpdates?.init({bridge,onState:acceptState,onOpenSettings:openPortalUpdateSettings,onError:message=>showToast(message,true)});
@@ -1519,6 +1438,7 @@ if (bridge?.getWindowState) void bridge.getWindowState().then(renderWindowState)
 if (bridge?.onState) bridge.onState(acceptState);
 if (bridge?.onCommand) {
   bridge.onCommand((command) => {
+    if(window.beingSidebar?.command(command))return;
     if (command === 'toggle-sidebar') toggleSidebar();
     else if (command === 'navigate-back') navigateHistory(-1);
     else if (command === 'navigate-forward') navigateHistory(1);
@@ -1543,7 +1463,7 @@ function renameChatSession(item, button) {
   const dot=button.querySelector('.session-activity-light');if(dot)editor.append(dot.cloneNode(true));
   editor.append(input);button.replaceWith(editor);editingSession=editor;
   let saving=false,finished=false;
-  const close=()=>{if(finished)return;finished=true;if(editingSession===editor)editingSession=null;render();};
+  const close=()=>{if(finished)return;finished=true;if(editingSession===editor)editingSession=null;editor.remove();window.beingSidebar?.refresh();render();};
   const save=async()=>{
     if(saving || finished || editingSession!==editor)return;
     const title=input.value.trim();

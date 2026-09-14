@@ -25,3 +25,19 @@ test('unavailable and plaintext backends never persist client tokens', async t =
   }
   assert.deepEqual(await fs.readdir(directory), []);
 });
+test('Town identity migration preserves the token, pins across restart, and rejects stale or foreign bindings', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'town-binding-')); t.after(() => fs.rm(directory, {recursive: true, force: true}));
+  const store = new TownClientStore({directory, safeStorage}), token = 'a'.repeat(64);
+  await store.save('key', 'alice', token);
+  const before = await fs.readFile(store._file('key'));
+  await assert.rejects(store.bindTownId('key', 'alice', token, 't_alice', () => false), {code: 'SESSION_CHANGED'});
+  assert.equal((await fs.readFile(store._file('key'))).equals(before), true);
+  await store.bindTownId('key', 'alice', token, 't_alice');
+  const fresh = new TownClientStore({directory, safeStorage}), restored = await fresh.loadCredential('key', 'alice');
+  assert.equal(restored.token === token, true); assert.equal(restored.townId, 't_alice');
+  const pinned = await fs.readFile(store._file('key'));
+  await assert.rejects(fresh.bindTownId('key', 'alice', token, 't_foreign'), {code: 'IDENTITY_MISMATCH'});
+  await assert.rejects(fresh.bindTownId('key', 'alice', 'b'.repeat(64), 't_alice'), {code: 'SESSION_CHANGED'});
+  assert.equal((await fs.readFile(store._file('key'))).equals(pinned), true);
+  assert.equal(pinned.includes(Buffer.from(token)), false); assert.equal(pinned.includes(Buffer.from('t_alice')), false);
+});

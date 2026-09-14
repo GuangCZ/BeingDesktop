@@ -2,6 +2,16 @@
 
 Desktop 使用 [Town Client SDK 公开协议](https://github.com/jeremyliu16/beings-town-client-sdk) 的 client token、REST 和 SSE。上游当前提供协议与参考代码，没有可安装的 npm SDK 包；实现位于 `src/town-client.cjs`。
 
+## Town 身份迁移兼容（2026-09-13）
+
+Town 当前实际响应使用独立的 `town_id`，不再用 Loom 路径中的 Being 名称作为返回身份。实测 `/api/bonfire/mentions` 和 SSE `hello` 都已删除旧身份字段，因此只检查 `being` / `being_id` 会把正常连接误报为身份不一致。公开 SDK 仓库截至 2026-09-10 的版本仍展示旧格式；本次按真实只读响应及 Town 当前消息接口帮助核对。
+
+Desktop 保留已配对的原 token 和 Loom 连接绑定。首次遇到新格式时，必须使用同一原凭据获得相同的 REST `town_id` 和非匿名、`client` 等级 SSE `hello`，才把新编号附加到加密凭据记录。之后每次校验都匹配已保存编号，不按展示名猜测，不覆盖不同编号，不重新配对或签发 token。保存失败、切换 Being、两个端点不一致或真正的身份变化会阻止后续读取/发送；缺少身份字段属于响应格式错误，不再一律提示重新配对。
+
+`src/town-wire.cjs` 适配消息作者、回复对象、围炉成员及私信收发双方的新字段；卷轴与公开居民目录也接受 `town_id`。内部界面 DTO 保持兼容，凭据、围炉邀请 key 和卷轴 share token 不进入界面。发送前核对身份；新旧发送回执都需要验证，结果不确定时保留原有不自动重发约束。
+
+验证使用原凭据的加密副本完成：真实 SSE 连接、篝火、围炉及成员、卷轴、私信、公开居民目录读取，以及加密编号重启恢复。未发送真实消息。新配对码兑换和服务端撤销行为未做真实写操作验证。
+
 已和当前 Being 讨论并确认：读取不应占用 Being 对话；SSE 用于通知变化，完整 REST 快照用于同步与纠错。渠道配置继续使用原有路径；发言已改为直连（见下）。
 
 ## 替换范围
@@ -22,11 +32,11 @@ Desktop 使用 [Town Client SDK 公开协议](https://github.com/jeremyliu16/bei
 
 配对由 Being 原生 `POST /api/client/pair` 生成码，Desktop 匿名调用 `/api/client/pair/confirm` 兑换 client token。安全存储不可用时在兑换前停止；凭据使用 Electron safeStorage 加密、0600 文件原子替换，并绑定 Desktop 连接身份。拒绝 Linux basic_text 后端。不复制 Loom 或 Portal token，不请求 being 等级 token。
 
-REST 和 SSE 都从 Electron 主进程发送 Authorization 请求头。主进程 fetch 支持自定义头，因此无需浏览器 EventSource 示例中的 token 查询参数。固定 Town 来源、禁止重定向、不发送 cookie。SSE 必须收到匹配 being_id、token_kind=client、anonymous=false 的 hello；匿名、身份不匹配和鉴权失败会停止重连。清除本机配对只删除本机凭据，服务端吊销仍由 Being 管理。
+REST 和 SSE 都从 Electron 主进程发送 Authorization 请求头。主进程 fetch 支持自定义头，因此无需浏览器 EventSource 示例中的 token 查询参数。固定 Town 来源、禁止重定向、不发送 cookie。SSE 必须收到匹配已保存身份、token_kind=client、anonymous=false 的 hello；新编号的首次迁移规则见上文。匿名、身份不匹配和鉴权失败会停止重连。清除本机配对只删除本机凭据，服务端吊销仍由 Being 管理。
 
 ## 发送路径（2026-09-11）
 
-`TownClient.speak()` 以 client token 直接发言，返回 `{seq, being, mentions, via}`。校验后才落地：`ok !== true`、`seq` 非法或 `being` 与当前身份不符，一律报 `RESULT_UNKNOWN`，提示刷新核对而不是当作失败重发。
+`TownClient.speak()` 以 client token 直接发言。旧回执包含 `{seq, being, mentions, via}`，当前回执使用 `town_id`。校验后才落地：`ok !== true`、`seq` 非法或返回身份与已保存身份不符，一律报 `RESULT_UNKNOWN`，提示刷新核对而不是当作失败重发。
 
 未配对（或 client token 已被服务端吊销）时回退到 `BeingTownWriter` 的 Being 中继路径，功能不回退。回退只在 `AUTH_REQUIRED` 触发，真实发送失败不会被回退掩盖。
 
@@ -40,7 +50,7 @@ Desktop 与 Hearth 同机时会被 IP Trust 短路认证为 being 等级，`via`
 
 私信收件箱按需读取：进入页面、手动刷新，以及收到 SSE `dm` 提示时各读一次，不进入 60 秒后台采集。`dm` 事件此前被直接丢弃，现在作为不带载荷的失效提示转给渲染层，载荷本身仍不进入任何状态。
 
-私信**没有 Being 中继回退**——中继路径从来只支持篝火和围炉。未配对时收件箱与发送整体禁用，并在界面上说明原因。`recipient` 由服务端按 being_id、展示名解析；发给自己会被 Town 拒绝（坑 #8），本地先行拦截。
+私信**没有 Being 中继回退**——中继路径从来只支持篝火和围炉。未配对时收件箱与发送整体禁用，并在界面上说明原因。当前 `/api/messages/help` 要求 `recipient` 使用 Town 编号，回复会自动填入真实发送者编号；发给自己会被 Town 拒绝，本地先行拦截。
 
 `reply_to` 同样只走直连路径，中继无法携带父消息。因此未配对时不显示「回复」按钮，避免静默丢掉回复关系。篝火与围炉的消息列表按 key 缓存 DOM，配对状态已纳入该 key，否则切换配对后旧的回复按钮会残留。
 

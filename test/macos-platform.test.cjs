@@ -104,7 +104,7 @@ test('Mac installer rejects a Windows payload even when the size matches the exp
 
 test('Mac update checks require the current architecture asset and can probe a native binary name', async () => {
   const name='heart-portal-macos-arm64';
-  const release={tag_name:'v0.8.1',draft:false,prerelease:false,html_url:'https://github.com/d5z/heart-portal/releases/tag/v0.8.1',assets:[{name,state:'uploaded',size:10,browser_download_url:`https://github.com/d5z/heart-portal/releases/download/v0.8.1/${name}`}]};
+  const release={tag_name:'v0.8.1',draft:false,prerelease:false,html_url:'https://github.com/d5z/heart-portal/releases/tag/v0.8.1',assets:[{name,state:'uploaded',size:10,digest:'sha256:'+'a'.repeat(64),browser_download_url:`https://github.com/d5z/heart-portal/releases/download/v0.8.1/${name}`}]};
   assert.equal(parsePortalRelease(release,{platform:'darwin',arch:'arm64'}).version,'0.8.1');
   assert.throws(()=>parsePortalRelease(release,{platform:'darwin',arch:'x64'}),/当前平台/);
   assert.equal(await readPortalVersion(path.resolve('heart-portal-macos-arm64'),{statImpl:async()=>({isFile:()=>true,isSymbolicLink:()=>false}),execImpl:async(file,args)=>{
@@ -132,12 +132,12 @@ test('Mac terminal uses zsh PTY without Windows flags or inherited credentials a
 
 test('Mac menu uses Command while Windows retains Control shortcuts', () => {
   const input={type:'keyDown',key:'1',meta:true};
-  assert.equal(commandForInput(input,'darwin'),'chat');
+  assert.equal(commandForInput(input,'darwin'),'task-1');
   assert.equal(commandForInput(input,'win32'),null);
   assert.equal(commandForInput({...input,meta:false,control:true},'darwin'),null);
-  assert.equal(commandForInput({...input,meta:false,control:true},'win32'),'chat');
+  assert.equal(commandForInput({...input,meta:false,control:true},'win32'),'task-1');
   const menu=createDesktopMenuTemplate('file',{sendCommand(){},closeWindow(){}},'darwin');
-  assert.equal(menu[0].accelerator,'Cmd+1');
+  assert.equal(menu[0].accelerator,'Cmd+N');
   assert.equal(menu.at(-1).accelerator,'Cmd+W');
 });
 

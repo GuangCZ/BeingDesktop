@@ -16,7 +16,7 @@ class DesktopTools {
     this.requests=new Map();this.remoteJobs=new Set();this.jobOrigins=new Map();this.generation=0;this.disposed=false;this.notifyQueued=false;this.requestResult=null;
     this.browser=new Browser({WebContentsView,session,getWindow,onChange:()=>this.changed()});
     this.console=new Console({getWorkspace,onChange:()=>this.changed()});
-    this.link=new ToolLink({...(desktopId?{portalName:desktopPortalName(desktopId)}:{}),onChange:()=>this.changed(),toolAllowed:name=>orchestration?.mode.enabled?name.startsWith('desktop_worker_'):!name.startsWith('desktop_worker_') && (!name.startsWith('desktop_terminal_') || Boolean(getTerminal()) && ['win32','darwin'].includes(process.platform)),invokeTool:(name,args,context)=>this.request(name,args,context)});
+    this.link=new ToolLink({shouldReconnect:()=>!this.disposed && orchestration?.mode.enabled===true && !orchestration.configuring,...(desktopId?{portalName:desktopPortalName(desktopId)}:{}),onChange:()=>this.changed(),toolAllowed:name=>orchestration?.mode.enabled?name.startsWith('desktop_worker_'):!name.startsWith('desktop_worker_') && (!name.startsWith('desktop_terminal_') || Boolean(getTerminal()) && ['win32','darwin'].includes(process.platform)),invokeTool:(name,args,context)=>this.request(name,args,context)});
   }
   snapshot() {
     const consoleState=this.console.snapshot(),jobIds=new Set(consoleState.jobs.map(job=>job.id));

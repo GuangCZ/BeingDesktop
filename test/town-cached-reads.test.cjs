@@ -17,7 +17,7 @@ function harness() {
     async load(identity, resource) { return structuredClone(data.get(JSON.stringify([identity, resource])) || {cached: false, data: null, lastSuccessAt: null}); },
     async save(identity, resource, value) { data.set(JSON.stringify([identity, resource]), {cached: true, data: structuredClone(value), lastSuccessAt: 1000}); return true; },
   };
-  const reads = new TownCachedReads({cache, getContext: () => context});
+  const reads = new TownCachedReads({cache, getContext: () => context, now: () => 1000});
   return {reads, cache, data, setContext(value) { context = {...context, ...value}; }};
 }
 

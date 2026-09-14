@@ -45,7 +45,8 @@ test('self-hosted presets mirror Loom: a keyless provider with a default address
   const result = modelConfigDto({...config, presets: [...config.presets, selfHosted]}, 7, 'now');
   assert.deepEqual(result.models[2], {id: 'glm-5.3-flash', presetId: 'self-hosted-glm', name: 'GLM 5.3 Flash', provider: 'self-hosted', hasApiKey: null, baseUrl: ''});
   assert.deepEqual(result.providers.find(provider => provider.id === 'self-hosted'), {id: 'self-hosted', name: '自部署', baseUrl: 'http://115.190.110.33:7860/v1', keyless: true});
-  assert.equal(result.providers.find(provider => provider.id === 'glm').name, 'GLM');
+  assert.deepEqual(result.providers.find(provider => provider.id === 'glm'), {id: 'glm', name: 'GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', keyless: false});
+  assert.equal(result.providers.find(provider => provider.id === 'openai').baseUrl, 'https://api.openai.com/v1');
   const explicit = modelConfigDto({...config, presets: [{...selfHosted, base_url: 'http://10.0.0.2:7860/v1?key=private'}]}, 7, 'now');
   assert.equal(explicit.models[0].baseUrl, 'http://10.0.0.2:7860/v1');
   assert.doesNotMatch(JSON.stringify(explicit), /private/);
