@@ -15,7 +15,12 @@ module.exports = {
   ...build,
   npmRebuild: true,
   forceCodeSigning: !local,
-  ...(local ? {afterPack: signing.afterPack, afterSign: signing.afterSign} : {afterSign: signing.verifyDeveloper}),
+  afterPack: async context => {
+    // Directory builds also need a feed; write it before sealing the app.
+    await require('./scripts/macos-update-config.cjs')(context);
+    if (local) await signing.afterPack(context);
+  },
+  afterSign: local ? signing.afterSign : signing.verifyDeveloper,
   directories: { ...build.directories, output: mode === 'local-test' ? 'dist/macos/experimental-local-signing' : 'dist/macos' },
   mac: {
     target: ['dmg', 'zip'],

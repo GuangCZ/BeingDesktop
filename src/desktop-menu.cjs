@@ -90,7 +90,7 @@ function createDesktopMenuTemplate(name, {sendCommand, closeWindow, editTarget},
       command('打开浏览器', 'open-browser', 'Ctrl+T'),
       command('切换控制台', 'toggle-console', 'Ctrl+J'),
     ];
-    case 'help': return [command('关于 Being Desktop', 'about')];
+    case 'help': return [command('检查 Desktop 更新…', 'desktop-updates'), command('关于 Being Desktop', 'about')];
     default: throw new Error('请选择有效的应用菜单。');
   }
 }

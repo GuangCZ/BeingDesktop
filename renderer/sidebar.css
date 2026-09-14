@@ -48,7 +48,7 @@
 .sidebar .sidebar-bottom { border: 0; padding: 8px 0 0; }
 .sidebar-profile { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px; border-radius: 8px; text-align: left; background: transparent; color: var(--sidebar-text); }
 .sidebar-profile:hover { background: var(--sidebar-hover); }
-.sidebar-avatar { display: grid; place-items: center; width: 28px; height: 28px; flex-shrink: 0; background: color-mix(in srgb,var(--sidebar-text) 12%,transparent); border: 1px solid var(--sidebar-line); border-radius: 50%; font-size: 12px; font-weight: 600; }
+.sidebar-avatar { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; background: color-mix(in srgb,var(--sidebar-text) 12%,transparent); border: 1px solid var(--sidebar-line); border-radius: 50%; font-size: 14px; font-weight: 600; }
 .sidebar-profile-copy { display: flex; flex: 1; flex-direction: column; min-width: 0; gap: 2px; }
 .sidebar-profile-copy strong { font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-profile-copy > span { font-size: 10px; color: var(--sidebar-muted); }
@@ -83,3 +83,11 @@
 :root[data-platform] .sidebar .project-toggle { padding-right: 46px; }
 @media (max-width: 1100px) { :root, :root[data-platform="darwin"] { --sidebar-width: 224px; } }
 @media (prefers-reduced-motion: reduce) { .sidebar *, .sidebar *::before { transition: none !important; animation: none !important; } }
+
+.sidebar-profile-row { position: relative; }
+.sidebar-profile-row:has(.sidebar-desktop-update:not([hidden])) .sidebar-profile-copy { padding-right: 36px; }
+.sidebar-desktop-update { position: absolute; right: 30px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 28px; height: 28px; padding: 4px; border: 0; border-radius: 50%; background: #2684ff; color: #fff; cursor: pointer; }
+.sidebar-desktop-update[hidden] { display: none; }
+.sidebar-desktop-update:hover { background: #1473ee; }
+.sidebar-desktop-update:disabled { cursor: progress; opacity: .65; }
+.sidebar-desktop-update > .icon { width: 20px; height: 20px; stroke-width: 2; }

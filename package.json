@@ -1,6 +1,6 @@
 {
   "name": "being-desktop",
-  "version": "0.8.25",
+  "version": "0.8.26",
   "description": "A desktop home for your existing Being, Loom and local Portal.",
   "author": {
     "name": "Being Desktop contributors"
@@ -12,12 +12,12 @@
     "postinstall": "node node_modules/electron/install.js",
     "start": "electron .",
     "test": "node scripts/test.cjs",
-    "check": "node --check src/platform.cjs && node --check src/desktop-terminal.cjs && node --check src/desktop-console.cjs && node --check src/portal-installer.cjs && node --check src/portal-maintenance.cjs && node --check src/portal-adoption.cjs && node --check src/portal-tools-config.cjs && node --check src/portal-permissions.cjs && node --check renderer/portal-permissions.js && node --check src/portal-launchagent.cjs && node --check src/portal-windows-manager.cjs && node --check src/main.cjs && node --check src/preload.cjs && node --check src/portal-updates.cjs && node --check src/model-config.cjs && node --check src/onboarding.cjs && node --check src/onboarding-inspection.cjs && node --check src/ui-theme.cjs && node --check renderer/portal-updates.js && node --check renderer/model-settings.js && node --check renderer/onboarding.js && node --check renderer/theme-colors.js && node --check renderer/theme-settings.js && node --check src/sidebar-state.cjs && node --check renderer/sidebar.js && node --check renderer/app.js && node --check src/portal-config.cjs && node --check src/portal-permissions.cjs && node --check renderer/portal-permissions.js && node --check renderer/chat-app.js && node --check renderer/chat-composer.js && node --check renderer/town-mentions.js && node --check src/town-wire.cjs && node --check renderer/composer-helpers.js && node --check src/composer-kits.cjs && node --check renderer/chat-selection.js && node --check renderer/chat-references.js && node --check src/chat-details.cjs && npm run check:workers",
+    "check": "node --check src/desktop-updates.cjs && node --check renderer/desktop-updates.js && node --check src/platform.cjs && node --check src/desktop-terminal.cjs && node --check src/desktop-console.cjs && node --check src/portal-installer.cjs && node --check src/portal-maintenance.cjs && node --check src/portal-adoption.cjs && node --check src/portal-tools-config.cjs && node --check src/portal-permissions.cjs && node --check renderer/portal-permissions.js && node --check src/portal-launchagent.cjs && node --check src/portal-windows-manager.cjs && node --check src/main.cjs && node --check src/preload.cjs && node --check src/portal-updates.cjs && node --check src/model-config.cjs && node --check src/onboarding.cjs && node --check src/onboarding-inspection.cjs && node --check src/ui-theme.cjs && node --check renderer/portal-updates.js && node --check renderer/model-settings.js && node --check renderer/onboarding.js && node --check renderer/theme-colors.js && node --check renderer/theme-settings.js && node --check src/sidebar-state.cjs && node --check renderer/sidebar.js && node --check renderer/app.js && node --check src/portal-config.cjs && node --check src/portal-permissions.cjs && node --check renderer/portal-permissions.js && node --check renderer/chat-app.js && node --check renderer/chat-composer.js && node --check renderer/town-mentions.js && node --check src/town-wire.cjs && node --check renderer/composer-helpers.js && node --check src/composer-kits.cjs && node --check renderer/chat-selection.js && node --check renderer/chat-references.js && node --check src/chat-details.cjs && npm run check:workers",
     "test:portal-updates": "node --test test/portal-updates.test.cjs && node test/portal-updates-ui.cjs",
     "test:onboarding": "node test/onboarding-ui.cjs",
     "test:theme": "node scripts/verify-theme-settings.cjs",
     "pack": "electron-builder --win dir",
-    "dist": "electron-builder --win portable",
+    "dist": "electron-builder --win nsis portable --x64",
     "pack:mac": "electron-builder --config electron-builder.mac.cjs --mac --dir --publish never",
     "dist:mac": "electron-builder --config electron-builder.mac.cjs --mac --publish never",
     "dist:mac:arm64": "npm run dist:mac -- --arm64",
@@ -26,7 +26,8 @@
     "test:orchestration": "node --test test/orchestration-policy.test.cjs test/agent-process.test.cjs test/orchestration.test.cjs test/worker-callbacks.test.cjs test/desktop-tool-link.test.cjs test/loom-sessions.test.cjs && node test/orchestration-ui.cjs",
     "test:mac": "electron test/macos-electron.cjs",
     "test:sidebar": "node --test test/sidebar-state.test.cjs test/desktop-menu.test.cjs && node test/sidebar-ui.cjs",
-    "test:chat": "node --test test/chat-references.test.cjs test/chat-details.test.cjs test/chat-sessions.test.cjs test/chat-store.test.cjs test/being-chat.test.cjs && electron test/chat-conversation-ui.cjs"
+    "test:chat": "node --test test/chat-references.test.cjs test/chat-details.test.cjs test/chat-sessions.test.cjs test/chat-store.test.cjs test/being-chat.test.cjs && electron test/chat-conversation-ui.cjs",
+    "test:desktop-updates": "node --test test/desktop-updates.test.cjs && node test/desktop-updates-ui.cjs"
   },
   "build": {
     "appId": "town.beings.desktop",
@@ -48,12 +49,30 @@
       "output": "dist"
     },
     "win": {
-      "target": "portable",
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "renderer/assets/being/being-icon.ico",
       "signExecutable": false
     },
     "portable": {
       "artifactName": "Being-Desktop-${version}-windows-x64.exe"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "GuangCZ",
+        "repo": "BeingDesktop",
+        "releaseType": "release"
+      }
+    ],
+    "nsis": {
+      "artifactName": "Being-Desktop-${version}-windows-${arch}-setup.exe",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
     }
   },
   "devDependencies": {
@@ -63,6 +82,7 @@
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
+    "electron-updater": "6.8.9",
     "node-pty": "1.1.0",
     "ws": "8.21.3"
   }

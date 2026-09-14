@@ -137,3 +137,25 @@ body[data-page="settings"] #content-grid { grid-template-columns: minmax(0, 1fr)
 }
 
 #page-settings #portal-maintenance-status { margin: 0; padding: 0 16px 12px; }
+
+/* Desktop updates share one group; status and actions keep their own spacing. */
+#page-settings .desktop-update-controls { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: color-mix(in srgb, var(--surface) 35%, var(--background)); container-type: inline-size; }
+#page-settings .desktop-update-controls > .switch-row { gap: 24px; border: 0; border-radius: 0; background: transparent; }
+#page-settings .desktop-update-controls .switch-row > span:first-child { min-width: 0; }
+#page-settings .desktop-update-controls .switch-row .field-help { margin-top: 4px; line-height: 18px; }
+#page-settings .desktop-update-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px 24px; padding: 16px; border-top: 1px solid var(--line); }
+#page-settings .desktop-update-feedback { flex: 1 1 200px; min-width: 0; }
+#page-settings #desktop-update-status { margin: 0; color: var(--muted); font-size: 13px; font-weight: 400; line-height: 20px; overflow-wrap: anywhere; }
+#page-settings #desktop-update-panel[data-update-status="error"] #desktop-update-status { color: var(--warning); }
+#page-settings .desktop-update-footer > .inline-actions { flex: 0 0 auto; flex-wrap: wrap; gap: 8px; margin: 0; }
+#page-settings #desktop-update-progress { display: block; width: 100%; height: 4px; margin: 10px 0 0; border: 0; border-radius: 2px; overflow: hidden; accent-color: var(--accent); }
+#page-settings #desktop-update-progress[hidden] { display: none; }
+#page-settings .desktop-update-details { padding: 0 16px 16px; color: var(--muted); font-size: 12px; line-height: 18px; }
+#page-settings .desktop-update-details > summary { width: fit-content; cursor: pointer; }
+#page-settings .desktop-update-details p { max-width: 60ch; margin: 8px 0 0; font-size: 12px; font-weight: 400; line-height: 20px; overflow-wrap: anywhere; }
+@container (max-width: 480px) {
+  #page-settings .desktop-update-footer { align-items: stretch; flex-direction: column; gap: 12px; }
+  #page-settings .desktop-update-feedback { flex-basis: auto; }
+}
+
+#page-settings #desktop-update-panel .desktop-update-controls > .switch-row { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }

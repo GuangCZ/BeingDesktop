@@ -1,0 +1,20 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const {createHash} = require('node:crypto');
+const {verifyUpdateArtifacts} = require('../scripts/check-desktop-update-artifacts.cjs');
+test('release gate rejects missing files, modified bytes, wrong versions and escaping paths', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-update-assets-'));
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const name = 'Being-Desktop-0.8.26-macos-arm64.zip', bytes = Buffer.from('fixture');
+  const info = {version: '0.8.26', files: [{url: name, size: bytes.length, sha512: createHash('sha512').update(bytes).digest('base64')}]};
+  const write = data => fs.writeFileSync(path.join(dir, 'latest-mac.yml'), JSON.stringify(data));
+  write(info);assert.throws(() => verifyUpdateArtifacts(dir, 'mac', '0.8.26'));
+  fs.writeFileSync(path.join(dir, name), bytes);assert.equal(verifyUpdateArtifacts(dir, 'mac', '0.8.26').version, '0.8.26');
+  assert.throws(() => verifyUpdateArtifacts(dir, 'mac', '0.8.27'), /version/);
+  fs.writeFileSync(path.join(dir, name), 'changed');assert.throws(() => verifyUpdateArtifacts(dir, 'mac', '0.8.26'), /checksum/);
+  write({...info, files: [{...info.files[0], url: '../' + name}]});assert.throws(() => verifyUpdateArtifacts(dir, 'mac', '0.8.26'), /filename/);
+});

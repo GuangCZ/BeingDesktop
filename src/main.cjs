@@ -25,6 +25,7 @@ const {restoreOnboarding,saveOnboardingStep,completeOnboardingAfterBonfire,remem
 const {normalizeAppMenuRequest,commandForInput,captureMenuEditingTarget,getDesktopWindowState,createDesktopMenuTemplate} = require('./desktop-menu.cjs');
 const {getTownCatalog,townPageUrl,prepareTownFeature,prepareTownAssistance,prepareFiresideDraft,prepareLoomDraft} = require('./town.cjs');
 const {PortalInstaller} = require('./portal-installer.cjs');
+const {DesktopUpdates, updateSupport, prepareMacUpdate, readPublishedVersion, RELEASE_URL: DESKTOP_RELEASE_URL} = require('./desktop-updates.cjs');
 const {PortalUpdates, readPortalVersion} = require('./portal-updates.cjs');
 const {PortalMaintenance} = require('./portal-maintenance.cjs');
 const {discoverLaunchAgent} = require('./portal-launchagent.cjs');
@@ -95,6 +96,9 @@ function boot() {
   let portalWatchdog;
   let desktopConnectPromise=null;
   let portalUpdateNotification = null;
+  let desktopUpdateNotification = null;
+  let desktopUpdates = null;
+  let desktopInstallPrompt = false;
   let mutationTail = Promise.resolve();
   let composerTimer=null;
   let messageQueueTimer=null;
@@ -130,6 +134,7 @@ function boot() {
   serialized.add('selectSavedProject');
   serialized.add('renameChatSession');
   serialized.add('saveOrchestration');
+  serialized.add('setDesktopAutoUpdate');
   serialized.add('savePortalPermissions');
   for (const name of ['adoptPortal','applyPortalUpdate','recoverPortalUpdate']) serialized.add(name);
   for(const name of ['installGroveKit','installEligibleGroveKits','prepareGroveAssistance'])serialized.add(name);
@@ -542,7 +547,7 @@ function boot() {
   }
   function publicState() {
     const portalState=portal.state;
-    return structuredClone({...state,desktopId,sidebar:sidebarState(disk.sidebar,connection?sessionPartition(connection):'',state.workspace.path),onboardingAutoSuppressed:disk.onboardingLoomConnected===true,orchestration:orchestration.snapshot(),portal:{...portalState,canAdopt:Boolean(portalAdoptionCandidate) && !matchesAdoption(disk.adoptedPortal,portalAdoptionCandidate),adopted:matchesAdoption(disk.adoptedPortal,portalAdoptionCandidate),canManage:portalMaintenance.state().supported,managerKind:portalMaintenance.state().kind,logs:portalState.owned?portal.logs:[],watchdog:portalWatchdog?.state(),connectionBeingName:portalState.owned?portalBeingName:'',connectionCurrent:portalState.owned?portalIdentityRevision===identityRevision:null},portalUpdate:{...portalUpdates.state(),maintenance:portalMaintenance.state()},townApp:townState()});
+    return structuredClone({...state,desktopUpdate:desktopUpdates?.state(),desktopId,sidebar:sidebarState(disk.sidebar,connection?sessionPartition(connection):'',state.workspace.path),onboardingAutoSuppressed:disk.onboardingLoomConnected===true,orchestration:orchestration.snapshot(),portal:{...portalState,canAdopt:Boolean(portalAdoptionCandidate) && !matchesAdoption(disk.adoptedPortal,portalAdoptionCandidate),adopted:matchesAdoption(disk.adoptedPortal,portalAdoptionCandidate),canManage:portalMaintenance.state().supported,managerKind:portalMaintenance.state().kind,logs:portalState.owned?portal.logs:[],watchdog:portalWatchdog?.state(),connectionBeingName:portalState.owned?portalBeingName:'',connectionCurrent:portalState.owned?portalIdentityRevision===identityRevision:null},portalUpdate:{...portalUpdates.state(),maintenance:portalMaintenance.state()},townApp:townState()});
   }
   async function saveSidebarAction(action, ids = state.chatSessions?.items.map(item=>item.id) || []) {
     const previous=disk.sidebar;
@@ -1368,6 +1373,32 @@ function boot() {
       activity('info','Portal 已接管','已沿用原服务接入启停与更新；原配置、身份和工作区保留，Portal 未重启。');
       broadcast();return publicState();
     });
+    handle('checkDesktopUpdates',async()=>{
+      if(exitStarted || !desktopUpdates)throw new Error('桌面端尚未就绪。');
+      await desktopUpdates.check({manual:true});return publicState();
+    });
+    handle('downloadDesktopUpdate',async()=>{
+      if(exitStarted || !desktopUpdates)throw new Error('桌面端尚未就绪。');
+      await desktopUpdates.download();return publicState();
+    });
+    handle('openDesktopRelease',async()=>{await shell.openExternal(DESKTOP_RELEASE_URL);return publicState();});
+    handle('setDesktopAutoUpdate',async value=>{
+      if(typeof value!=='boolean')throw new Error('无效设置');
+      const previous=disk.desktopAutoUpdate;disk.desktopAutoUpdate=value;
+      try {await persist();}catch(error){disk.desktopAutoUpdate=previous;throw error;}
+      desktopUpdates?.settingsChanged();return publicState();
+    });
+    handle('installDesktopUpdate',async()=>{
+      if(exitStarted || desktopInstallPrompt || desktopUpdates?.state().status!=='ready')return publicState();
+      desktopInstallPrompt=true;
+      try {
+        const answer=await dialog.showMessageBox(win,{type:'question',title:'重启并更新 Being Desktop',
+          message:'现在保存会话并重启安装更新？',detail:'正在运行的桌面任务和终端会停止。请先保存编辑中的文件。',
+          buttons:['稍后','重启安装'],defaultId:0,cancelId:0,noLink:true});
+        if(answer.response===1 && !exitStarted)await desktopUpdates.install(apply=>shutdown({applyUpdate:apply}));
+      } finally {desktopInstallPrompt=false;}
+      return publicState();
+    });
     handle('checkPortalUpdates',async()=>{
       if(exitStarted)throw new Error('桌面端正在退出。');
       await portal.inspect({forceVersion:true});
@@ -1505,7 +1536,7 @@ function boot() {
     tray.setToolTip(`Being Desktop · ${state.runtime.model || '等待连接'}`);
     tray.setContextMenu(Menu.buildFromTemplate([{label:'打开 Being',click:showDesktopWindow},{type:'separator'},{label:'退出桌面端',click:()=>shutdown()}]));
   }
-  async function shutdown() {
+  async function shutdown({applyUpdate = null} = {}) {
     if(exitStarted)return;exitStarted=true;
     portalWatchdog?.stop();
     onboardingInspection.reset();channelBeing.reset();resetTownReader();chatDetails?.reset();chatSessions?.end();
@@ -1513,6 +1544,7 @@ function boot() {
     townBackground.stop();
     clearInterval(refreshTimer);
     portalUpdates.stop();
+    desktopUpdates?.stop();
     portalMaintenance.cancelDownload();
     await mutationTail;
     await portalMaintenance._operation?.catch(()=>{});
@@ -1523,6 +1555,7 @@ function boot() {
       activity('error','Portal 尚未停止','桌面端保持打开，请检查 Portal 状态后重试停止。');
       showDesktopWindow();
       if(portalUpdateChecksEnabled)portalUpdates.start();
+      desktopUpdates?.start();
       refreshTimer=setInterval(refresh,15000);refreshTimer.unref();
       return;
     }
@@ -1532,7 +1565,7 @@ function boot() {
       const commandJobs=desktopTools?.console.snapshot().jobs || [];
       await Promise.all(commandJobs.filter(job=>['starting','running','stopping'].includes(job.status)).map(job=>desktopTools.console.stop(job.id)));
       await desktopTerminal?.dispose();await desktopTools?.dispose();
-    } catch {exitStarted=false;portalWatchdog.start();syncTownLifecycle();activity('error','命令尚未停止','请在控制台停止运行中的命令后重试退出。');showDesktopWindow();if(portalUpdateChecksEnabled)portalUpdates.start();refreshTimer=setInterval(refresh,15000);refreshTimer.unref();return;}
+    } catch {exitStarted=false;portalWatchdog.start();syncTownLifecycle();activity('error','命令尚未停止','请在控制台停止运行中的命令后重试退出。');showDesktopWindow();if(portalUpdateChecksEnabled)portalUpdates.start();desktopUpdates?.start();refreshTimer=setInterval(refresh,15000);refreshTimer.unref();return;}
     await Promise.all([...liveChatViews].map(async item=>{
       if(item.webContents.isDestroyed())return;
       await item.webContents.executeJavaScript('globalThis.__beingDesktopSessions?.flush()').catch(()=>{});
@@ -1541,9 +1574,12 @@ function boot() {
     generation++;discardView();
     await Promise.all([bonfireCache.flush(),townDataCache.flush(),...[...openFeatureHistories].map(history=>history.flush())]);
     portalUpdateNotification?.close();
+    desktopUpdateNotification?.close();
     if(tray)tray.destroy();
     quitCommitted=true;
-    app.quit();
+    if(applyUpdate)applyUpdate();
+    else app.quit();
+    return true;
   }
   app.on('second-instance',showDesktopWindow);
   app.on('activate',showDesktopWindow);
@@ -1563,6 +1599,29 @@ function boot() {
     session.defaultSession.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));
     session.defaultSession.setPermissionCheckHandler(()=>false);
     await restore();
+    desktopUpdates=new DesktopUpdates({version:app.getVersion(),
+      unsupported:updateSupport({packaged:app.isPackaged,platform:process.platform,
+        portable:Boolean(process.env.PORTABLE_EXECUTABLE_DIR),resourcesPath:process.resourcesPath,executable:process.execPath}),
+      getEnabled:()=>disk.desktopAutoUpdate!==false,
+      createUpdater:()=>require('electron-updater').autoUpdater,
+      getPublishedVersion:()=>readPublishedVersion({fetchImpl:(url,options)=>net.fetch(url,options)}),
+      onInstallError:()=>{
+        dialog.showErrorBox('更新未能安装','系统未能启动更新安装。将重新打开当前版本，你可以稍后重试。');
+        app.relaunch();app.quit();
+      },
+      prepareInstall:async()=>{
+        if(process.platform==='darwin' && !require('electron-updater').autoUpdater.squirrelDownloadedUpdate)
+          await prepareMacUpdate(require('electron').autoUpdater);
+      },
+      onChange:()=>broadcast(),
+      onReady:update=>{
+        if(exitStarted || !Notification.isSupported())return;
+        desktopUpdateNotification?.close();
+        desktopUpdateNotification=new Notification({title:'Being Desktop 更新已下载',body:`${update.latestVersion} 已准备好。点击前往设置，重启安装。`});
+        desktopUpdateNotification.on('click',()=>{showDesktopWindow();sendShellCommand('desktop-updates');});
+        desktopUpdateNotification.show();
+      },
+    });
     await portalMaintenance.initialize();
     win=new BrowserWindow({width:1440,height:940,minWidth:1000,minHeight:700,...windowAppearance({background:state.settings.colors.background,...systemAppearance(nativeTheme)}),show:false,title:'Being Desktop',icon:path.join(__dirname,'../renderer/assets/being/being-icon.ico'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true}});
     const updateAppearance=()=>{
@@ -1622,6 +1681,7 @@ function boot() {
     portalWatchdog.start();
     win.show();refresh();refreshTimer=setInterval(refresh,15000);refreshTimer.unref();
     if(portalUpdateChecksEnabled)portalUpdates.start();
+    desktopUpdates.start();
     powerMonitor.on('suspend',()=>{townSuspended=true;portalWatchdog.stop();syncTownLifecycle();portalUpdates.stop();});
     powerMonitor.on('resume',()=>{townSuspended=false;portalWatchdog.start();syncTownLifecycle();if(portalUpdateChecksEnabled)portalUpdates.start();activity('info','电脑已唤醒','正在核对连接状态，不自动重发消息。');refresh();});
     await onReady?.({app,win,getView:()=>view,getState:publicState,refresh,shutdown,

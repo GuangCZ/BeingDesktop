@@ -5,18 +5,50 @@ const assert = require('node:assert/strict');
 const asar = require('@electron/asar');
 
 const DEPENDENCIES = Object.freeze({
-  'node-pty': '1.1.0',
-  'node-addon-api': '7.1.1',
-  '@xterm/xterm': '6.0.0',
   '@xterm/addon-fit': '0.11.0',
+  '@xterm/xterm': '6.0.0',
+  'argparse': '2.0.1',
+  'builder-util-runtime': '9.7.0',
+  'debug': '4.4.3',
+  'electron-updater': '6.8.9',
+  'fs-extra': '10.1.0',
+  'graceful-fs': '4.2.11',
+  'js-yaml': '4.3.2',
+  'jsonfile': '6.2.1',
+  'lazy-val': '1.0.5',
+  'lodash.escaperegexp': '4.1.2',
+  'lodash.isequal': '4.5.0',
+  'ms': '2.1.3',
+  'node-addon-api': '7.1.1',
+  'node-pty': '1.1.0',
+  'sax': '1.6.1',
+  'semver': '7.7.4',
+  'tiny-typed-emitter': '2.1.0',
+  'universalify': '2.0.1',
   'ws': '8.21.3',
 });
 // electron-builder removes only these observed metadata fields from dependencies.
 const STRIPPED_MANIFEST_FIELDS = Object.freeze({
-  'node-pty': ['bugs', 'keywords', 'scripts'],
-  'node-addon-api': ['bugs', 'contributors', 'keywords', 'scripts'],
-  '@xterm/xterm': ['keywords', 'scripts'],
   '@xterm/addon-fit': ['keywords', 'scripts'],
+  '@xterm/xterm': ['keywords', 'scripts'],
+  'argparse': ['keywords', 'scripts'],
+  'builder-util-runtime': ['bugs'],
+  'debug': ['keywords', 'contributors', 'scripts', 'xo'],
+  'electron-updater': ['bugs'],
+  'fs-extra': ['keywords', 'scripts'],
+  'graceful-fs': ['scripts', 'keywords'],
+  'js-yaml': ['keywords', 'contributors', 'scripts'],
+  'jsonfile': ['keywords', 'scripts'],
+  'lazy-val': ['bugs', 'scripts'],
+  'lodash.escaperegexp': ['keywords', 'contributors', 'scripts'],
+  'lodash.isequal': ['keywords', 'contributors', 'scripts'],
+  'ms': ['scripts', 'eslintConfig'],
+  'node-addon-api': ['bugs', 'contributors', 'keywords', 'scripts'],
+  'node-pty': ['bugs', 'keywords', 'scripts'],
+  'sax': ['scripts'],
+  'semver': ['scripts'],
+  'tiny-typed-emitter': ['keywords', 'scripts'],
+  'universalify': ['keywords', 'bugs', 'scripts'],
   'ws': ['keywords', 'bugs', 'scripts'],
 });
 const NATIVE_FILES = Object.freeze([
@@ -64,6 +96,12 @@ function verifyPackage({ root = path.resolve(__dirname, '..'), archive } = {}) {
     assert.ok(!stat.link, `Archive links are not allowed: ${entry}`);
     if (!stat.files) files.set(entry, stat);
   }
+  // electron-builder hoists updater's pinned semver into the app archive.
+  const sourceFile = file => {
+    if(file.startsWith('node_modules/semver/') && fs.existsSync(path.join(root,'node_modules/electron-updater/node_modules/semver/package.json')))
+      return path.join(root,file.replace('node_modules/semver/','node_modules/electron-updater/node_modules/semver/'));
+    return path.join(root,file);
+  };
   const packedFile = file => {
     assert.ok(files.has(file), `Missing packaged file: ${file}`);
     return asar.extractFile(archive, path.normalize(file));
@@ -81,11 +119,11 @@ function verifyPackage({ root = path.resolve(__dirname, '..'), archive } = {}) {
       assert.deepEqual(manifest.dependencies, sourceManifest.dependencies);
     } else if (Object.keys(DEPENDENCIES).some(name => file === `node_modules/${name}/package.json`)) {
       const name = file.slice('node_modules/'.length, -'/package.json'.length);
-      const expected = JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
+      const expected = JSON.parse(fs.readFileSync(sourceFile(file), 'utf8'));
       for (const field of STRIPPED_MANIFEST_FIELDS[name]) delete expected[field];
       assert.deepEqual(JSON.parse(packed), expected, `Packaged dependency manifest mismatch: ${file}`);
     } else {
-      assert.ok(packed.equals(fs.readFileSync(path.join(root, file))), `Packaged source mismatch: ${file}`);
+      assert.ok(packed.equals(fs.readFileSync(sourceFile(file))), `Packaged source mismatch: ${file}`);
     }
     if (file.startsWith('node_modules/node-pty/')) {
       assert.equal(stat.unpacked, true, `node-pty file must be unpacked: ${file}`);
@@ -109,14 +147,24 @@ function verifyPackage({ root = path.resolve(__dirname, '..'), archive } = {}) {
     const manifest = JSON.parse(packedFile(`node_modules/${name}/package.json`));
     assert.equal(manifest.name, name, `Unexpected dependency identity: ${name}`);
     assert.equal(manifest.version, expectedVersion, `Unexpected dependency version: ${name}`);
-    const license = name === 'node-addon-api' ? 'LICENSE.md' : 'LICENSE';
-    packedFile(`node_modules/${name}/${license}`);
-    if (manifest.main) packedFile(`node_modules/${name}/${manifest.main.replace(/^\.\//, '')}`);
+    const license = ['LICENSE','LICENSE.md','LICENSE-MIT.txt','LICENSE.txt','LICENSE-MIT','license','license.txt','license.md'].find(file=>files.has(`node_modules/${name}/${file}`));
+    if (license) packedFile(`node_modules/${name}/${license}`);
+    else {
+      // lazy-val 1.0.5 publishes its MIT declaration only in package.json.
+      assert.equal(name, 'lazy-val', `Missing dependency license: ${name}`);
+      assert.equal(manifest.license, 'MIT');
+    }
+    if (manifest.main) {
+      const main = `node_modules/${name}/${manifest.main.replace(/^\.\//, '')}`;
+      const entry = [main, `${main}.js`, `${main}.json`, `${main}.node`, `${main}/index.js`].find(file => files.has(file));
+      assert.ok(entry, `Missing dependency entry point: ${name}`);
+      packedFile(entry);
+    }
   }
   for (const file of NATIVE_FILES) {
     packedFile(file);
     assert.equal(files.get(file).unpacked, true, `Native dependency must be unpacked: ${file}`);
-    assert.ok(fs.readFileSync(path.join(unpacked, file)).equals(fs.readFileSync(path.join(root, file))), `Native dependency bytes mismatch: ${file}`);
+    assert.ok(fs.readFileSync(path.join(unpacked, file)).equals(fs.readFileSync(sourceFile(file))), `Native dependency bytes mismatch: ${file}`);
   }
   for (const [vendorFile, dependencyFile] of Object.entries(VENDOR_FILES)) {
     assert.ok(packedFile(`renderer/vendor/xterm/${vendorFile}`).equals(fs.readFileSync(path.join(root, 'node_modules', dependencyFile))), `Vendored xterm asset mismatch: ${vendorFile}`);

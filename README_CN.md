@@ -51,7 +51,9 @@ npm test
 npm run pack
 ```
 
-目录包位于 `dist/win-unpacked`，请保留整个目录。`npm run dist` 生成便携 EXE。
+目录包位于 `dist/win-unpacked`，请保留整个目录。`npm run dist` 生成 Windows 安装版和便携 EXE。
+
+在「连接与设置 → 关于」可管理 Being Desktop 更新。安装版默认在启动后和每小时检查稳定版，发现新版后在左下角账户旁显示下载图标；点击后才开始下载，完成后点击「重启安装」。可关闭自动检查，手动检查和下载仍可用。Windows 便携版需要先安装一次带 `-setup.exe` 后缀的安装版；此前没有自动更新功能的旧版也需要手动升级一次。macOS 请将应用放入「应用程序」后运行。
 
 `npm start` 使用默认用户数据目录；`Start.ps1` 使用相同的默认用户数据目录，共用连接配置。
 

@@ -47,7 +47,7 @@ test('menu actions dispatch desktop commands while close preserves the native wi
   }
   assert.equal(closed, 1);
   assert.deepEqual(commands, ['new-task', 'search-tasks', 'select-workspace', 'workspace', 'settings', 'navigate-back', 'navigate-forward',
-    'toggle-sidebar', 'toggle-inspector', 'refresh', 'open-browser', 'toggle-console', 'about']);
+    'toggle-sidebar', 'toggle-inspector', 'refresh', 'open-browser', 'toggle-console', 'desktop-updates', 'about']);
   const editing = createDesktopMenuTemplate('edit', callbacks).filter(item => item.type !== 'separator');
   assert.deepEqual(editing.map(item => item.role), ['undo', 'redo', 'cut', 'copy', 'paste', 'selectAll']);
   assert.ok(editing.every(item => !item.click));

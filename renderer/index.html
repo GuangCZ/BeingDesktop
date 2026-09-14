@@ -40,6 +40,7 @@
   <script src="theme-settings.js" defer></script>
   <script src="onboarding.js" defer></script>
   <script src="portal-updates.js" defer></script>
+  <script src="desktop-updates.js" defer></script>
   <script src="portal-permissions.js" defer></script>
   <script src="sidebar.js" defer></script>
   <script src="app.js" defer></script>
@@ -72,6 +73,7 @@
     <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5L20 7"/></symbol>
     <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/></symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 4v16m-7-7 7 7 7-7"/></symbol>
     <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
     <symbol id="i-minimize" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
@@ -127,7 +129,7 @@
         </section>
       </div>
       <div class="sidebar-bottom">
-        <button class="sidebar-profile" id="sidebar-profile" aria-haspopup="menu" aria-expanded="false"><span class="sidebar-avatar" aria-hidden="true">B</span><span class="sidebar-profile-copy"><strong id="sidebar-profile-name">Being</strong><span id="sidebar-profile-status">尚未连接</span></span><svg class="icon"><use href="#i-more"/></svg></button>
+        <div class="sidebar-profile-row"><button class="sidebar-profile" id="sidebar-profile" aria-haspopup="menu" aria-expanded="false"><span class="sidebar-avatar" aria-hidden="true">B</span><span class="sidebar-profile-copy"><strong id="sidebar-profile-name">Being</strong><span id="sidebar-profile-status">尚未连接</span></span><svg class="icon"><use href="#i-more"/></svg></button><button class="sidebar-desktop-update" id="desktop-update-entry" type="button" aria-label="下载 Desktop 更新" title="下载 Desktop 更新" hidden><svg class="icon" aria-hidden="true"><use href="#i-arrow-down"/></svg></button></div>
         <span id="app-version" hidden></span>
       </div>
       <div id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" aria-valuemin="190" aria-valuemax="380" aria-valuenow="252" tabindex="0"></div>
@@ -324,6 +326,24 @@
                   <pre id="portal-log-output" class="portal-log-box" tabindex="0" aria-labelledby="portal-log-label">暂无日志。</pre>
                 </div>
                 <div class="settings-action-row"><details class="settings-note"><summary>运行详情</summary><p class="field-help" id="portal-owner-detail">仅管理由桌面启动的进程。</p></details><div class="inline-actions"><button class="button secondary small-button" id="test-portal-connection">连接自测</button><button class="button secondary small-button" id="stop-portal" disabled>停止</button><button class="button primary small-button" id="start-portal" disabled>启动</button></div></div>
+              </div>
+            </section>
+            <section class="settings-card" id="desktop-update-panel" aria-labelledby="desktop-update-heading">
+              <div class="card-heading"><div class="setting-icon"><svg class="icon"><use href="#i-info"/></svg></div><div><h3 id="desktop-update-heading">Being Desktop 更新</h3><p>当前版本 <span id="desktop-update-version">未知</span></p></div></div>
+              <div class="desktop-update-controls">
+                <label class="switch-row" for="desktop-update-enabled"><span><strong>自动检查更新</strong><span class="field-help">每小时检查，发现新版后点击左下角图标下载。</span></span><input type="checkbox" id="desktop-update-enabled" role="switch" aria-describedby="desktop-update-setting-note"><span class="switch-track" aria-hidden="true"></span></label>
+                <div class="desktop-update-footer">
+                  <div class="desktop-update-feedback">
+                    <p id="desktop-update-status" role="status" aria-live="polite"></p>
+                    <progress id="desktop-update-progress" max="100" value="0" aria-label="更新下载进度" hidden></progress>
+                  </div>
+                  <div class="inline-actions"><button class="button secondary small-button" id="desktop-update-check" type="button" title="检查最新稳定版">检查更新</button><button class="button primary small-button" id="desktop-update-download" type="button" hidden>下载更新</button><button class="button primary small-button" id="desktop-update-install" type="button" hidden>重启安装</button><button class="button quiet small-button" id="desktop-update-open" type="button">发布页面</button></div>
+                </div>
+                <details class="desktop-update-details" id="desktop-update-details">
+                  <summary>更新详情</summary>
+                  <p id="desktop-update-detail"></p>
+                  <p id="desktop-update-setting-note">关闭后停止自动检查；手动检查和下载仍可用。</p>
+                </details>
               </div>
             </section>
             <section class="settings-card reading-settings" id="reading-settings" aria-labelledby="reading-heading">

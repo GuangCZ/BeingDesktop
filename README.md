@@ -41,7 +41,9 @@ npm test
 npm run pack
 ```
 
-`npm run pack` creates `dist/win-unpacked`. Keep the complete directory together. `npm run dist` builds the portable executable. If the native terminal module reports an ABI mismatch, rebuild `node-pty` for the configured Electron version.
+`npm run pack` creates `dist/win-unpacked`. Keep the complete directory together. `npm run dist` builds the Windows installer and portable executable. If the native terminal module reports an ABI mismatch, rebuild `node-pty` for the configured Electron version.
+
+Manage Desktop updates in **Settings → About**. Installed builds check for stable releases at startup and every hour. When an update is available, click the download icon beside your profile at the bottom left, then choose **Restart to install** when ready. Automatic checks can be disabled; manual checks and downloads remain available. Older releases need one manual upgrade to 0.8.26 or later. On Windows, use the `-setup.exe` installer to enable auto-updates. On macOS, run the app from Applications.
 
 `npm start` uses the app's default user data directory. `Start.ps1` uses the same default user data directory. Do not commit profiles, credentials, or build artifacts.
 

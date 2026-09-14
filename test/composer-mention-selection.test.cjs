@@ -28,3 +28,15 @@ test('message display resolves known Town IDs while preserving unknown IDs, URLs
   assert.equal(M.displayText(original,members),'@YomiyaHina 你好，@t_unknown user@t_yomi https://example.invalid/@t_yomi');
   assert.equal(M.displayText('@t_yomi。',members),'@YomiyaHina。');
 });
+
+test('display names resolve after Chinese punctuation and brackets without touching URL tokens', () => {
+  assert.equal(M.displayText('你好，@t_yomi！（@t_first）【@t_second】',members),'你好，@YomiyaHina！（@Twin Name）【@Twin Name】');
+  const links='https://example.invalid/?(@t_yomi) mailto:user@t_yomi user@t_yomi @t_yomi_extra';
+  assert.equal(M.displayText(links,members),links);
+});
+test('display lookup uses exact Town IDs and leaves missing or unnamed members unchanged', () => {
+  const directory=[{town_id:'t_exact',display_name:'真实 Being 名称'},{id:'t_blank',name:''}];
+  const text='@t_exact @t_exact_extra @t_blank @t_unknown';
+  assert.equal(M.displayText(text,directory),'@真实 Being 名称 @t_exact_extra @t_blank @t_unknown');
+  assert.equal(text,'@t_exact @t_exact_extra @t_blank @t_unknown');
+});

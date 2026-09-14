@@ -34,8 +34,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/check-docs.cjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Build portable executable
+      - name: Build installer and portable executable
         run: npm run dist -- --publish never
+      - name: Verify auto-update metadata and checksums
+        run: node scripts/check-desktop-update-artifacts.cjs dist windows
       - name: Verify archive
         run: node -e "console.log(JSON.stringify(require('./test/verify-package.cjs').verifyPackage({archive:'dist/win-unpacked/resources/app.asar'})))"
       - name: Publish release
@@ -47,14 +49,20 @@ jobs:
           $releaseTag = "v$releaseVersion"
           $releaseExe = "dist/Being-Desktop-$releaseVersion-windows-x64.exe"
           $releaseZip = "dist/Being-Desktop-$releaseVersion-windows-x64.zip"
+          $releaseSetup = "dist/Being-Desktop-$releaseVersion-windows-x64-setup.exe"
+          $releaseBlockmap = "$releaseSetup.blockmap"
+          $releaseMetadata = "dist/latest.yml"
           if (-not (Test-Path -LiteralPath $releaseExe)) { throw 'Portable executable missing.' }
+          foreach ($asset in @($releaseSetup, $releaseBlockmap, $releaseMetadata)) {
+            if (-not (Test-Path -LiteralPath $asset)) { throw "Update asset missing: $asset" }
+          }
           Compress-Archive -LiteralPath dist/win-unpacked -DestinationPath $releaseZip -CompressionLevel Optimal
-          $releaseChecksums = @($releaseExe, $releaseZip) | ForEach-Object {
+          $releaseChecksums = @($releaseExe, $releaseZip, $releaseSetup, $releaseBlockmap, $releaseMetadata) | ForEach-Object {
             $releaseHash = (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()
             "$releaseHash  $([IO.Path]::GetFileName($_))"
           }
           $releaseChecksums | Set-Content dist/SHA256SUMS.txt -Encoding utf8NoBOM
           gh release view $releaseTag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) { throw "Release $releaseTag already exists; refusing to replace its assets." }
-          gh release create $releaseTag $releaseExe $releaseZip dist/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Being Desktop $releaseVersion" --notes-file "releases/$releaseVersion.md"
+          gh release create $releaseTag $releaseExe $releaseZip $releaseSetup $releaseBlockmap $releaseMetadata dist/SHA256SUMS.txt --draft --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Being Desktop $releaseVersion" --notes-file "releases/$releaseVersion.md"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

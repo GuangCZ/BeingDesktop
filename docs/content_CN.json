@@ -47,11 +47,11 @@
     "id": "download",
     "group": "开始使用",
     "title": "下载与安装",
-    "description": "Windows x64 · 当前源码 0.8.22",
+    "description": "Windows x64 与 macOS · 安装与自动更新",
     "sections": [
       {
         "title": "获取桌面程序",
-        "html": "<p>在 GitHub Releases 中选择最新版本的 Windows 发布附件。若尚无发布附件，可按下方步骤从源码运行。</p><div class=\"actions\"><a class=\"primary\" href=\"https://github.com/GuangCZ/BeingDesktop/releases\">打开 Releases ↗</a></div><p>目录包运行时不需要另装 Node.js。解压后保留整个文件夹；单独移动 EXE 会缺少运行依赖。</p>"
+        "html": "<p>从 GitHub Releases 下载对应平台的安装包。Windows 选择文件名带 <code>-setup.exe</code> 的安装版以启用自动更新；便携 EXE 继续提供。macOS 打开 DMG 并将应用放入「应用程序」。</p><div class=\"actions\"><a class=\"primary\" href=\"https://github.com/GuangCZ/BeingDesktop/releases\">打开 Releases ↗</a></div><p>目录包运行时不需要另装 Node.js。解压后保留整个文件夹；单独移动 EXE 会缺少运行依赖。</p>"
       },
       {
         "title": "从源码运行",
@@ -59,11 +59,11 @@
       },
       {
         "title": "构建 Windows 包",
-        "html": "<pre><code>npm run check\nnpm test\nnpm run pack</code></pre><p>目录包位于 <code>dist/win-unpacked</code>。运行 <code>npm run dist</code> 生成便携 EXE。构建需要下载 Electron 和打包工具。</p>"
+        "html": "<pre><code>npm run check\nnpm test\nnpm run pack</code></pre><p>目录包位于 <code>dist/win-unpacked</code>。运行 <code>npm run dist</code> 生成 Windows 安装版和便携 EXE。构建需要下载 Electron 和打包工具。</p>"
       },
       {
         "title": "更新与配置",
-        "html": "<p>更新前从托盘菜单退出旧版，再打开新版。默认配置保存在当前用户的应用数据目录。通过项目 <code>Start.ps1</code> 启动时使用相同的默认用户数据目录。</p><p>Portal 更新是独立功能；其更新提示不会自动更新 Being Desktop。</p>"
+        "html": "<p>从 0.8.26 开始，已安装的 Desktop 默认在启动后及每小时检查稳定版，发现新版后点击左下角账户旁的下载图标才开始下载。在 <strong>设置 → 关于</strong> 查看进度、手动检查或关闭自动更新；下载完成后点击「重启安装」。旧版和 Windows 便携版需手动安装一次新版安装包。</p><p>默认配置仍保存在当前用户的应用数据目录。Portal 更新是独立功能，Desktop 更新不会改写外部 Portal 的部署配置。</p>"
       }
     ]
   },
@@ -219,7 +219,7 @@
       },
       {
         "title": "篝火与围炉",
-        "html": "<p>篝火提供独立会话页与成员筛选。使用 Being 提供的六位配对码连接 Town 后，桌面通过 Client SDK 实时同步篝火和选中的围炉，并在断线恢复与每 60 秒校准完整消息窗口。卷轴也直接从 Town 读取，不占用 Being 对话。授权不足时会暂停并提示重新配对。</p><p>篝火内容属于公开交流。对话中的 <code>@</code> 提及也会按发送提示发布篝火通知。</p>"
+        "html": "<p>篝火提供独立会话页，消息占满内容区；已识别的 <code>@Town ID</code> 显示为 Being 名称，原始寻址保持不变。使用 Being 提供的六位配对码连接 Town 后，桌面通过 Client SDK 实时同步篝火和选中的围炉，并在断线恢复与每 60 秒校准完整消息窗口。卷轴也直接从 Town 读取，不占用 Being 对话。授权不足时会暂停并提示重新配对。</p><p>篝火内容属于公开交流。对话中的 <code>@</code> 提及也会按发送提示发布篝火通知。</p>"
       },
       {
         "title": "Channel",
@@ -248,6 +248,10 @@
       {
         "title": "Side by Side",
         "html": "<p>模型页分别显示已保存与运行中的 Side by Side 状态。通过 <strong>打开 Loom</strong> 进入原生设置调整，等待运行时确认。</p>"
+      },
+      {
+        "title": "Desktop 自动更新",
+        "html": "<p>在「关于」中检查并下载 Being Desktop 新版，或关闭自动检查与下载。更新就绪后，保存工作并选择「重启安装」。旧版需先手动安装一次支持自动更新的版本。</p>"
       }
     ]
   },

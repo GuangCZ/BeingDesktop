@@ -20,6 +20,8 @@ api.changeChatSession=async (id,project='')=>{
 for(const name of ['installGroveKit','installEligibleGroveKits','prepareGroveAssistance'])api[name]=(...args)=>ipcRenderer.invoke(`being:${name}`,...args);
 for(const name of ['getFeatureTasks','getFeatureTask','discussFeatureTask','endFeatureTaskTracking'])api[name]=(...args)=>ipcRenderer.invoke(`being:${name}`,...args);
 for (const name of ['adoptPortal','checkPortalUpdates','openPortalUpdate','downloadPortalUpdate','cancelPortalDownload','applyPortalUpdate','recoverPortalUpdate']) api[name]=()=>ipcRenderer.invoke(`being:${name}`);
+for(const name of ['checkDesktopUpdates','downloadDesktopUpdate','installDesktopUpdate','openDesktopRelease'])api[name]=()=>ipcRenderer.invoke(`being:${name}`);
+api.setDesktopAutoUpdate=value=>ipcRenderer.invoke('being:setDesktopAutoUpdate',value);
 api.setColors=colors=>ipcRenderer.invoke('being:setColors',colors);
 api.setOnboardingStep=step=>ipcRenderer.invoke('being:setOnboardingStep',step);
 for(const name of ['inspectOnboarding','cancelOnboardingInspection'])api[name]=()=>ipcRenderer.invoke(`being:${name}`);
@@ -74,7 +76,7 @@ api.onState = (callback) => {
 };
 api.onCommand = (callback) => {
   if (typeof callback !== 'function') throw new TypeError('Expected callback');
-  const commands = new Set(['navigate-back', 'navigate-forward', 'toggle-sidebar', 'toggle-inspector', 'chat', 'workspace', 'settings', 'select-workspace', 'refresh', 'open-browser', 'open-console', 'about', 'portal-updates','new-task','search-tasks','toggle-console',...Array.from({length:9},(_,i)=>`task-${i+1}`)]);
+  const commands = new Set(['navigate-back', 'navigate-forward', 'toggle-sidebar', 'toggle-inspector', 'chat', 'workspace', 'settings', 'select-workspace', 'refresh', 'open-browser', 'open-console', 'about', 'desktop-updates', 'portal-updates','new-task','search-tasks','toggle-console',...Array.from({length:9},(_,i)=>`task-${i+1}`)]);
   const handler = (_event, command) => { if (commands.has(command)) callback(command); };
   ipcRenderer.on('being:command', handler);
   return () => ipcRenderer.removeListener('being:command', handler);

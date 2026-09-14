@@ -60,8 +60,8 @@
   // and on the wire. Call after Markdown parsing so names are always inert text.
   function displayText(text, members) {
     const byId = memberMap(members);
-    return String(text || '').replace(/(^|\s)@([A-Za-z0-9][A-Za-z0-9_-]{0,99})(?=$|[\s.,!?;:，。！？；：、()\[\]{}])/gu,
-      (whole, before, id) => { const name = memberName(byId.get(id)); return name ? before + '@' + clean(name) : whole; });
+    return String(text || '').replace(/(?:https?:\/\/|mailto:)\S+|(^|[\s，。！？；：、（【“‘(\[{])@([A-Za-z0-9][A-Za-z0-9_-]{0,99})(?=$|[\s.,!?;:，。！？；：、()\[\]{}）】”’])/gu,
+      (whole, before, id) => { const name = id && clean(memberName(byId.get(id))); return name ? before + '@' + name : whole; });
   }
   function warnings(value) {
     return (Array.isArray(value) ? value : []).slice(0, 100).map(item => {

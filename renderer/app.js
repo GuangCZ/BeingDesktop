@@ -167,6 +167,7 @@ function acceptState(next) {
 function render() {
   if (state.machine.platform) document.documentElement.dataset.platform = state.machine.platform;
   window.beingPortalUpdates?.setState(state.portalUpdate);
+  window.beingDesktopUpdates?.setState(state.desktopUpdate);
   window.beingPortalPermissions?.setState(state);
   window.beingThemeSettings?.setState(state);
   window.beingOnboarding?.setState(state);
@@ -1303,7 +1304,7 @@ const settingsSections = [
   {id: 'models', label: '模型', icon: 'cpu', targets: ['model-settings'], keywords: 'API 服务 密钥 Side by Side'},
   {id: 'orchestration', label: '编排模式', icon: 'cpu', targets: ['orchestration-settings'], keywords: 'Orchestrator Worker Agent Kit Codex Claude Cursor Grok 执行 工具'},
   {id: 'portal', label: '本机 Portal', icon: 'terminal', targets: ['portal-settings'], keywords: '工作区 工具 权限 程序 更新'},
-  {id: 'about', label: '关于', icon: 'info', targets: ['export-diagnostics', 'setup-restart'], keywords: '版本 诊断 新手引导'},
+  {id: 'about', label: '关于', icon: 'info', targets: ['desktop-update-panel', 'export-diagnostics', 'setup-restart'], keywords: '版本 更新 自动 下载 诊断 新手引导'},
 ];
 
 function selectSettingsSection(id, {focus = false} = {}) {
@@ -1411,6 +1412,7 @@ initializeSettingsLayout();
 window.beingOrchestration?.init({bridge,onOpen:()=>changePage('workers'),onBack:()=>changePage('chat'),onUpdate:orchestration=>{state.orchestration=orchestration;render();}});
 window.beingThemeSettings?.init({bridge,onState:acceptState});
 window.beingPortalPermissions?.init({bridge,onState:acceptState});
+window.beingDesktopUpdates?.init({bridge,onState:acceptState,openSettings:()=>{changePage('settings');selectSettingsSection('about');}});
 window.beingPortalUpdates?.init({bridge,onState:acceptState,onOpenSettings:openPortalUpdateSettings,onError:message=>showToast(message,true)});
 function openFeatureTasks(feature='') {
   featureTaskView?.setFeature(feature);
@@ -1448,6 +1450,7 @@ if (bridge?.onCommand) {
     else if (command === 'open-browser') window.beingTools?.show('browser');
     else if (command === 'open-console') window.beingTools?.show('console');
     else if (command === 'about') showToast(`Being Desktop ${state.version}`);
+    else if (command === 'desktop-updates') {changePage('settings');selectSettingsSection('about');}
     else if (command === 'portal-updates') openPortalUpdateSettings();
     else if (['chat', 'workspace', 'settings'].includes(command)) changePage(command);
   });
